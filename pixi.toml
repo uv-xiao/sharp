@@ -1,0 +1,96 @@
+[project]
+name = "sharp"
+version = "0.1.0"
+description = "Sharp: An MLIR-based infrastructure project"
+authors = ["Sharp Authors"]
+channels = ["conda-forge", "nodefaults"]
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+
+[dependencies]
+cmake = ">=3.20"
+ninja = "*"
+python = ">=3.8"
+lit = "*"
+pybind11 = "*"
+git = "*"
+# Note: We'll use standalone clang-20 and lld-20 for building, not conda-forge versions
+# Note: FileCheck will be provided by LLVM build
+
+[tasks]
+# Initialize submodules
+init-submodules = { cmd = "bash scripts/init-submodules.sh" }
+
+# Setup clang-20 and lld-20
+setup-clang20 = { cmd = "bash scripts/setup-clang20.sh" }
+
+# Build dependencies (LLVM/MLIR and CIRCT)
+build-llvm = { cmd = "bash scripts/build-llvm.sh", env = { CMAKE_BUILD_TYPE = "Release" }, depends-on = ["init-submodules", "setup-clang20"] }
+build-circt = { cmd = "bash scripts/build-circt.sh", depends-on = ["build-llvm"] }
+build-deps = { depends-on = ["build-llvm", "build-circt"] }
+
+# Configure and build Sharp
+configure = { cmd = """
+    export PATH=$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH
+    cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
+    -DMLIR_DIR=$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/mlir \
+    -DLLVM_DIR=$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/llvm \
+    -DCIRCT_DIR=$PIXI_PROJECT_ROOT/.install/circt/lib/cmake/circt \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DSHARP_INCLUDE_TESTS=ON \
+    -DCMAKE_C_COMPILER=$PIXI_PROJECT_ROOT/.install/clang20/bin/clang \
+    -DCMAKE_CXX_COMPILER=$PIXI_PROJECT_ROOT/.install/clang20/bin/clang++ \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+""", env = { CMAKE_BUILD_TYPE = "Debug" }, depends-on = ["build-deps"] }
+
+configure-release = { cmd = """
+    export PATH=$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH
+    cmake -B build-release -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DMLIR_DIR=$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/mlir \
+    -DLLVM_DIR=$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/llvm \
+    -DCIRCT_DIR=$PIXI_PROJECT_ROOT/.install/circt/lib/cmake/circt \
+    -DLLVM_ENABLE_ASSERTIONS=OFF \
+    -DSHARP_INCLUDE_TESTS=ON \
+    -DCMAKE_C_COMPILER=$PIXI_PROJECT_ROOT/.install/clang20/bin/clang \
+    -DCMAKE_CXX_COMPILER=$PIXI_PROJECT_ROOT/.install/clang20/bin/clang++
+""", depends-on = ["build-deps"] }
+
+# Build commands
+build = { cmd = "cmake --build build", depends-on = ["configure"] }
+build-release = { cmd = "cmake --build build-release", depends-on = ["configure-release"] }
+clean = { cmd = "rm -rf build build-release" }
+
+# Test commands
+test = { cmd = "cmake --build build --target check-sharp", depends-on = ["build"] }
+test-lit = { cmd = "cmake --build build --target check-sharp-lit", depends-on = ["build"] }
+test-unit = { cmd = "cmake --build build --target check-sharp-unit", depends-on = ["build"] }
+
+# Development tools
+format = { cmd = """
+    find include lib tools -name '*.cpp' -o -name '*.h' | \
+    xargs clang-format -i
+""" }
+
+tidy = { cmd = """
+    echo "Note: clang-tidy should be installed separately or will use the one from clang20"
+    export PATH=$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH
+    if command -v clang-tidy &> /dev/null; then
+        find lib -name '*.cpp' | \
+        xargs clang-tidy -p build --checks='-*,readability-*,performance-*,modernize-*'
+    else
+        echo "clang-tidy not found. Please install it or build clang20 with clang-tools-extra."
+    fi
+""", depends-on = ["build"] }
+
+docs = { cmd = "cmake --build build --target sharp-doc", depends-on = ["configure"] }
+
+# Utility commands
+shell = { cmd = "bash", env = { PATH = "$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH", MLIR_DIR = "$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/mlir", LLVM_DIR = "$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/llvm", CIRCT_DIR = "$PIXI_PROJECT_ROOT/.install/circt/lib/cmake/circt" } }
+
+[feature.dev.dependencies]
+clang-format = ">=14"
+doxygen = "*"
+
+[environments]
+default = { features = ["dev"] }

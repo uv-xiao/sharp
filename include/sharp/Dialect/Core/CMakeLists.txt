@@ -1,0 +1,16 @@
+add_mlir_dialect(CoreOps core)
+add_mlir_doc(CoreDialect CoreDialect Sharp/ -gen-dialect-doc)
+add_mlir_doc(CoreOps CoreOps Sharp/ -gen-op-doc)
+
+set(LLVM_TARGET_DEFINITIONS CoreOps.td)
+mlir_tablegen(CoreOps.h.inc -gen-op-decls)
+mlir_tablegen(CoreOps.cpp.inc -gen-op-defs)
+mlir_tablegen(CoreDialect.h.inc -gen-dialect-decls)
+mlir_tablegen(CoreDialect.cpp.inc -gen-dialect-defs)
+mlir_tablegen(CoreTypes.h.inc -gen-typedef-decls)
+mlir_tablegen(CoreTypes.cpp.inc -gen-typedef-defs)
+mlir_tablegen(CoreEnums.h.inc -gen-enum-decls)
+mlir_tablegen(CoreEnums.cpp.inc -gen-enum-defs)
+add_public_tablegen_target(SharpCoreIncGen)
+
+add_dependencies(mlir-headers SharpCoreIncGen)

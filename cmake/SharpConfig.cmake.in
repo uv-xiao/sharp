@@ -1,0 +1,24 @@
+# SharpConfig.cmake
+# This file provides the Sharp CMake package configuration
+
+@PACKAGE_INIT@
+
+# Provide the MLIR and LLVM configurations
+set(SHARP_MLIR_DIR "@MLIR_DIR@")
+set(SHARP_LLVM_DIR "@LLVM_DIR@")
+
+# Include directories
+set(SHARP_INCLUDE_DIRS "@PACKAGE_CMAKE_INSTALL_PREFIX@/include")
+set(SHARP_CMAKE_DIR "@PACKAGE_CMAKE_INSTALL_PREFIX@/lib/cmake/sharp")
+
+# Find dependencies
+find_package(MLIR REQUIRED CONFIG HINTS ${SHARP_MLIR_DIR})
+find_package(LLVM REQUIRED CONFIG HINTS ${SHARP_LLVM_DIR})
+
+# Include the exported targets
+include("${SHARP_CMAKE_DIR}/SharpTargets.cmake")
+
+# Set up include paths
+include_directories(${SHARP_INCLUDE_DIRS})
+include_directories(${MLIR_INCLUDE_DIRS})
+include_directories(${LLVM_INCLUDE_DIRS})

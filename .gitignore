@@ -1,0 +1,58 @@
+# Build directories
+build/
+build-*/
+
+# Installation directory
+.install/
+
+# Submodules are tracked by git
+# circt/ is a git submodule, so it's not ignored
+
+# Pixi
+.pixi/
+pixi.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+
+# Compilation outputs
+*.o
+*.so
+*.dylib
+*.a
+*.lib
+*.exe
+*.dll
+
+# Test outputs
+Testing/
+test/Output/
+
+# Documentation
+docs/html/
+docs/latex/
+*.dox
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+.Python
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*~
