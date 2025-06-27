@@ -6,13 +6,29 @@ authors = ["Sharp Authors"]
 channels = ["conda-forge", "nodefaults"]
 platforms = ["linux-64", "osx-64", "osx-arm64"]
 
+[activation.env]
+CC = "$PIXI_PROJECT_ROOT/.install/clang20/bin/clang" 
+CXX = "$PIXI_PROJECT_ROOT/.install/clang20/bin/clang++" 
+LD = "$PIXI_PROJECT_ROOT/.install/clang20/bin/ld.lld" 
+AR = "$PIXI_PROJECT_ROOT/.install/clang20/bin/llvm-ar"
+RANLIB = "$PIXI_PROJECT_ROOT/.install/clang20/bin/llvm-ranlib"
+PATH = "$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH"
+LLVM_DIR = "$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/llvm"
+MLIR_DIR = "$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/mlir"
+CIRCT_DIR = "$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/circt"
+
 [dependencies]
-cmake = ">=3.20"
+cmake = ">=3.21"
 ninja = "*"
 python = ">=3.8"
 lit = "*"
 pybind11 = "*"
 git = "*"
+numpy = "*"
+pyyaml = "*"
+psutil = "*"
+pip = "*"
+zstd = ">=1.5.7,<2"
 # Note: We'll use standalone clang-20 and lld-20 for building, not conda-forge versions
 # Note: FileCheck will be provided by LLVM build
 
@@ -23,37 +39,62 @@ init-submodules = { cmd = "bash scripts/init-submodules.sh" }
 # Setup clang-20 and lld-20
 setup-clang20 = { cmd = "bash scripts/setup-clang20.sh" }
 
+# Install Python dependencies for MLIR/CIRCT bindings
+setup-python-deps = { cmd = "pip install nanobind==2.4.0 -q || pip install nanobind==2.4.0" }
+
 # Build dependencies (LLVM/MLIR and CIRCT)
-build-llvm = { cmd = "bash scripts/build-llvm.sh", env = { CMAKE_BUILD_TYPE = "Release" }, depends-on = ["init-submodules", "setup-clang20"] }
-build-circt = { cmd = "bash scripts/build-circt.sh", depends-on = ["build-llvm"] }
-build-deps = { depends-on = ["build-llvm", "build-circt"] }
+build-unified = { cmd = "bash scripts/build-unified-quiet.sh", env = { CMAKE_BUILD_TYPE = "Release" }, depends-on = ["init-submodules", "setup-clang20", "setup-python-deps"] }
+build-unified-verbose = { cmd = "bash scripts/build-unified.sh", env = { CMAKE_BUILD_TYPE = "Release" }, depends-on = ["init-submodules", "setup-clang20", "setup-python-deps"] }
+build-deps = { depends-on = ["build-unified"] }
 
 # Configure and build Sharp
 configure = { cmd = """
-    export PATH=$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH
-    cmake -B build -G Ninja \
+    bash scripts/configure-quiet.sh -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
-    -DMLIR_DIR=$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/mlir \
-    -DLLVM_DIR=$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/llvm \
-    -DCIRCT_DIR=$PIXI_PROJECT_ROOT/.install/circt/lib/cmake/circt \
+    -DMLIR_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/mlir \
+    -DLLVM_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/llvm \
+    -DCIRCT_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/circt \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DSHARP_INCLUDE_TESTS=ON \
-    -DCMAKE_C_COMPILER=$PIXI_PROJECT_ROOT/.install/clang20/bin/clang \
-    -DCMAKE_CXX_COMPILER=$PIXI_PROJECT_ROOT/.install/clang20/bin/clang++ \
+    -DSHARP_BINDINGS_PYTHON_ENABLED=ON \
+    -DCMAKE_C_COMPILER=$CC \
+    -DCMAKE_CXX_COMPILER=$CXX \
+    -DCMAKE_LINKER=$LD \
+    -DLLVM_USE_LINKER=lld \
+    -DCMAKE_PREFIX_PATH="/usr;$PIXI_PROJECT_ROOT/.pixi/envs/default" \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+""", env = { CMAKE_BUILD_TYPE = "Debug" }, depends-on = ["build-deps"] }
+
+configure-verbose = { cmd = """
+    cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
+    -DMLIR_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/mlir \
+    -DLLVM_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/llvm \
+    -DCIRCT_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/circt \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DSHARP_INCLUDE_TESTS=ON \
+    -DSHARP_BINDINGS_PYTHON_ENABLED=ON \
+    -DCMAKE_C_COMPILER=$CC \
+    -DCMAKE_CXX_COMPILER=$CXX \
+    -DCMAKE_LINKER=$LD \
+    -DLLVM_USE_LINKER=lld \
+    -DCMAKE_PREFIX_PATH="/usr;$PIXI_PROJECT_ROOT/.pixi/envs/default" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 """, env = { CMAKE_BUILD_TYPE = "Debug" }, depends-on = ["build-deps"] }
 
 configure-release = { cmd = """
-    export PATH=$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH
-    cmake -B build-release -G Ninja \
+    bash scripts/configure-quiet.sh -B build-release -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DMLIR_DIR=$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/mlir \
-    -DLLVM_DIR=$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/llvm \
-    -DCIRCT_DIR=$PIXI_PROJECT_ROOT/.install/circt/lib/cmake/circt \
+    -DMLIR_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/mlir \
+    -DLLVM_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/llvm \
+    -DCIRCT_DIR=$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/circt \
     -DLLVM_ENABLE_ASSERTIONS=OFF \
     -DSHARP_INCLUDE_TESTS=ON \
-    -DCMAKE_C_COMPILER=$PIXI_PROJECT_ROOT/.install/clang20/bin/clang \
-    -DCMAKE_CXX_COMPILER=$PIXI_PROJECT_ROOT/.install/clang20/bin/clang++
+    -DCMAKE_C_COMPILER=$CC \
+    -DCMAKE_CXX_COMPILER=$CXX \
+    -DCMAKE_LINKER=$LD \
+    -DLLVM_USE_LINKER=lld \
+    -DCMAKE_PREFIX_PATH="/usr;$PIXI_PROJECT_ROOT/.pixi/envs/default"
 """, depends-on = ["build-deps"] }
 
 # Build commands
@@ -61,10 +102,16 @@ build = { cmd = "cmake --build build", depends-on = ["configure"] }
 build-release = { cmd = "cmake --build build-release", depends-on = ["configure-release"] }
 clean = { cmd = "rm -rf build build-release" }
 
+# Run commands
+run-opt = { cmd = "build/bin/sharp-opt", depends-on = ["build"] }
+
 # Test commands
 test = { cmd = "cmake --build build --target check-sharp", depends-on = ["build"] }
 test-lit = { cmd = "cmake --build build --target check-sharp-lit", depends-on = ["build"] }
 test-unit = { cmd = "cmake --build build --target check-sharp-unit", depends-on = ["build"] }
+test-python = { cmd = "PYTHONPATH=$PIXI_PROJECT_ROOT/build/python_packages/sharp_core:$PIXI_PROJECT_ROOT/.install/unified-build/tools/mlir/python_packages/mlir_core python test_sharp.py", depends-on = ["build"] }
+
+uninstall = { cmd = "rm -rf $PIXI_PROJECT_ROOT/.install"}
 
 # Development tools
 format = { cmd = """
@@ -86,7 +133,7 @@ tidy = { cmd = """
 docs = { cmd = "cmake --build build --target sharp-doc", depends-on = ["configure"] }
 
 # Utility commands
-shell = { cmd = "bash", env = { PATH = "$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH", MLIR_DIR = "$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/mlir", LLVM_DIR = "$PIXI_PROJECT_ROOT/.install/llvm/lib/cmake/llvm", CIRCT_DIR = "$PIXI_PROJECT_ROOT/.install/circt/lib/cmake/circt" } }
+shell = { cmd = "bash", env = { PATH = "$PIXI_PROJECT_ROOT/.install/clang20/bin:$PATH", MLIR_DIR = "$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/mlir", LLVM_DIR = "$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/llvm", CIRCT_DIR = "$PIXI_PROJECT_ROOT/.install/unified/lib/cmake/circt", PYTHONPATH = "$PIXI_PROJECT_ROOT/.install/unified-build/tools/circt/python_packages/circt_core:$PIXI_PROJECT_ROOT/.install/unified-build/tools/mlir/python_packages/mlir_core" } }
 
 [feature.dev.dependencies]
 clang-format = ">=14"

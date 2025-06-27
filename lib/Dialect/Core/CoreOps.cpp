@@ -23,6 +23,24 @@ using namespace sharp::core;
 // ConstantOp
 //===----------------------------------------------------------------------===//
 
+void ConstantOp::print(OpAsmPrinter &p) {
+  p << " ";
+  p.printAttribute(getValue());
+  p.printOptionalAttrDict((*this)->getAttrs(), /*elidedAttrs=*/{"value"});
+}
+
+ParseResult ConstantOp::parse(OpAsmParser &parser, OperationState &result) {
+  IntegerAttr valueAttr;
+
+  if (parser.parseAttribute(valueAttr, getValueAttrName(result.name),
+                            result.attributes) ||
+      parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  result.addTypes(valueAttr.getType());
+  return success();
+}
+
 OpFoldResult ConstantOp::fold(FoldAdaptor adaptor) {
-  return getValue();
+  return getValueAttr();
 }

@@ -10,11 +10,20 @@ CLANG_DIR="$INSTALL_DIR/clang20"
 mkdir -p "$INSTALL_DIR"
 
 # Check if clang-20 is already installed
-if [ -d "$CLANG_DIR" ] && [ -x "$CLANG_DIR/bin/clang" ]; then
+if [ -d "$CLANG_DIR" ] && [ -x "$CLANG_DIR/bin/clang" ] && [ -x "$CLANG_DIR/bin/ld.lld" ]; then
     VERSION=$("$CLANG_DIR/bin/clang" --version | head -n1)
-    if [[ "$VERSION" == *"clang version 20"* ]]; then
-        echo "Clang-20 already installed: $VERSION"
-        exit 0
+    # Check for clang version 20 or newer
+    if [[ "$VERSION" =~ clang\ version\ (20|2[1-9]|[3-9][0-9]) ]]; then
+        echo "Clang-20+ already installed: $VERSION"
+        # Verify lld is also present
+        if [ -x "$CLANG_DIR/bin/ld.lld" ] || [ -x "$CLANG_DIR/bin/lld" ]; then
+            exit 0
+        else
+            echo "Warning: lld not found, will reinstall..."
+        fi
+    else
+        echo "Found older clang version: $VERSION"
+        echo "Will install clang-20..."
     fi
 fi
 
@@ -26,62 +35,56 @@ ARCH=$(uname -m)
 
 if [ "$OS" = "Linux" ]; then
     if [ "$ARCH" = "x86_64" ]; then
-        # For Ubuntu/Debian based systems, we can use the LLVM apt repository
         echo "Detected Linux x86_64"
         
         # Create temporary directory for download
         TEMP_DIR=$(mktemp -d)
         cd "$TEMP_DIR"
         
-        # Download pre-built LLVM 20 from GitHub releases
-        # Note: As of the time of writing, LLVM 20 might not be released yet.
-        # You may need to build from source or use a nightly build.
+        # Download pre-built LLVM 20.1.7 from GitHub releases
+        echo "Downloading pre-built LLVM 20.1.7..."
+        RELEASE_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.7/LLVM-20.1.7-Linux-X64.tar.xz"
         
-        # Try to download pre-built binaries (no sudo required)
-        echo "Attempting to download pre-built LLVM 20..."
-            
-        # Check GitHub releases for LLVM
-        RELEASE_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-20.0.0/clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04.tar.xz"
-        
-        # Note: The above URL is hypothetical. Check actual releases at:
-        # https://github.com/llvm/llvm-project/releases
-        
-        # For development/nightly builds:
-        echo "Checking for LLVM 20 pre-built releases..."
-        NIGHTLY_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-20.0.0-rc1/clang+llvm-20.0.0-rc1-x86_64-linux-gnu.tar.xz"
-        
-        # Try to download
-        if ! wget -q --spider "$NIGHTLY_URL" 2>/dev/null; then
-            echo "LLVM 20 pre-built not found. Will build from source..."
-            BUILD_FROM_SOURCE=1
-        else
-            wget "$NIGHTLY_URL" -O llvm20.tar.xz
-            echo "Extracting..."
-            tar -xf llvm20.tar.xz
-            mv clang+llvm-*/* "$CLANG_DIR/"
+        if ! wget -q --spider "$RELEASE_URL" 2>/dev/null; then
+            echo "Error: LLVM 20.1.7 release not found at: $RELEASE_URL"
+            echo "Please check https://github.com/llvm/llvm-project/releases for available versions."
+            exit 1
         fi
+        
+        echo "Downloading from: $RELEASE_URL"
+        wget "$RELEASE_URL" -O llvm20.tar.xz --progress=bar:force 2>&1
+        
+        echo "Extracting..."
+        mkdir -p "$CLANG_DIR"
+        tar -xf llvm20.tar.xz --strip-components=1 -C "$CLANG_DIR"
+        
+        echo "Download and extraction complete."
     else
         echo "Unsupported architecture: $ARCH"
+        echo "LLVM 20.1.7 pre-built binaries are only available for x86_64."
+        echo "For $ARCH, you'll need to build from source."
         BUILD_FROM_SOURCE=1
     fi
 elif [ "$OS" = "Darwin" ]; then
     echo "Detected macOS"
-    # For macOS, try to download pre-built binaries first
+    # For macOS, check if pre-built binaries are available
     echo "Checking for macOS pre-built binaries..."
     
     if [ "$ARCH" = "x86_64" ]; then
-        MACOS_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-20.0.0/clang+llvm-20.0.0-x86_64-apple-darwin.tar.xz"
+        MACOS_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.7/LLVM-20.1.7-macOS-X64.tar.xz"
     elif [ "$ARCH" = "arm64" ]; then
-        MACOS_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-20.0.0/clang+llvm-20.0.0-arm64-apple-darwin.tar.xz"
+        MACOS_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.7/LLVM-20.1.7-macOS-ARM64.tar.xz"
     fi
     
     if [ -n "$MACOS_URL" ] && wget -q --spider "$MACOS_URL" 2>/dev/null; then
-        wget "$MACOS_URL" -O llvm20.tar.xz
+        echo "Downloading from: $MACOS_URL"
+        wget "$MACOS_URL" -O llvm20.tar.xz --progress=bar:force 2>&1
         echo "Extracting..."
-        tar -xf llvm20.tar.xz
-        mv clang+llvm-*/* "$CLANG_DIR/"
+        mkdir -p "$CLANG_DIR"
+        tar -xf llvm20.tar.xz --strip-components=1 -C "$CLANG_DIR"
     else
-        echo "No pre-built binaries found for macOS. Will build from source..."
+        echo "No pre-built binaries found for macOS $ARCH."
+        echo "Will build from source..."
         BUILD_FROM_SOURCE=1
     fi
 else
@@ -129,8 +132,9 @@ if [ "$BUILD_FROM_SOURCE" = "1" ]; then
     ninja install
 fi
 
-# Clean up
-if [ -d "$TEMP_DIR" ]; then
+# Clean up temporary directory if it exists
+if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    cd "$PROJECT_ROOT"
     rm -rf "$TEMP_DIR"
 fi
 
@@ -138,7 +142,15 @@ fi
 if [ -x "$CLANG_DIR/bin/clang" ]; then
     echo "Clang-20 successfully installed!"
     "$CLANG_DIR/bin/clang" --version
-    "$CLANG_DIR/bin/lld" --version || true
+    
+    # Check for lld or ld.lld
+    if [ -x "$CLANG_DIR/bin/ld.lld" ]; then
+        "$CLANG_DIR/bin/ld.lld" --version || true
+    elif [ -x "$CLANG_DIR/bin/lld" ]; then
+        "$CLANG_DIR/bin/lld" --version || true
+    else
+        echo "Warning: lld not found in installation"
+    fi
 else
     echo "Error: Failed to install clang-20"
     exit 1

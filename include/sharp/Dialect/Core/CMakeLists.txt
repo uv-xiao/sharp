@@ -1,4 +1,4 @@
-add_mlir_dialect(CoreOps core)
+add_mlir_dialect(CoreOps sharp)
 add_mlir_doc(CoreDialect CoreDialect Sharp/ -gen-dialect-doc)
 add_mlir_doc(CoreOps CoreOps Sharp/ -gen-op-doc)
 

@@ -1,7 +1,14 @@
 cmake_minimum_required(VERSION 3.20.0)
 
+# Set CMP0116 to NEW to avoid deprecation warning
+# This policy is about generated file dependencies
 if(POLICY CMP0116)
-  cmake_policy(SET CMP0116 OLD)
+  cmake_policy(SET CMP0116 NEW)
+endif()
+
+# Suppress warnings about runtime path conflicts
+if(POLICY CMP0060)
+  cmake_policy(SET CMP0060 NEW)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -25,6 +32,35 @@ option(SHARP_BINDINGS_PYTHON_ENABLED "Enable Python bindings" OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(SHARP_ENABLE_ASSERTIONS "Enable assertions" ON)
 
+# Set proper RPATH handling to avoid conflicts
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# Prefer system libraries over pixi environment to avoid conflicts
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
+endif()
+
+# Handle library search paths to avoid conflicts
+# Save original CMAKE_PREFIX_PATH
+set(ORIGINAL_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
+
+# First try system paths for common libraries
+find_package(ZLIB QUIET)
+find_package(zstd QUIET)
+
+# If not found in system, add pixi environment
+if(NOT zstd_FOUND OR NOT ZLIB_FOUND)
+  list(APPEND CMAKE_PREFIX_PATH "$ENV{PIXI_PROJECT_ROOT}/.pixi/envs/default")
+  if(NOT zstd_FOUND)
+    find_package(zstd QUIET)
+  endif()
+  if(NOT ZLIB_FOUND)
+    find_package(ZLIB QUIET)
+  endif()
+endif()
+
 # Find MLIR
 find_package(MLIR REQUIRED CONFIG)
 message(STATUS "Using MLIRConfig.cmake in: ${MLIR_DIR}")
@@ -36,6 +72,28 @@ if(CIRCT_FOUND)
   message(STATUS "Using CIRCTConfig.cmake in: ${CIRCT_DIR}")
 else()
   message(STATUS "CIRCT not found, some features may be disabled")
+endif()
+
+# Find lit - try multiple locations
+find_program(LLVM_EXTERNAL_LIT 
+  NAMES lit llvm-lit
+  PATHS 
+    ${CMAKE_CURRENT_SOURCE_DIR}/.pixi/envs/default/bin
+    ${CMAKE_CURRENT_SOURCE_DIR}/.install/unified/bin
+    ${CMAKE_CURRENT_SOURCE_DIR}/.install/unified-build/bin
+    ${LLVM_TOOLS_BINARY_DIR}
+  NO_DEFAULT_PATH
+)
+
+if(NOT LLVM_EXTERNAL_LIT)
+  # Try to find lit in PATH as fallback
+  find_program(LLVM_EXTERNAL_LIT NAMES lit llvm-lit)
+endif()
+
+if(LLVM_EXTERNAL_LIT)
+  message(STATUS "Found lit: ${LLVM_EXTERNAL_LIT}")
+else()
+  message(WARNING "lit not found, tests will not work")
 endif()
 
 # Configure include paths and definitions
@@ -78,6 +136,15 @@ set(SHARP_TOOLS_DIR ${CMAKE_BINARY_DIR}/bin)
 if(SHARP_BINDINGS_PYTHON_ENABLED)
   include(MLIRDetectPythonEnv)
   mlir_configure_python_dev_packages()
+  
+  # Set up Python packages directory
+  set(SHARP_PYTHON_PACKAGES_DIR "${CMAKE_BINARY_DIR}/python_packages")
+  
+  # Ensure we have the required headers target
+  add_custom_target(sharp-headers)
+  
+  # Find Python3
+  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 endif()
 
 # Add subdirectories
@@ -98,11 +165,11 @@ if(SHARP_INCLUDE_DOCS)
   add_subdirectory(docs)
 endif()
 
-# Export targets
-export(EXPORT SharpTargets
-  FILE "${CMAKE_CURRENT_BINARY_DIR}/SharpTargets.cmake"
-  NAMESPACE sharp::
-)
+# Export targets (commented out until we have targets to export)
+# export(EXPORT SharpTargets
+#   FILE "${CMAKE_CURRENT_BINARY_DIR}/SharpTargets.cmake"
+#   NAMESPACE sharp::
+# )
 
 # Create SharpConfig.cmake
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SharpConfig.cmake.in
@@ -125,11 +192,11 @@ install(DIRECTORY ${SHARP_INCLUDE_DIR}/sharp
   PATTERN "*.gen"
 )
 
-install(EXPORT SharpTargets
-  FILE SharpTargets.cmake
-  NAMESPACE sharp::
-  DESTINATION lib/cmake/sharp
-)
+# install(EXPORT SharpTargets
+#   FILE SharpTargets.cmake
+#   NAMESPACE sharp::
+#   DESTINATION lib/cmake/sharp
+# )
 
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/SharpConfig.cmake
   DESTINATION lib/cmake/sharp

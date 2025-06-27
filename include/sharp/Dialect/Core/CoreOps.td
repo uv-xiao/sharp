@@ -21,7 +21,7 @@ include "mlir/Interfaces/InferTypeOpInterface.td"
 //===----------------------------------------------------------------------===//
 
 def Core_Dialect : Dialect {
-  let name = "sharp.core";
+  let name = "sharp";
   let summary = "Sharp Core dialect";
   let description = [{
     The Sharp Core dialect provides fundamental operations and types for the
@@ -30,8 +30,6 @@ def Core_Dialect : Dialect {
   
   let cppNamespace = "::sharp::core";
   let hasConstantMaterializer = 1;
-  let useDefaultTypePrinterParser = 1;
-  let useDefaultAttributePrinterParser = 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -63,7 +61,7 @@ def Core_ConstantOp : Core_Op<"constant", [Pure]> {
   let arguments = (ins AnyAttr:$value);
   let results = (outs AnyType:$result);
 
-  let assemblyFormat = "attr-dict $value `:` type($result)";
+  let hasCustomAssemblyFormat = 1;
   let hasFolder = 1;
 }
 
