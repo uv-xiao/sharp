@@ -1,12 +1,12 @@
-add_mlir_dialect_library(SharpTXN
-  TXNDialect.cpp
-  TXNOps.cpp
+add_mlir_dialect_library(SharpTxn
+  TxnDialect.cpp
+  TxnOps.cpp
 
   ADDITIONAL_HEADER_DIRS
-  ${SHARP_MAIN_INCLUDE_DIR}/sharp/Dialect/TXN
+  ${SHARP_MAIN_INCLUDE_DIR}/sharp/Dialect/Txn
 
   DEPENDS
-  MLIRTXNIncGen
+  MLIRTxnIncGen
 
   LINK_LIBS PUBLIC
   MLIRIR

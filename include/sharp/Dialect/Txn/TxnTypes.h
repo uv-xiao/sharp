@@ -1,4 +1,4 @@
-//===- TXNTypes.h - TXN dialect types -------------------------------------===//
+//===- TxnTypes.h - Txn dialect types -------------------------------------===//
 //
 // Part of the Sharp Project.
 //
@@ -11,6 +11,6 @@
 #include "mlir/IR/DialectImplementation.h"
 
 #define GET_TYPEDEF_CLASSES
-#include "sharp/Dialect/TXN/TXNTypes.h.inc"
+#include "sharp/Dialect/Txn/TxnTypes.h.inc"
 
 #endif // SHARP_DIALECT_TXN_TXNTYPES_H

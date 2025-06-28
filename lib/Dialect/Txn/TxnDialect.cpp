@@ -1,12 +1,12 @@
-//===- TXNDialect.cpp - TXN dialect implementation ------------------------===//
+//===- TxnDialect.cpp - Txn dialect implementation ------------------------===//
 //
 // Part of the Sharp Project.
 //
 //===----------------------------------------------------------------------===//
 
-#include "sharp/Dialect/TXN/TXNDialect.h"
-#include "sharp/Dialect/TXN/TXNOps.h"
-#include "sharp/Dialect/TXN/TXNTypes.h"
+#include "sharp/Dialect/Txn/TxnDialect.h"
+#include "sharp/Dialect/Txn/TxnOps.h"
+#include "sharp/Dialect/Txn/TxnTypes.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -28,17 +28,17 @@ using namespace sharp::txn;
 // Dialect initialization
 //===----------------------------------------------------------------------===//
 
-void TXNDialect::initialize() {
+void TxnDialect::initialize() {
   // Register types.
   addTypes<
 #define GET_TYPEDEF_LIST
-#include "sharp/Dialect/TXN/TXNTypes.cpp.inc"
+#include "sharp/Dialect/Txn/TxnTypes.cpp.inc"
       >();
 
   // Register operations.
   addOperations<
 #define GET_OP_LIST
-#include "sharp/Dialect/TXN/TXN.cpp.inc"
+#include "sharp/Dialect/Txn/Txn.cpp.inc"
       >();
 }
 
@@ -47,10 +47,10 @@ void TXNDialect::initialize() {
 //===----------------------------------------------------------------------===//
 
 #define GET_TYPEDEF_CLASSES
-#include "sharp/Dialect/TXN/TXNTypes.cpp.inc"
+#include "sharp/Dialect/Txn/TxnTypes.cpp.inc"
 
 //===----------------------------------------------------------------------===//
 // Dialect definitions
 //===----------------------------------------------------------------------===//
 
-#include "sharp/Dialect/TXN/TXNDialect.cpp.inc"
+#include "sharp/Dialect/Txn/TxnDialect.cpp.inc"

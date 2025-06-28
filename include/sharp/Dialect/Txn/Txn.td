@@ -1,4 +1,4 @@
-//===- TXN.td - Definition of TXN dialect ---------------------------------===//
+//===- Txn.td - Definition of Txn dialect ---------------------------------===//
 //
 // Part of the Sharp Project.
 //
@@ -14,7 +14,7 @@ include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
-def TXNDialect : Dialect {
+def TxnDialect : Dialect {
   let name = "txn";
   let cppNamespace = "::sharp::txn";
 
@@ -43,13 +43,13 @@ def TXNDialect : Dialect {
 }
 
 // Base class for the types in this dialect.
-class TXNType<string name> : TypeDef<TXNDialect, name> {}
+class TxnType<string name> : TypeDef<TxnDialect, name> {}
 
 // Base class for the operations in this dialect.
-class TXNOp<string mnemonic, list<Trait> traits = []> :
-    Op<TXNDialect, mnemonic, traits>;
+class TxnOp<string mnemonic, list<Trait> traits = []> :
+    Op<TxnDialect, mnemonic, traits>;
 
-include "sharp/Dialect/TXN/TXNTypes.td"
-include "sharp/Dialect/TXN/TXNOps.td"
+include "sharp/Dialect/Txn/TxnTypes.td"
+include "sharp/Dialect/Txn/TxnOps.td"
 
 #endif // SHARP_DIALECT_TXN_TD

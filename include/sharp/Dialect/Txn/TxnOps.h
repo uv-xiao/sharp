@@ -1,4 +1,4 @@
-//===- TXNOps.h - TXN dialect operations ----------------------------------===//
+//===- TxnOps.h - Txn dialect operations ----------------------------------===//
 //
 // Part of the Sharp Project.
 //
@@ -15,8 +15,8 @@
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Bytecode/BytecodeOpInterface.h"
-#include "sharp/Dialect/TXN/TXNDialect.h"
-#include "sharp/Dialect/TXN/TXNTypes.h"
+#include "sharp/Dialect/Txn/TxnDialect.h"
+#include "sharp/Dialect/Txn/TxnTypes.h"
 
 namespace sharp {
 namespace txn {
@@ -25,6 +25,6 @@ using namespace mlir;
 } // namespace sharp
 
 #define GET_OP_CLASSES
-#include "sharp/Dialect/TXN/TXN.h.inc"
+#include "sharp/Dialect/Txn/Txn.h.inc"
 
 #endif // SHARP_DIALECT_TXN_TXNOPS_H

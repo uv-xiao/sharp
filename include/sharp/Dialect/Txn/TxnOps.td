@@ -1,4 +1,4 @@
-//===- TXNOps.td - TXN dialect operation definitions ----------------------===//
+//===- TxnOps.td - Txn dialect operation definitions ----------------------===//
 //
 // Part of the Sharp Project.
 //
@@ -11,13 +11,13 @@ include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/IR/OpAsmInterface.td"
-include "TXNTypes.td"
+include "TxnTypes.td"
 
 //===----------------------------------------------------------------------===//
 // Module and Primitive Operations
 //===----------------------------------------------------------------------===//
 
-def ModuleOp : TXNOp<"module", [
+def ModuleOp : TxnOp<"module", [
     IsolatedFromAbove, Symbol, SymbolTable, NoTerminator
   ]> {
   let summary = "Transaction module definition";
@@ -38,7 +38,7 @@ def ModuleOp : TXNOp<"module", [
   let hasVerifier = 1;
 }
 
-def PrimitiveOp : TXNOp<"primitive", [
+def PrimitiveOp : TxnOp<"primitive", [
     IsolatedFromAbove, Symbol, NoTerminator
   ]> {
   let summary = "Primitive module definition";
@@ -58,7 +58,7 @@ def PrimitiveOp : TXNOp<"primitive", [
   let hasVerifier = 1;
 }
 
-def InstanceOp : TXNOp<"instance", [Symbol]> {
+def InstanceOp : TxnOp<"instance", [Symbol]> {
   let summary = "Module instance declaration";
   let description = [{
     Declares an instance of another module within the current module.
@@ -68,7 +68,7 @@ def InstanceOp : TXNOp<"instance", [Symbol]> {
     SymbolNameAttr:$sym_name,
     FlatSymbolRefAttr:$module_name
   );
-  let results = (outs TXN_ModuleType:$result);
+  let results = (outs Txn_ModuleType:$result);
 
   let assemblyFormat = "$sym_name `of` $module_name attr-dict `:` type($result)";
 }
@@ -77,7 +77,7 @@ def InstanceOp : TXNOp<"instance", [Symbol]> {
 // Method and Rule Operations
 //===----------------------------------------------------------------------===//
 
-def ValueMethodOp : TXNOp<"value_method", [
+def ValueMethodOp : TxnOp<"value_method", [
     IsolatedFromAbove, FunctionOpInterface, AutomaticAllocationScope
   ]> {
   let summary = "Pure value method definition";
@@ -109,7 +109,7 @@ def ValueMethodOp : TXNOp<"value_method", [
   let hasCustomAssemblyFormat = 1;
 }
 
-def ActionMethodOp : TXNOp<"action_method", [
+def ActionMethodOp : TxnOp<"action_method", [
     IsolatedFromAbove, FunctionOpInterface, AutomaticAllocationScope
   ]> {
   let summary = "Action method definition";
@@ -141,7 +141,7 @@ def ActionMethodOp : TXNOp<"action_method", [
   let hasCustomAssemblyFormat = 1;
 }
 
-def RuleOp : TXNOp<"rule", [
+def RuleOp : TxnOp<"rule", [
     IsolatedFromAbove, NoTerminator
   ]> {
   let summary = "Spontaneous transition rule";
@@ -161,7 +161,7 @@ def RuleOp : TXNOp<"rule", [
 // Transaction Control Operations
 //===----------------------------------------------------------------------===//
 
-def ReturnOp : TXNOp<"return", [
+def ReturnOp : TxnOp<"return", [
     Pure, ReturnLike, Terminator
   ]> {
   let summary = "Return from a TXN method";
@@ -181,7 +181,7 @@ def ReturnOp : TXNOp<"return", [
   ];
 }
 
-def YieldOp : TXNOp<"yield", [
+def YieldOp : TxnOp<"yield", [
     Pure, ReturnLike, Terminator
   ]> {
   let summary = "Yield values from a region";
@@ -201,7 +201,7 @@ def YieldOp : TXNOp<"yield", [
   ];
 }
 
-def ScheduleOp : TXNOp<"schedule", [
+def ScheduleOp : TxnOp<"schedule", [
     Terminator
   ]> {
   let summary = "Module schedule - defines module behavior";
@@ -216,7 +216,7 @@ def ScheduleOp : TXNOp<"schedule", [
   let assemblyFormat = "$methods attr-dict";
 }
 
-def IfOp : TXNOp<"if", [
+def IfOp : TxnOp<"if", [
     DeclareOpInterfaceMethods<RegionBranchOpInterface,
       ["getSuccessorRegions", "getRegionInvocationBounds", "getEntrySuccessorRegions"]>,
     NoRegionArguments
@@ -241,7 +241,7 @@ def IfOp : TXNOp<"if", [
 // Action Operations
 //===----------------------------------------------------------------------===//
 
-def AbortOp : TXNOp<"abort", [Terminator]> {
+def AbortOp : TxnOp<"abort", [Terminator]> {
   let summary = "Abort the current transaction";
   let description = [{
     Causes the current transaction to fail and rollback any effects.
@@ -250,7 +250,7 @@ def AbortOp : TXNOp<"abort", [Terminator]> {
   let assemblyFormat = "attr-dict";
 }
 
-def CallOp : TXNOp<"call", []> {
+def CallOp : TxnOp<"call", []> {
   let summary = "Call a method on a module";
   let description = [{
     Invokes a value or action method on a module instance.

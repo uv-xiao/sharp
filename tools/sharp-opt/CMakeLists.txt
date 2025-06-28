@@ -20,7 +20,7 @@ target_link_libraries(sharp-opt PRIVATE
   ${circt_dialect_libs}
   ${circt_conversion_libs}
   SharpCore
-  SharpTXN
+  SharpTxn
   MLIROptLib
   MLIRSupport
   MLIRIR

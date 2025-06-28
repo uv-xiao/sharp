@@ -1,4 +1,4 @@
-//===- TXNDialect.h - TXN dialect declaration -----------------------------===//
+//===- TxnDialect.h - Txn dialect declaration -----------------------------===//
 //
 // Part of the Sharp Project.
 //
@@ -10,6 +10,6 @@
 #include "mlir/IR/Dialect.h"
 
 // Pull in the dialect definition.
-#include "sharp/Dialect/TXN/TXNDialect.h.inc"
+#include "sharp/Dialect/Txn/TxnDialect.h.inc"
 
 #endif // SHARP_DIALECT_TXN_TXNDIALECT_H

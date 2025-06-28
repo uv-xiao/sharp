@@ -1,10 +1,10 @@
-//===- TXNOps.cpp - TXN dialect operations implementation -----------------===//
+//===- TxnOps.cpp - Txn dialect operations implementation -----------------===//
 //
 // Part of the Sharp Project.
 //
 //===----------------------------------------------------------------------===//
 
-#include "sharp/Dialect/TXN/TXNOps.h"
+#include "sharp/Dialect/Txn/TxnOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/Interfaces/FunctionImplementation.h"
@@ -376,4 +376,4 @@ LogicalResult CallOp::verify() {
 //===----------------------------------------------------------------------===//
 
 #define GET_OP_CLASSES
-#include "sharp/Dialect/TXN/TXN.cpp.inc"
+#include "sharp/Dialect/Txn/Txn.cpp.inc"

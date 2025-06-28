@@ -1,4 +1,4 @@
-//===- TXNTypes.td - TXN dialect type definitions -------------------------===//
+//===- TxnTypes.td - Txn dialect type definitions -------------------------===//
 //
 // Part of the Sharp Project.
 //
@@ -13,7 +13,7 @@ include "mlir/IR/AttrTypeBase.td"
 // Type definitions
 //===----------------------------------------------------------------------===//
 
-def ActionType : TXNType<"Action"> {
+def ActionType : TxnType<"Action"> {
   let mnemonic = "action";
   let summary = "Action type that may produce a value or abort";
   let description = [{
@@ -33,7 +33,7 @@ def ActionType : TXNType<"Action"> {
   let assemblyFormat = "`<` $resultType `>`";
 }
 
-def ValueType : TXNType<"Value"> {
+def ValueType : TxnType<"Value"> {
   let mnemonic = "value";
   let summary = "Pure computation type";
   let description = [{
@@ -52,7 +52,7 @@ def ValueType : TXNType<"Value"> {
   let assemblyFormat = "`<` $resultType `>`";
 }
 
-def ModuleType : TXNType<"Module"> {
+def ModuleType : TxnType<"Module"> {
   let mnemonic = "module";
   let summary = "Module interface type";
   let description = [{
@@ -72,13 +72,13 @@ def ModuleType : TXNType<"Module"> {
 }
 
 // Type constraints for operations
-def TXN_ActionType : Type<CPred<"llvm::isa<::sharp::txn::ActionType>($_self)">,
+def Txn_ActionType : Type<CPred<"llvm::isa<::sharp::txn::ActionType>($_self)">,
                               "txn.action type">;
 
-def TXN_ValueType : Type<CPred<"llvm::isa<::sharp::txn::ValueType>($_self)">,
+def Txn_ValueType : Type<CPred<"llvm::isa<::sharp::txn::ValueType>($_self)">,
                              "txn.value type">;
 
-def TXN_ModuleType : Type<CPred<"llvm::isa<::sharp::txn::ModuleType>($_self)">,
+def Txn_ModuleType : Type<CPred<"llvm::isa<::sharp::txn::ModuleType>($_self)">,
                               "txn.module type">;
 
 #endif // SHARP_DIALECT_TXN_TYPES_TD
