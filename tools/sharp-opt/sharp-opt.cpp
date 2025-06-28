@@ -21,13 +21,15 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 
-#include "sharp/Dialect/Core/CoreDialect.h"
+#include "circt/InitAllDialects.h"
+#include "sharp/InitAllDialects.h"
 
 int main(int argc, char **argv) {
   mlir::registerAllPasses();
 
   mlir::DialectRegistry registry;
-  registry.insert<sharp::core::CoreDialect>();
+  sharp::registerAllDialects(registry);
+  circt::registerAllDialects(registry);
   mlir::registerAllDialects(registry);
 
   return mlir::asMainReturnCode(

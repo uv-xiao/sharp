@@ -9,11 +9,18 @@ add_llvm_executable(sharp-opt
 # Add to default build targets
 set_target_properties(sharp-opt PROPERTIES FOLDER "Tools")
 
+# Get CIRCT libraries
+get_property(circt_dialect_libs GLOBAL PROPERTY CIRCT_DIALECT_LIBS)
+get_property(circt_conversion_libs GLOBAL PROPERTY CIRCT_CONVERSION_LIBS)
+
 # Link required libraries
 target_link_libraries(sharp-opt PRIVATE
   ${dialect_libs}
   ${conversion_libs}
+  ${circt_dialect_libs}
+  ${circt_conversion_libs}
   SharpCore
+  SharpTXN
   MLIROptLib
   MLIRSupport
   MLIRIR
