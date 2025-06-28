@@ -1,119 +1,224 @@
-# Sharp Project Notes
+# Sharp Project - Research Notes
 
-## Papers and References
+## Overview
 
-### Making Concurrent Hardware Verification Sequential - Bourgeat et al. (2025)
+This document synthesizes three key papers on hardware design languages and verification:
+1. **Fjfj (2025)**: Sequential verification of concurrent hardware
+2. **Kôika (2020)**: Rule-based hardware design with explicit scheduling
+3. **EQueue (2022)**: Compiler-driven simulation of hardware accelerators
 
-#### Overview
-This paper addresses the exponential complexity problem in verifying concurrent hardware modules by introducing a sequential verification methodology that preserves hardware's concurrent nature.
-
-#### Key Problem
-- Traditional hardware verification requires considering all 2^n combinations of concurrent method calls
-- This leads to exponential proof complexity as module APIs grow
-- Makes modular hardware verification significantly harder than software verification
-
-#### Core Insights and Techniques
-
-1. **One Action Method Restriction**
-   - Allow only one state-modifying (action) method per logical cycle per module
-   - Multiple read-only (value) methods can execute concurrently
-   - Enables sequential reasoning while maintaining concurrent execution
-
-2. **Sequential Characterization**
-   - Through language restrictions, enable sequential reasoning about hardware modules
-   - Preserves concurrent execution in the final hardware
-   - Reduces verification complexity from exponential to linear
-
-3. **Transactional Semantics**
-   - Introduce abort semantics that propagate when preconditions aren't met
-   - Similar to software transaction models
-   - Clean handling of backpressure and control flow
-
-4. **Fjfj Language**
-   - New Bluespec-inspired formal language embedded in Coq
-   - Supports sequential verification of concurrent hardware
-   - Provides mechanized proof framework
-
-#### Methodology
-
-1. **Module Specification**
-   - Rules: spontaneous state transitions
-   - Value methods: pure observations (read-only)
-   - Action methods: state transformations
-
-2. **Sequential Verification Process**
-   - Verify each method/rule individually
-   - Use refinement relations between implementation and specification
-   - Leverage one-action-method restriction to avoid concurrent interference
-
-3. **Compilation Strategy**
-   - Logical cycles (sequential semantics) compiled to physical clock cycles
-   - Multiple non-conflicting rules can execute in same physical cycle
-   - Automatic handling of control signals (ready/enable)
-
-#### Technical Contributions
-
-- **Refinement Theorem**: Mechanized proof enabling modular composition
-- **Formal Semantics**: Complete operational semantics for Fjfj with abort propagation
-- **Primitive Module Abstraction**: Custom primitive modules for specifications
-- **Mechanized Examples**: Three verified case studies in Coq
-
-#### Case Studies
-
-1. **5-Stage RISC-V Pipeline**
-   - Demonstrates handling of complex control flow and hazards
-   - Verifies refinement to ISA specification
-
-2. **Parameterized N×M Crossbar**
-   - Shows handling of parameterized designs
-   - Verifies packet routing correctness
-
-3. **Programmable Network Switch**
-   - Complex stateful processing with match-action tables
-   - Verifies packet processing semantics
-
-#### Limitations
-
-- No automatic synthesis from Fjfj to RTL (manual translation to Bluespec required)
-- One-action-method restriction may require design restructuring
-- Currently limited to natural numbers for method arguments/returns
-- Learning curve for sequential-within-concurrent model
-
-#### Relevance to Sharp Project
-
-1. **Modular Verification**: Independent verification and composition of processor components
-2. **Sequential Reasoning**: Simplifies verification of pipelines and concurrent features
-3. **Refinement-Based Approach**: Proving optimized implementations match specifications
-4. **Transaction Semantics**: Robust interface design between components
-5. **Parameterized Designs**: Useful for configurable processor features
-6. **Coq Integration**: Aligns with formal verification goals
-7. **Primitive Abstractions**: High-level specifications of architectural components
-
-#### Key Takeaway
-The paper's approach makes concurrent hardware verification tractable through sequential reasoning while preserving hardware's inherent concurrency - particularly valuable for verifying complex processor designs.
+These papers represent complementary approaches to managing complexity in hardware design through different abstractions and verification strategies.
 
 ---
 
-## Implementation Ideas for Sharp
+## Paper Summaries
 
-### Potential Applications
+### 1. Making Concurrent Hardware Verification Sequential (Bourgeat et al., 2025)
 
-1. **Pipeline Verification**
-   - Apply sequential verification to individual pipeline stages
-   - Use refinement to prove pipeline implements ISA correctly
-   - Handle hazards and forwarding with transaction semantics
+**Problem**: Traditional hardware verification faces exponential complexity (2^n combinations) when verifying concurrent method calls.
 
-2. **Module Interface Design**
-   - Adopt value/action method distinction in Sharp dialect
-   - Use abort semantics for clean error handling
-   - Design composable module interfaces
+**Solution**: Fjfj language with one-action-method restriction enables sequential reasoning while preserving concurrent execution.
 
-3. **Verification Infrastructure**
-   - Consider Coq integration for formal proofs
-   - Implement refinement checking in Sharp tools
-   - Support parameterized component verification
+**Key Concepts**:
+- **One Action Method Restriction**: Only one state-modifying method per cycle per module
+- **Transaction Semantics**: Abort propagation for failed preconditions
+- **Sequential Verification**: Verify methods individually, compose modularly
+- **Refinement-Based**: Prove implementations match specifications
 
-### Next Steps
-- Study Fjfj's formal semantics for dialect design insights
-- Explore how to integrate sequential verification into Sharp's workflow
-- Consider transaction-like semantics for architectural components
+**Technical Approach**:
+- Language embedded in Coq for mechanized proofs
+- Logical cycles compiled to physical clock cycles
+- Multiple non-conflicting rules execute concurrently
+- Automatic handling of control signals (ready/enable)
+
+**Case Studies**: 5-stage RISC-V pipeline, N×M crossbar, programmable switch
+
+### 2. The Essence of Bluespec: A Core Language for Rule-Based Hardware Design (Bourgeat et al., 2020)
+
+**Problem**: Bluespec's performance depends on opaque static analysis and user hints, making it unpredictable.
+
+**Solution**: Kôika provides explicit control over scheduling with deterministic cycle-accurate semantics.
+
+**Key Concepts**:
+- **Explicit Scheduling**: Direct control over rule execution order
+- **ORAAT Property**: One-Rule-At-A-Time semantics preserved during concurrent execution
+- **Ephemeral History Registers (EHRs)**: Enable intra-cycle data forwarding
+- **Log-based Semantics**: Dynamic tracking ensures correctness
+
+**Technical Approach**:
+- Mechanized in Coq with verified compiler to RTL
+- Rules generate logs of reads/writes
+- Dynamic checks prevent ORAAT violations
+- EHR ports (rd0/wr0, rd1/wr1) for forwarding
+
+**Example - Collatz Sequence**:
+```
+rule divide = 
+  let v = r.rd0 in
+  if iseven(v) then r.wr0(v >> 1)
+
+rule multiply =
+  let v = r.rd1 in  
+  if isodd(v) then r.wr1(3 * v + 1)
+
+schedule collatz = [divide; multiply]
+```
+
+### 3. Compiler-Driven Simulation of Reconfigurable Hardware Accelerators (Li et al., 2022)
+
+**Problem**: Traditional simulators are either too low-level (RTL) or require one-off engineering for each accelerator.
+
+**Solution**: EQueue MLIR dialect enables multi-level simulation with separation of structure and behavior.
+
+**Key Concepts**:
+- **Structure Specification**: Explicit component hierarchy (processors, memories, DMA)
+- **Event-Based Control**: Launch operations with dependencies
+- **Multi-Level Simulation**: From tensor operations to detailed hardware
+- **Performance Models**: Pluggable timing/power models per component
+
+**Technical Approach**:
+- Built on MLIR infrastructure
+- Generic simulation engine interprets EQueue programs
+- Progressive lowering through compilation pipeline
+- Visualization of execution traces and bandwidth
+
+**Example Structure**:
+```mlir
+kernel = equeue.create_proc(ARMr6)
+sram = equeue.create_mem(SRAM, [64], 4)
+pe0_dep = equeue.launch(...) in (launch_dep, pe0) {
+  ofmap = addi(ifmap, 4)
+}
+```
+
+---
+
+## Unified Analysis
+
+### Common Design Principles
+
+1. **Separation of Concerns**
+   - **Fjfj**: Separates verification (sequential) from execution (concurrent)
+   - **Kôika**: Separates functional behavior from scheduling decisions
+   - **EQueue**: Separates hardware structure from simulation logic
+
+2. **Explicit Control Over Implicit Decisions**
+   - **Fjfj**: Explicit module interfaces and method restrictions
+   - **Kôika**: Explicit schedules replace hidden static analysis
+   - **EQueue**: Explicit data movement and event dependencies
+
+3. **Multi-Level Abstraction**
+   - **Fjfj**: Logical cycles abstract from physical implementation
+   - **Kôika**: Rules compose into schedules with preserved semantics
+   - **EQueue**: Progressive refinement from tensors to hardware details
+
+4. **Formal Foundations**
+   - **Fjfj**: Mechanized refinement proofs in Coq
+   - **Kôika**: Verified compiler with ORAAT theorem
+   - **EQueue**: Precise event-based operational semantics
+
+### Complementary Strengths
+
+| Aspect | Fjfj | Kôika | EQueue |
+|--------|------|-------|---------|
+| **Primary Focus** | Modular verification | Performance predictability | Design exploration |
+| **Abstraction** | Sequential reasoning | Rule-based design | Event-driven simulation |
+| **Verification** | Refinement proofs | ORAAT preservation | Performance estimation |
+| **Concurrency** | One-action restriction | EHR forwarding | Event dependencies |
+| **Implementation** | Coq proofs | Verified RTL compiler | MLIR simulation |
+
+### Evolution and Relationships
+
+1. **Historical Progression**:
+   - Kôika (2020) addresses Bluespec's opaque scheduling
+   - EQueue (2022) enables flexible architectural exploration
+   - Fjfj (2025) solves exponential verification complexity
+
+2. **Technical Connections**:
+   - All three build on rule-based/transaction concepts
+   - Fjfj extends ideas from Kôika for verification
+   - EQueue complements both with performance analysis
+
+3. **Methodological Alignment**:
+   - Emphasis on predictability and explicit control
+   - Support for modular composition
+   - Integration with formal methods tools
+
+---
+
+## Integration Opportunities for Sharp/Txn
+
+### Direct Applications
+
+1. **From Fjfj**:
+   - One-action-method restriction for verifiable interfaces
+   - Transaction abort semantics already adopted
+   - Refinement-based verification methodology
+
+2. **From Kôika**:
+   - Explicit scheduling (already adopted as `txn.schedule`)
+   - EHR mechanism for intra-cycle communication
+   - Log-based dynamic correctness checking
+
+3. **From EQueue**:
+   - Multi-level simulation capabilities
+   - Performance estimation framework
+   - Event-based dependency tracking
+
+### Proposed Synthesis
+
+#### Architecture
+```
+┌─────────────────────────────────────┐
+│         Txn Dialect (Sharp)         │
+├─────────────────────────────────────┤
+│ Verification Layer (Fjfj-inspired)  │
+│ - One-action restriction            │
+│ - Refinement proofs                 │
+├─────────────────────────────────────┤
+│ Execution Layer (Kôika-inspired)    │
+│ - Explicit scheduling               │
+│ - EHR forwarding                    │
+│ - ORAAT preservation                │
+├─────────────────────────────────────┤
+│ Simulation Layer (EQueue-inspired)  │
+│ - Multi-level models                │
+│ - Performance estimation            │
+│ - Event visualization               │
+└─────────────────────────────────────┘
+```
+
+#### Implementation Strategy
+
+1. **Phase 1: Enhanced Scheduling**
+   - Extend `txn.schedule` with Kôika's forwarding semantics
+   - Add EHR-like ports to registers for intra-cycle communication
+   - Implement dynamic ORAAT checking
+
+2. **Phase 2: Verification Infrastructure**
+   - Adopt Fjfj's one-action restriction where appropriate
+   - Build refinement checking tools
+   - Integrate with Coq for mechanized proofs
+
+3. **Phase 3: Performance Analysis**
+   - Add EQueue-style simulation annotations
+   - Build multi-level performance models
+   - Create visualization tools for execution traces
+
+### Research Questions
+
+1. Can we unify Kôika's EHRs with Fjfj's one-action restriction?
+2. How to integrate EQueue's simulation with formal verification?
+3. Can we automatically derive performance models from verified designs?
+4. What's the right abstraction level for each design phase?
+
+---
+
+## Conclusions
+
+These three papers represent a coherent evolution in hardware design methodology:
+- **Correctness**: From opaque Bluespec to explicit Kôika to verifiable Fjfj
+- **Performance**: From static analysis to dynamic scheduling to multi-level simulation
+- **Abstraction**: From RTL details to rule-based design to transaction-level modeling
+
+The Sharp/Txn dialect is well-positioned to integrate these advances into a unified framework that supports the entire hardware design lifecycle from specification through verification to implementation.
