@@ -36,7 +36,7 @@ void TxnDialect::initialize() {
       >();
 
   // Register attributes.
-  // TODO: Register custom attributes when we have proper support
+  // TODO: Register custom attributes when we have proper AttrDef support
 
   // Register operations.
   addOperations<

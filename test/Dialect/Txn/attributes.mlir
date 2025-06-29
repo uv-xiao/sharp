@@ -30,8 +30,17 @@
     "txn.return"(%c0) : (i32) -> ()
   }) {function_type = () -> i32, sym_name = "valueMethod", timing = "combinational"} : () -> ()
 
-  "txn.schedule"() {methods = [@rule1, @rule2, @method1]} : () -> ()
-}) {sym_name = "ModuleWithConflictMatrix", conflict_matrix = {"rule1,rule2" = 2 : i32, "rule1,method1" = 0 : i32, "rule2,method1" = 1 : i32}} : () -> ()
+  // CHECK: "txn.schedule"
+  // CHECK-SAME: conflict_matrix = {
+  "txn.schedule"() {
+    actions = [@rule1, @rule2, @method1], 
+    conflict_matrix = {
+      "rule1,rule2" = 2 : i32,   // C (Conflict)
+      "rule1,method1" = 0 : i32, // SB (SequenceBefore)
+      "rule2,method1" = 1 : i32  // SA (SequenceAfter)
+    }
+  } : () -> ()
+}) {sym_name = "ModuleWithConflictMatrix"} : () -> ()
 
 // CHECK: "txn.module"
 "txn.module"() ({
@@ -43,5 +52,5 @@
     "txn.return"() : () -> ()
   }) {function_type = () -> (), sym_name = "simpleMethod"} : () -> ()
 
-  "txn.schedule"() {methods = [@simpleRule, @simpleMethod]} : () -> ()
+  "txn.schedule"() {actions = [@simpleRule, @simpleMethod]} : () -> ()
 }) {sym_name = "ModuleWithoutAttributes"} : () -> ()

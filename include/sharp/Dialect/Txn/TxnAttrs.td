@@ -83,8 +83,7 @@ def TxnTimingAttr : AttrDef<TxnDialect, "Timing"> {
 // Conflict Matrix Attribute
 //===----------------------------------------------------------------------===//
 
-// Simplified conflict matrix attribute for now
-// TODO: Implement full conflict matrix with dictionary storage
+// Simplified conflict matrix attribute
 def TxnConflictMatrixAttr : Attr<CPred<"isa<::mlir::DictionaryAttr>($_self)">,
                                   "conflict matrix attribute"> {
   let storageType = "::mlir::DictionaryAttr";

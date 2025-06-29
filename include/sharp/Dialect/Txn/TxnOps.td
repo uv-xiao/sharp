@@ -26,10 +26,7 @@ def ModuleOp : TxnOp<"module", [
     and a schedule that defines the module's behavior.
   }];
 
-  let arguments = (ins 
-    SymbolNameAttr:$sym_name,
-    OptionalAttr<TxnConflictMatrixAttr>:$conflict_matrix
-  );
+  let arguments = (ins SymbolNameAttr:$sym_name);
   let regions = (region SizedRegion<1>:$body);
 
   let extraClassDeclaration = [{
@@ -217,9 +214,12 @@ def ScheduleOp : TxnOp<"schedule", [
     can be executed in each cycle.
   }];
 
-  let arguments = (ins SymbolRefArrayAttr:$methods);
+  let arguments = (ins 
+    SymbolRefArrayAttr:$actions,
+    OptionalAttr<TxnConflictMatrixAttr>:$conflict_matrix
+  );
 
-  let assemblyFormat = "$methods attr-dict";
+  let assemblyFormat = "$actions attr-dict";
 }
 
 def IfOp : TxnOp<"if", [
