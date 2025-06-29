@@ -12,4 +12,7 @@
 // Pull in the dialect definition.
 #include "sharp/Dialect/Txn/TxnDialect.h.inc"
 
+// Pull in the attribute definitions.
+#include "sharp/Dialect/Txn/TxnAttrs.h"
+
 #endif // SHARP_DIALECT_TXN_TXNDIALECT_H

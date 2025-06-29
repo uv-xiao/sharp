@@ -25,6 +25,10 @@ ParseResult ModuleOp::parse(OpAsmParser &parser, OperationState &result) {
                             result.attributes))
     return failure();
 
+  // Parse optional attributes
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
   // Parse the body region.
   Region *body = result.addRegion();
   if (parser.parseRegion(*body, /*arguments=*/{}, /*argTypes=*/{}))
@@ -39,6 +43,7 @@ ParseResult ModuleOp::parse(OpAsmParser &parser, OperationState &result) {
 
 void ModuleOp::print(OpAsmPrinter &p) {
   p << " @" << getSymName();
+  p.printOptionalAttrDict((*this)->getAttrs(), /*elidedAttrs=*/{"sym_name"});
   p << " ";
   p.printRegion(getBody(), /*printEntryBlockArgs=*/false,
                 /*printBlockTerminators=*/true);

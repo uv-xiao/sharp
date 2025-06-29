@@ -35,6 +35,9 @@ void TxnDialect::initialize() {
 #include "sharp/Dialect/Txn/TxnTypes.cpp.inc"
       >();
 
+  // Register attributes.
+  // TODO: Register custom attributes when we have proper support
+
   // Register operations.
   addOperations<
 #define GET_OP_LIST

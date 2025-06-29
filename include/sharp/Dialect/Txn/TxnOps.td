@@ -26,7 +26,10 @@ def ModuleOp : TxnOp<"module", [
     and a schedule that defines the module's behavior.
   }];
 
-  let arguments = (ins SymbolNameAttr:$sym_name);
+  let arguments = (ins 
+    SymbolNameAttr:$sym_name,
+    OptionalAttr<TxnConflictMatrixAttr>:$conflict_matrix
+  );
   let regions = (region SizedRegion<1>:$body);
 
   let extraClassDeclaration = [{
@@ -90,7 +93,8 @@ def ValueMethodOp : TxnOp<"value_method", [
     TypeAttrOf<FunctionType>:$function_type,
     OptionalAttr<StrAttr>:$sym_visibility,
     OptionalAttr<DictArrayAttr>:$arg_attrs,
-    OptionalAttr<DictArrayAttr>:$res_attrs
+    OptionalAttr<DictArrayAttr>:$res_attrs,
+    OptionalAttr<StrAttr>:$timing
   );
   let regions = (region AnyRegion:$body);
 
@@ -122,7 +126,8 @@ def ActionMethodOp : TxnOp<"action_method", [
     TypeAttrOf<FunctionType>:$function_type,
     OptionalAttr<StrAttr>:$sym_visibility,
     OptionalAttr<DictArrayAttr>:$arg_attrs,
-    OptionalAttr<DictArrayAttr>:$res_attrs
+    OptionalAttr<DictArrayAttr>:$res_attrs,
+    OptionalAttr<StrAttr>:$timing
   );
   let regions = (region AnyRegion:$body);
 
@@ -150,7 +155,8 @@ def RuleOp : TxnOp<"rule", [
   }];
 
   let arguments = (ins
-    SymbolNameAttr:$sym_name
+    SymbolNameAttr:$sym_name,
+    OptionalAttr<StrAttr>:$timing
   );
   let regions = (region SizedRegion<1>:$body);
 
