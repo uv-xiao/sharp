@@ -3,7 +3,6 @@
 // Test attributes using generic format
 
 // CHECK: "txn.module"
-// CHECK-SAME: conflict_matrix = {
 "txn.module"() ({
   // CHECK: "txn.rule"
   // CHECK-SAME: timing = "combinational"

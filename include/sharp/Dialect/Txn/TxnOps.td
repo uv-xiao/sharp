@@ -34,7 +34,9 @@ def ModuleOp : TxnOp<"module", [
     Block *getBodyBlock() { return &getBody().front(); }
   }];
 
-  let hasCustomAssemblyFormat = 1;
+  let assemblyFormat = [{
+    $sym_name attr-dict-with-keyword $body
+  }];
   let hasVerifier = 1;
 }
 

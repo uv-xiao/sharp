@@ -2,7 +2,7 @@
 
 // Test basic TXN dialect functionality with updated syntax
 
-// CHECK-LABEL: txn.module @BasicModule
+// CHECK-LABEL: txn.module @BasicModule {
 txn.module @BasicModule {
   // CHECK: %{{.*}} = txn.instance @helper of @Helper : !txn.module<"Helper">
   %helper = txn.instance @helper of @Helper : !txn.module<"Helper">
