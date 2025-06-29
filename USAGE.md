@@ -144,7 +144,7 @@ ninja
 ### Test Commands
 - `pixi run test` - Run all tests
 - `pixi run test-lit` - Run lit tests only
-- `pixi run test-unit` - Run unit tests only
+- `pixi run test-unit` - Run unit tests (requires LLVM built with gtest)
 
 ### Development Tools
 - `pixi run format` - Format C++ code
@@ -318,6 +318,7 @@ The pixi environment automatically sets:
 - **Python not found**: Install Python 3.8+ and ensure it's in PATH
 - **CIRCT headers not found**: Force rebuild with `rm .install/unified/.build-complete && pixi run build`
 - **Large disk usage**: If LLVM was cloned with full history, re-clone with shallow depth
+- **Unit tests fail with missing gtest**: The unified LLVM build doesn't include gtest libraries. Unit tests are optional. Use lit tests instead with `pixi run test-lit`
 
 ### Disk Space Management
 

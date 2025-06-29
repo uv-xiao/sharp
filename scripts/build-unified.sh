@@ -12,9 +12,18 @@ MARKER_FILE="$UNIFIED_INSTALL_DIR/.build-complete"
 
 # Check if build is already complete
 if [ -f "$MARKER_FILE" ]; then
-    echo "Unified LLVM/MLIR/CIRCT build already complete."
-    echo "To force rebuild, delete: $MARKER_FILE"
-    exit 0
+    # Check if gtest support is already enabled
+    if grep -q "GTest support: Enabled" "$MARKER_FILE" 2>/dev/null; then
+        echo "Unified LLVM/MLIR/CIRCT build already complete (with gtest support)."
+        echo "To force rebuild, delete: $MARKER_FILE"
+        exit 0
+    else
+        echo "Existing build found without gtest support. Rebuilding with gtest enabled..."
+        rm -f "$MARKER_FILE"
+        # Also clean the build directory to ensure clean rebuild
+        echo "Cleaning build directory for fresh build with gtest..."
+        rm -rf "$BUILD_DIR"
+    fi
 fi
 
 echo "Building LLVM/MLIR/CIRCT in unified mode for Python bindings..."
@@ -104,6 +113,8 @@ cmake "$LLVM_DIR/llvm" \
     -DLLVM_INSTALL_UTILS=ON \
     -DLLVM_ENABLE_OCAMLDOC=OFF \
     -DLLVM_OCAML_INSTALL_PATH=/tmp/llvm-ocaml \
+    -DLLVM_BUILD_TESTS=ON \
+    -DLLVM_INSTALL_GTEST=ON \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
     -DCIRCT_BINDINGS_PYTHON_ENABLED=ON \
     -DVERILATOR_DISABLE=ON \
@@ -122,6 +133,7 @@ Build completed on: $(date)
 Compiler: $($CLANG_PATH --version | head -n1)
 Build type: ${CMAKE_BUILD_TYPE:-Release}
 Python bindings: Enabled
+GTest support: Enabled
 EOF
 
 echo "Unified build complete!"

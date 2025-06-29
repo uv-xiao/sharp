@@ -41,7 +41,7 @@ def ModuleOp : TxnOp<"module", [
 }
 
 def PrimitiveOp : TxnOp<"primitive", [
-    IsolatedFromAbove, Symbol, NoTerminator
+    IsolatedFromAbove, Symbol, NoTerminator, SymbolTable
   ]> {
   let summary = "Primitive module definition";
   let description = [{
@@ -275,6 +275,84 @@ def CallOp : TxnOp<"call", []> {
 
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// FIRRTL Interface Operations  
+//===----------------------------------------------------------------------===//
+
+def FirValueMethodOp : TxnOp<"fir_value_method", [
+    HasParent<"PrimitiveOp">,
+    Symbol
+  ]> {
+  let summary = "FIRRTL value method declaration for primitives";
+  let description = [{
+    Declares a value method interface for hardware primitives.
+    This is used to specify the FIRRTL interface that will be generated
+    for the primitive's value methods.
+  }];
+  
+  let arguments = (ins
+    SymbolNameAttr:$sym_name,
+    TypeAttrOf<FunctionType>:$function_type
+  );
+  
+  let assemblyFormat = [{
+    $sym_name `(` `)` attr-dict `:` $function_type
+  }];
+}
+
+def FirActionMethodOp : TxnOp<"fir_action_method", [
+    HasParent<"PrimitiveOp">,
+    Symbol
+  ]> {
+  let summary = "FIRRTL action method declaration for primitives";
+  let description = [{
+    Declares an action method interface for hardware primitives.
+    This is used to specify the FIRRTL interface that will be generated
+    for the primitive's action methods.
+  }];
+  
+  let arguments = (ins
+    SymbolNameAttr:$sym_name,
+    TypeAttrOf<FunctionType>:$function_type
+  );
+  
+  let assemblyFormat = [{
+    $sym_name `(` `)` attr-dict `:` $function_type
+  }];
+}
+
+def ClockByOp : TxnOp<"clock_by", [
+    HasParent<"PrimitiveOp">
+  ]> {
+  let summary = "Specify default clock for primitive";
+  let description = [{
+    Specifies which clock signal the primitive uses.
+    This corresponds to the "Default clock" in BSV embedding.
+  }];
+  
+  let arguments = (ins SymbolRefAttr:$clock);
+  
+  let assemblyFormat = [{
+    $clock attr-dict
+  }];
+}
+
+def ResetByOp : TxnOp<"reset_by", [
+    HasParent<"PrimitiveOp">
+  ]> {
+  let summary = "Specify default reset for primitive";
+  let description = [{
+    Specifies which reset signal the primitive uses.
+    This corresponds to the "Default reset" in BSV embedding.
+  }];
+  
+  let arguments = (ins SymbolRefAttr:$reset);
+  
+  let assemblyFormat = [{
+    $reset attr-dict
+  }];
 }
 
 

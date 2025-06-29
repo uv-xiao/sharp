@@ -1,3 +1,5 @@
+add_subdirectory(primitives)
+
 add_mlir_dialect_library(SharpTxn
   TxnDialect.cpp
   TxnOps.cpp

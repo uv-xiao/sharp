@@ -7,7 +7,13 @@ BUILD_LOG="$SCRIPT_DIR/../.install/unified-build.log"
 # Run the actual build script with output redirection
 if "$SCRIPT_DIR/build-unified.sh" > "$BUILD_LOG" 2>&1; then
     # If successful, just show the key messages
-    if grep -q "Unified LLVM/MLIR/CIRCT build already complete" "$BUILD_LOG"; then
+    if grep -q "Unified LLVM/MLIR/CIRCT build already complete (with gtest support)" "$BUILD_LOG"; then
+        echo "✓ Unified LLVM/MLIR/CIRCT build already complete (with gtest support)"
+    elif grep -q "Rebuilding with gtest enabled" "$BUILD_LOG"; then
+        echo "✓ Rebuilding LLVM/MLIR/CIRCT with gtest support..."
+        echo "  This will take some time on first run..."
+        echo "  Build log: $BUILD_LOG"
+    elif grep -q "Unified LLVM/MLIR/CIRCT build already complete" "$BUILD_LOG"; then
         echo "✓ Unified LLVM/MLIR/CIRCT build already complete"
     else
         echo "✓ Unified LLVM/MLIR/CIRCT build completed successfully"

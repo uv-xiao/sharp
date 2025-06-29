@@ -19,6 +19,13 @@ set_target_properties(check-sharp-lit PROPERTIES FOLDER "Tests")
 
 add_lit_testsuites(SHARP ${CMAKE_CURRENT_SOURCE_DIR} DEPENDS ${SHARP_TEST_DEPENDS})
 
-add_custom_target(check-sharp
-  DEPENDS check-sharp-lit check-sharp-unit
-)
+# Create check-sharp target that includes all available tests
+if(TARGET check-sharp-unit)
+  add_custom_target(check-sharp
+    DEPENDS check-sharp-lit check-sharp-unit
+  )
+else()
+  add_custom_target(check-sharp
+    DEPENDS check-sharp-lit
+  )
+endif()

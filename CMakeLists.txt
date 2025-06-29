@@ -158,7 +158,15 @@ endif()
 if(SHARP_INCLUDE_TESTS)
   enable_testing()
   add_subdirectory(test)
-  add_subdirectory(unittests)
+  
+  # Only add unittests if LLVM was built with gtest
+  find_library(LLVM_GTEST_LIB llvm_gtest PATHS ${LLVM_LIBRARY_DIR} NO_DEFAULT_PATH)
+  find_library(LLVM_GTEST_MAIN_LIB llvm_gtest_main PATHS ${LLVM_LIBRARY_DIR} NO_DEFAULT_PATH)
+  if(LLVM_GTEST_LIB AND LLVM_GTEST_MAIN_LIB)
+    add_subdirectory(unittests)
+  else()
+    message(STATUS "Unit tests disabled - rebuild with 'pixi run build' to enable gtest support")
+  endif()
 endif()
 
 if(SHARP_INCLUDE_DOCS)

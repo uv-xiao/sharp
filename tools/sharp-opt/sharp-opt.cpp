@@ -23,9 +23,11 @@
 
 #include "circt/InitAllDialects.h"
 #include "sharp/InitAllDialects.h"
+#include "sharp/Analysis/Passes.h"
 
 int main(int argc, char **argv) {
   mlir::registerAllPasses();
+  mlir::sharp::registerPasses();
 
   mlir::DialectRegistry registry;
   sharp::registerAllDialects(registry);
