@@ -24,6 +24,9 @@ namespace sharp {
 /// Create a pass to infer and complete conflict matrices for txn modules.
 std::unique_ptr<mlir::Pass> createConflictMatrixInferencePass();
 
+/// Create a pass to check for non-synthesizable constructs.
+std::unique_ptr<mlir::Pass> createPreSynthesisCheckPass();
+
 /// Generate the code for registering analysis passes.
 #define GEN_PASS_REGISTRATION
 #include "sharp/Analysis/Passes.h.inc"

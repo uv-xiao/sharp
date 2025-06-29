@@ -40,4 +40,23 @@ def ConflictMatrixInference : Pass<"sharp-infer-conflict-matrix", "mlir::ModuleO
   let dependentDialects = ["::sharp::txn::TxnDialect"];
 }
 
+def PreSynthesisCheck : Pass<"sharp-pre-synthesis-check", "mlir::ModuleOp"> {
+  let summary = "Check for non-synthesizable constructs before FIRRTL translation";
+  let description = [{
+    This pass analyzes Sharp Txn modules to identify non-synthesizable constructs
+    that would prevent successful translation to FIRRTL/Verilog. The pass checks for:
+
+    1. Non-synthesizable (spec) primitives
+    2. Multi-cycle rules/methods (timing != "combinational")
+    3. Modules that instantiate non-synthesizable submodules or primitives
+
+    The pass marks modules as non-synthesizable by adding a "nonsynthesizable"
+    attribute and emits clear error messages for unsupported constructs.
+  }];
+  
+  let constructor = "mlir::sharp::createPreSynthesisCheckPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
 #endif // SHARP_ANALYSIS_PASSES

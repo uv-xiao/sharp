@@ -41,22 +41,29 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - Wire: read SB write conflict matrix
   - Test coverage in `test/Dialect/Txn/primitives.mlir`
 
+- **Txn Primitive Infrastructure** (2025-06-29)
+  - Separated txn primitive interface from FIRRTL implementation
+  - Created separate constructors for primitives and FIRRTL modules
+  - Added bridging attributes (firrtl.port, firrtl.data_port, firrtl.enable_port)
+  - Enabled gtest support in LLVM build for unit testing
+  - Comprehensive documentation in `docs/txn_primitive.md`
+
+- **Pre-synthesis Checking Analysis** (2025-06-29)
+  - Implemented analysis pass in `lib/Analysis/PreSynthesisCheck.cpp`
+  - Detects non-synthesizable (`spec`) primitives
+  - Verifies no multi-cycle rules/methods (timing != "combinational")
+  - Propagates non-synthesizable status through module hierarchy
+  - Emits clear error messages for unsupported constructs
+  - Test coverage in `test/Analysis/pre-synthesis-check.mlir`
+
 ### 🚧 In Progress
-- **Pre-synthesis Checking Analysis**
-  - any multi-cycle rules/methods and nonsynthesizable/non-existing primitives lead to unsynthesizability
-  - a module that instantiates a nonsynthesizable submodule/primitive should be marked as unsynthesizable
+
+### 📋 Planned
 
 - **Txn-to-FIRRTL Conversion Pass**
   - [ ] Design conversion architecture following Koika approach
   - [ ] Implement basic module structure translation
   - [ ] Add will-fire logic generation with CM support
-
-### 📋 Planned
-
-- **Analysis for Non-synthesizable Elements**
-  - Check for non-synthesizable (`spec`) primitives before translation
-  - Verify no multi-cycle rules/methods (currently unsupported)
-  - Fail with clear error messages for unsupported constructs
 
 - **FIRRTL Translation**
   - Reference: Bourgeat-2020-Koika.pdf, implementation at https://github.com/mit-plv/koika/blob/master/coq/CircuitGeneration.v
@@ -105,6 +112,7 @@ Sharp is implementing transaction-based hardware description with conflict matri
 3. ~~Create FIRRTL primitive module templates~~ ✅
 4. ~~Design conflict matrix inference algorithm~~ ✅
 5. ~~Implement primitive operations and constructors~~ ✅
-6. Add actual FIRRTL implementation to primitives (currently placeholders)
-7. Implement basic txn-to-FIRRTL conversion pass
-8. Add pre-synthesis checking for non-synthesizable elements
+6. ~~Add actual FIRRTL implementation to primitives~~ ✅
+7. ~~Add pre-synthesis checking for non-synthesizable elements~~ ✅
+8. Implement basic txn-to-FIRRTL conversion pass
+9. Add will-fire logic generation with CM support
