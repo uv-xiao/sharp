@@ -1,6 +1,9 @@
 add_mlir_dialect_library(SharpAnalysis
   ConflictMatrixInference.cpp
   PreSynthesisCheck.cpp
+  ReachabilityAnalysis.cpp
+  CombinationalLoopDetection.cpp
+  MethodAttributeValidation.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${SHARP_MAIN_INCLUDE_DIR}/sharp/Analysis
@@ -12,4 +15,5 @@ add_mlir_dialect_library(SharpAnalysis
   MLIRIR
   MLIRPass
   SharpTxn
+  MLIRArithDialect
   )

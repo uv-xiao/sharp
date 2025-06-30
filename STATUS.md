@@ -57,10 +57,25 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - Emits clear error messages for unsupported constructs
   - Test coverage in `test/Analysis/pre-synthesis-check.mlir` and `test/Analysis/pre-synthesis-check-ops.mlir`
 
+- **Txn-to-FIRRTL Analysis Passes** (2025-06-30)
+  - Implemented analysis passes per `docs/txn_to_firrtl.md`:
+  - **Reachability Analysis** (`lib/Analysis/ReachabilityAnalysis.cpp`)
+    - Computes reachability conditions for method calls within actions
+    - Tracks control flow through txn.if operations
+    - Generates symbolic condition expressions (e.g., "cond_0", "!cond_1 && cond_2")
+    - Attaches reachability_condition attribute to txn.call operations
+  - **Method Attribute Validation** (`lib/Analysis/MethodAttributeValidation.cpp`)
+    - Validates signal name uniqueness for FIRRTL translation
+    - Checks always_ready/always_enable attribute constraints
+    - Ensures no conflicts with module, instance, or other method names
+  - Updated CallOp printer/parser to support attribute dictionaries
+  - **Note**: Combinational Loop Detection implemented but deprecated pending txn.primitive attribute support
+
 ### 🚧 In Progress
 
 - **Txn-to-FIRRTL Conversion Pass**
   - [x] Design conversion architecture following Koika approach (docs/txn_to_firrtl.md)
+  - [x] Implement required analysis passes (reachability, loop detection, validation)
   - [ ] Implement basic module structure translation
   - [ ] Add will-fire logic generation with CM support
 
@@ -77,6 +92,9 @@ Sharp is implementing transaction-based hardware description with conflict matri
     - Prevent firing when previous action conflicts per CM
     - Return false if rule calls same action method multiple times
   - Bottom-up translation order (submodules first)
+
+- **Txn-level combinational loop detection**
+  - current implementation is not correct, since we don't have attributes in `txn.primitive` to define combinational paths.
   
 - **Verilog Export**
   - Add sharp-opt command-line options for triggering translation

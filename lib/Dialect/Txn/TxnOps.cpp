@@ -29,8 +29,9 @@ LogicalResult ModuleOp::verify() {
   if (bodyBlock.empty())
     return emitOpError("module body cannot be empty");
     
-  auto *terminator = bodyBlock.getTerminator();
-  if (!isa<ScheduleOp>(terminator))
+  // Since ModuleOp has NoTerminator trait, check if the last operation is a ScheduleOp
+  auto *lastOp = &bodyBlock.back();
+  if (!isa<ScheduleOp>(lastOp))
     return emitOpError("module must end with a 'txn.schedule' operation");
   
   return success();
@@ -324,6 +325,10 @@ ParseResult CallOp::parse(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(resultTypes);
 
+  // Parse optional attributes
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
   return parser.resolveOperands(operands, operandTypes, parser.getNameLoc(),
                                result.operands);
 }
@@ -338,6 +343,10 @@ void CallOp::print(OpAsmPrinter &p) {
   // Print as function type
   auto funcType = FunctionType::get(getContext(), getOperandTypes(), getResultTypes());
   p.printType(funcType);
+  
+  // Print attributes (excluding callee which was already printed)
+  SmallVector<StringRef> elidedAttrs = {"callee"};
+  p.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
 }
 
 LogicalResult CallOp::verify() {

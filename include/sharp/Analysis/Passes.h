@@ -27,6 +27,15 @@ std::unique_ptr<mlir::Pass> createConflictMatrixInferencePass();
 /// Create a pass to check for non-synthesizable constructs.
 std::unique_ptr<mlir::Pass> createPreSynthesisCheckPass();
 
+/// Create a pass to compute reachability conditions for method calls.
+std::unique_ptr<mlir::Pass> createReachabilityAnalysisPass();
+
+/// Create a pass to detect combinational loops in txn modules.
+std::unique_ptr<mlir::Pass> createCombinationalLoopDetectionPass();
+
+/// Create a pass to validate method attributes for FIRRTL translation.
+std::unique_ptr<mlir::Pass> createMethodAttributeValidationPass();
+
 /// Generate the code for registering analysis passes.
 #define GEN_PASS_REGISTRATION
 #include "sharp/Analysis/Passes.h.inc"
