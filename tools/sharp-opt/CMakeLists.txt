@@ -21,6 +21,8 @@ target_link_libraries(sharp-opt PRIVATE
   ${circt_conversion_libs}
   SharpCore
   SharpTxn
+  SharpAnalysis
+  SharpConversionPasses
   MLIROptLib
   MLIRSupport
   MLIRIR

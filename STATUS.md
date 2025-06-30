@@ -71,13 +71,42 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - Updated CallOp printer/parser to support attribute dictionaries
   - **Note**: Combinational Loop Detection implemented but deprecated pending txn.primitive attribute support
 
+- **Txn-to-FIRRTL Conversion Pass** (2025-06-30)
+  - Created comprehensive FIRRTL operations guide (`docs/firrtl_operations_guide.md`)
+  - Implemented complete conversion pass infrastructure:
+    - Pass registration in `include/sharp/Conversion/Passes.td`
+    - Main implementation in `lib/Conversion/TxnToFIRRTL/`
+    - Integration with sharp-opt tool
+  - Core functionality implemented:
+    - FIRRTL circuit with proper module hierarchy
+    - Module ports for clock, reset, and method interfaces
+    - Will-fire signals with conflict matrix checking
+    - Ready signals for action methods based on conflicts
+    - Node operations for named intermediate values
+    - Wire operations for method results
+    - When blocks for conditional execution
+    - Arithmetic operations support (arith.constant, arith.cmpi)
+    - Type conversion from Sharp to FIRRTL types
+  - Successfully converts Counter/Register examples to FIRRTL
+  - Handles value methods, action methods, and rules
+  - Properly sorts modules based on dependency analysis
+  - Comprehensive test suite in `test/Conversion/TxnToFIRRTL/`:
+    - Basic module conversion tests
+    - Complex conflict matrix scenarios
+    - Control flow with txn.if operations
+    - Method guards and ready signal generation
+    - Edge cases and error handling
+    - Nested module hierarchies
+
 ### 🚧 In Progress
 
-- **Txn-to-FIRRTL Conversion Pass**
-  - [x] Design conversion architecture following Koika approach (docs/txn_to_firrtl.md)
-  - [x] Implement required analysis passes (reachability, loop detection, validation)
-  - [ ] Implement basic module structure translation
-  - [ ] Add will-fire logic generation with CM support
+- **Enhanced Txn-to-FIRRTL Features**
+  - [ ] Add conflict_inside calculation with reachability analysis
+  - [ ] Implement submodule instantiation and port connections
+  - [ ] Handle CallOp translation to connect to submodule methods
+  - [ ] Support proper register/wire state management in primitives
+  - [ ] Add support for more complex data types beyond i1/i32
+  - [ ] Implement primitive method calls (Register.read, Wire.write, etc.)
 
 ### 📋 Planned
 
@@ -133,5 +162,21 @@ Sharp is implementing transaction-based hardware description with conflict matri
 5. ~~Implement primitive operations and constructors~~ ✅
 6. ~~Add actual FIRRTL implementation to primitives~~ ✅
 7. ~~Add pre-synthesis checking for non-synthesizable elements~~ ✅
-8. Implement basic txn-to-FIRRTL conversion pass
-9. Add will-fire logic generation with CM support
+8. ~~Implement basic txn-to-FIRRTL conversion pass~~ ✅
+9. ~~Add will-fire logic generation with CM support~~ ✅
+10. ~~Create comprehensive test suite for conversion pass~~ ✅
+11. Complete advanced conversion features:
+    - Implement submodule instantiation and port connections
+    - Handle CallOp translation for inter-module method calls
+    - Add register/wire primitive integration
+    - Support conflict_inside calculation with reachability
+12. Add command-line integration:
+    - Add --convert-txn-to-firrtl flag to sharp-opt
+    - Support --export-verilog option for end-to-end flow
+13. Implement remaining primitives:
+    - FIFO, Memory, and other hardware primitives
+    - Spec primitives for verification
+14. Performance optimizations:
+    - Optimize will-fire logic generation
+    - Reduce redundant conflict checks
+    - Implement dead code elimination
