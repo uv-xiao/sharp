@@ -93,7 +93,9 @@ def ValueMethodOp : TxnOp<"value_method", [
     OptionalAttr<StrAttr>:$sym_visibility,
     OptionalAttr<DictArrayAttr>:$arg_attrs,
     OptionalAttr<DictArrayAttr>:$res_attrs,
-    OptionalAttr<StrAttr>:$timing
+    OptionalAttr<StrAttr>:$timing,
+    OptionalAttr<StrAttr>:$result,          // Result signal postfix (default="OUT")
+    OptionalAttr<StrAttr>:$prefix           // Method name prefix for translation
   );
   let regions = (region AnyRegion:$body);
 
@@ -126,7 +128,13 @@ def ActionMethodOp : TxnOp<"action_method", [
     OptionalAttr<StrAttr>:$sym_visibility,
     OptionalAttr<DictArrayAttr>:$arg_attrs,
     OptionalAttr<DictArrayAttr>:$res_attrs,
-    OptionalAttr<StrAttr>:$timing
+    OptionalAttr<StrAttr>:$timing,
+    OptionalAttr<StrAttr>:$ready,          // Ready signal postfix (default="RDY")
+    OptionalAttr<StrAttr>:$enable,         // Enable signal postfix (default="EN")
+    OptionalAttr<StrAttr>:$result,         // Result signal postfix (default="OUT")
+    OptionalAttr<StrAttr>:$prefix,         // Method name prefix for translation
+    OptionalAttr<UnitAttr>:$always_ready,  // Method is always ready (removes ready signal)
+    OptionalAttr<UnitAttr>:$always_enable  // Method is always enabled (removes enable signal)
   );
   let regions = (region AnyRegion:$body);
 
@@ -155,7 +163,8 @@ def RuleOp : TxnOp<"rule", [
 
   let arguments = (ins
     SymbolNameAttr:$sym_name,
-    OptionalAttr<StrAttr>:$timing
+    OptionalAttr<StrAttr>:$timing,
+    OptionalAttr<StrAttr>:$prefix
   );
   let regions = (region SizedRegion<1>:$body);
 
@@ -294,7 +303,9 @@ def FirValueMethodOp : TxnOp<"fir_value_method", [
   
   let arguments = (ins
     SymbolNameAttr:$sym_name,
-    TypeAttrOf<FunctionType>:$function_type
+    TypeAttrOf<FunctionType>:$function_type,
+    OptionalAttr<StrAttr>:$result,         // Result signal postfix (default="OUT")
+    OptionalAttr<StrAttr>:$prefix          // Method name prefix for translation
   );
   
   let assemblyFormat = [{
@@ -315,7 +326,13 @@ def FirActionMethodOp : TxnOp<"fir_action_method", [
   
   let arguments = (ins
     SymbolNameAttr:$sym_name,
-    TypeAttrOf<FunctionType>:$function_type
+    TypeAttrOf<FunctionType>:$function_type,
+    OptionalAttr<StrAttr>:$ready,          // Ready signal postfix (default="RDY")
+    OptionalAttr<StrAttr>:$enable,         // Enable signal postfix (default="EN")
+    OptionalAttr<StrAttr>:$result,         // Result signal postfix (default="OUT")
+    OptionalAttr<StrAttr>:$prefix,         // Method name prefix for translation
+    OptionalAttr<UnitAttr>:$always_ready,  // Method is always ready (removes ready signal)
+    OptionalAttr<UnitAttr>:$always_enable  // Method is always enabled (removes enable signal)
   );
   
   let assemblyFormat = [{

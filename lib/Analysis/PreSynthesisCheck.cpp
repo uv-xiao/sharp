@@ -54,6 +54,12 @@ private:
   /// Check if a method has multi-cycle timing
   bool checkMethodForMultiCycle(Operation *method);
   
+  /// Check if operations in a module/primitive are synthesizable
+  bool checkOperationsAreSynthesizable(Operation *op);
+  
+  /// Check if a single operation is from an allowed dialect
+  bool isAllowedOperation(Operation *op);
+  
   /// Mark a module as non-synthesizable
   void markNonSynthesizable(::sharp::txn::ModuleOp module, StringRef reason);
   
@@ -79,11 +85,15 @@ void PreSynthesisCheckPass::runOnOperation() {
   module.walk([&](Operation *op) {
     if (auto primitive = dyn_cast<::sharp::txn::PrimitiveOp>(op)) {
       if (!checkPrimitive(primitive)) {
-        markNonSynthesizable(primitive, "spec primitive type");
+        // The specific error has already been emitted by checkPrimitive
+        // Don't add a generic error message here
       }
     } else if (auto txnModule = dyn_cast<::sharp::txn::ModuleOp>(op)) {
       if (checkForMultiCycle(txnModule)) {
         markNonSynthesizable(txnModule, "contains multi-cycle operations");
+      }
+      if (!checkOperationsAreSynthesizable(txnModule)) {
+        markNonSynthesizable(txnModule, "contains non-synthesizable operations");
       }
     }
   });
@@ -104,6 +114,7 @@ bool PreSynthesisCheckPass::checkPrimitive(::sharp::txn::PrimitiveOp primitive) 
   if (typeAttr != "hw") {
     LLVM_DEBUG(llvm::dbgs() << "Primitive " << primitive.getSymName() 
                             << " has type '" << typeAttr << "' (not 'hw')\n");
+    markNonSynthesizable(primitive, "spec primitive type");
     return false;
   }
   
@@ -113,6 +124,13 @@ bool PreSynthesisCheckPass::checkPrimitive(::sharp::txn::PrimitiveOp primitive) 
     LLVM_DEBUG(llvm::dbgs() << "Primitive " << primitive.getSymName() 
                             << " lacks firrtl.impl attribute\n");
     primitive.emitError() << "synthesizable primitive lacks firrtl.impl attribute";
+    markNonSynthesizable(primitive, "spec primitive type");
+    return false;
+  }
+  
+  // Check operations within the primitive
+  if (!checkOperationsAreSynthesizable(primitive)) {
+    markNonSynthesizable(primitive, "contains non-synthesizable operations");
     return false;
   }
   
@@ -258,6 +276,57 @@ void PreSynthesisCheckPass::propagateNonSynthesizable(ModuleOp topModule) {
       }
     }
   }
+}
+
+bool PreSynthesisCheckPass::checkOperationsAreSynthesizable(Operation *op) {
+  bool allOperationsSynthesizable = true;
+  
+  op->walk([&](Operation *innerOp) {
+    // Skip the parent operation itself
+    if (innerOp == op)
+      return;
+    
+    if (!isAllowedOperation(innerOp)) {
+      innerOp->emitError() << "operation '" << innerOp->getName() 
+                          << "' is not allowed in synthesizable code";
+      allOperationsSynthesizable = false;
+    }
+  });
+  
+  return allOperationsSynthesizable;
+}
+
+bool PreSynthesisCheckPass::isAllowedOperation(Operation *op) {
+  // Get the dialect namespace
+  StringRef dialectName = op->getName().getDialectNamespace();
+  
+  // Allowed dialects for synthesis
+  if (dialectName == "txn" ||        // Sharp Txn dialect
+      dialectName == "firrtl" ||      // FIRRTL dialect for primitives
+      dialectName == "builtin")       // Builtin operations like module
+    return true;
+  
+  // Check specific allowed operations from other dialects
+  // Allow basic arithmetic operations that are commonly used in hardware
+  if (dialectName == "arith") {
+    // Allow arithmetic constants and basic operations
+    StringRef opName = op->getName().getStringRef();
+    if (opName == "arith.constant" ||
+        opName == "arith.addi" || opName == "arith.subi" ||
+        opName == "arith.muli" || opName == "arith.divsi" || opName == "arith.divui" ||
+        opName == "arith.remsi" || opName == "arith.remui" ||
+        opName == "arith.andi" || opName == "arith.ori" || opName == "arith.xori" ||
+        opName == "arith.shli" || opName == "arith.shrsi" || opName == "arith.shrui" ||
+        opName == "arith.cmpi" || opName == "arith.select" ||
+        opName == "arith.extsi" || opName == "arith.extui" || opName == "arith.trunci")
+      return true;
+  }
+  
+  LLVM_DEBUG(llvm::dbgs() << "Operation " << op->getName() 
+                          << " from dialect '" << dialectName 
+                          << "' is not allowed for synthesis\n");
+  
+  return false;
 }
 
 } // end anonymous namespace

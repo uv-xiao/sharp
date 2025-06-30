@@ -49,6 +49,7 @@ def PreSynthesisCheck : Pass<"sharp-pre-synthesis-check", "mlir::ModuleOp"> {
     1. Non-synthesizable (spec) primitives
     2. Multi-cycle rules/methods (timing != "combinational")
     3. Modules that instantiate non-synthesizable submodules or primitives
+    4. Operations from non-synthesizable dialects (only txn, firrtl, and builtin allowed)
 
     The pass marks modules as non-synthesizable by adding a "nonsynthesizable"
     attribute and emits clear error messages for unsupported constructs.

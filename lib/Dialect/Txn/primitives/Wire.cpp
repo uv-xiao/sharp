@@ -51,12 +51,17 @@ namespace txn {
   
   // Create read method declaration (value method)
   // The implementation would connect to the FIRRTL module's read_data port
-  auto readMethod = builder.create<::sharp::txn::FirValueMethodOp>(loc, "read", readType);
+  auto readMethod = builder.create<::sharp::txn::FirValueMethodOp>(
+      loc, builder.getStringAttr("read"), TypeAttr::get(readType),
+      /*result=*/StringAttr(), /*prefix=*/StringAttr());
   readMethod->setAttr("firrtl.port", builder.getStringAttr("read_data"));
   
   // Create write method declaration (action method)
   // The implementation would connect to write_data and assert write_enable
-  auto writeMethod = builder.create<::sharp::txn::FirActionMethodOp>(loc, "write", writeType);
+  auto writeMethod = builder.create<::sharp::txn::FirActionMethodOp>(
+      loc, builder.getStringAttr("write"), TypeAttr::get(writeType),
+      /*ready=*/StringAttr(), /*enable=*/StringAttr(), /*result=*/StringAttr(),
+      /*prefix=*/StringAttr(), /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
   writeMethod->setAttr("firrtl.data_port", builder.getStringAttr("write_data"));
   writeMethod->setAttr("firrtl.enable_port", builder.getStringAttr("write_enable"));
   

@@ -53,17 +53,18 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - Detects non-synthesizable (`spec`) primitives
   - Verifies no multi-cycle rules/methods (timing != "combinational")
   - Propagates non-synthesizable status through module hierarchy
+  - Validates operations are from allowed dialects (txn, firrtl, builtin, arith)
   - Emits clear error messages for unsupported constructs
-  - Test coverage in `test/Analysis/pre-synthesis-check.mlir`
+  - Test coverage in `test/Analysis/pre-synthesis-check.mlir` and `test/Analysis/pre-synthesis-check-ops.mlir`
 
 ### 🚧 In Progress
 
-### 📋 Planned
-
 - **Txn-to-FIRRTL Conversion Pass**
-  - [ ] Design conversion architecture following Koika approach
+  - [x] Design conversion architecture following Koika approach (docs/txn_to_firrtl.md)
   - [ ] Implement basic module structure translation
   - [ ] Add will-fire logic generation with CM support
+
+### 📋 Planned
 
 - **FIRRTL Translation**
   - Reference: Bourgeat-2020-Koika.pdf, implementation at https://github.com/mit-plv/koika/blob/master/coq/CircuitGeneration.v
