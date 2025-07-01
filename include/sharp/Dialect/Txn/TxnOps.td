@@ -47,12 +47,16 @@ def PrimitiveOp : TxnOp<"primitive", [
   let description = [{
     Defines a primitive module that can be either synthesizable (using CIRCT
     dialects) or non-synthesizable (using general MLIR operations).
+    
+    Primitives can be parameterized with type parameters, allowing for
+    generic definitions like Register<T> or Wire<T>.
   }];
 
   let arguments = (ins 
     SymbolNameAttr:$sym_name,
     StrAttr:$type,  // "hw" for synthesizable, "spec" for specification
-    TypeAttr:$interface_type
+    TypeAttr:$interface_type,
+    OptionalAttr<ArrayAttr>:$type_parameters  // Array of TypeAttr for parametric primitives
   );
   let regions = (region SizedRegion<1>:$body);
 
@@ -64,15 +68,21 @@ def InstanceOp : TxnOp<"instance", [Symbol]> {
   let summary = "Module instance declaration";
   let description = [{
     Declares an instance of another module within the current module.
+    
+    For parametric primitives, type arguments can be provided to instantiate
+    the primitive with specific types. For example:
+      %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   }];
 
   let arguments = (ins
     SymbolNameAttr:$sym_name,
-    FlatSymbolRefAttr:$module_name
+    FlatSymbolRefAttr:$module_name,
+    OptionalAttr<ArrayAttr>:$type_arguments  // Array of TypeAttr for instantiating parametric modules
   );
   let results = (outs Txn_ModuleType:$result);
 
-  let assemblyFormat = "$sym_name `of` $module_name attr-dict `:` type($result)";
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
 }
 
 //===----------------------------------------------------------------------===//

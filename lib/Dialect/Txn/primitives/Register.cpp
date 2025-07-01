@@ -38,7 +38,8 @@ namespace txn {
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
                                                             StringAttr::get(builder.getContext(), name),
                                                             builder.getStringAttr("hw"), 
-                                                            TypeAttr::get(moduleType));
+                                                            TypeAttr::get(moduleType),
+                                                            /*type_parameters=*/ArrayAttr());
   
   // Create a new builder for the primitive body
   OpBuilder::InsertionGuard guard(builder);

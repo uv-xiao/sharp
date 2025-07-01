@@ -2,67 +2,103 @@
 
 ## Description
 
-This framework aims to bridge description, optimization, and implementation of hardware, architecture, and software.
+Sharp is a transaction-based hardware description language built on MLIR that enables conflict-free hardware design through explicit conflict matrices and transaction-level modeling. Inspired by Bluespec and Koika, Sharp provides a high-level abstraction for hardware description while ensuring synthesizability to FIRRTL and Verilog.
 
-The short-term plan is to develop individual IRs for architecture and hardware. They are implemented as MLIR dialects and interact with CIRCT for RTL generation and other tasks.
+The project implements custom MLIR dialects that integrate with CIRCT for RTL generation, offering a modern approach to hardware design with built-in conflict detection and resolution.
 
 > [!NOTE]
-> Ultimate Goal: Unified IR for multi-purpose architecture design, synthesized for hardware and programming model generation. 
+> **Key Features:**
+> - Transaction-level modeling with explicit conflict matrices
+> - Automatic conflict detection and resolution
+> - Parametric primitive types (Register<T>, Wire<T>)
+> - FIRRTL generation with will-fire logic
+> - Comprehensive analysis passes for synthesizability
 
 ## Quick Start
 
 ```bash
 # Install pixi and build Sharp
 curl -fsSL https://pixi.sh/install.sh | bash
-git clone <your-repo-url> sharp
+git clone https://github.com/xuyang2/sharp.git
 cd sharp
 pixi install
 pixi run build
 
-# Run sharp-opt
-./build/bin/sharp-opt <input.mlir>
+# Run a simple example
+./build/bin/sharp-opt test/Dialect/Txn/basic.mlir
+
+# Convert Txn to FIRRTL
+./build/bin/sharp-opt --convert-txn-to-firrtl test/Conversion/TxnToFIRRTL/counter.mlir
+```
+
+## Example: Simple Counter
+
+```mlir
+txn.module @Counter {
+  // Instantiate a parametric register
+  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  
+  txn.action_method @increment() {
+    %current = txn.call @count::@read() : () -> i32
+    %one = arith.constant 1 : i32
+    %next = arith.addi %current, %one : i32
+    txn.call @count::@write(%next) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.value_method @getCount() -> i32 {
+    %val = txn.call @count::@read() : () -> i32
+    txn.return %val : i32
+  }
+  
+  txn.schedule [@increment, @getCount] {
+    conflict_matrix = {}
+  }
+}
 ```
 
 ## Development with VSCode
 
-The project includes comprehensive VSCode configuration for an optimal development experience:
+The project includes comprehensive VSCode configuration:
 
-1. **Open as Workspace** (Recommended):
-   ```bash
-   code .vscode/sharp.code-workspace
-   ```
-   This provides a multi-root workspace with Sharp, CIRCT, MLIR, and LLVM folders.
+```bash
+# Open as workspace (recommended)
+code .vscode/sharp.code-workspace
 
-2. **Open as Folder**:
-   ```bash
-   code .
-   ```
-   Uses the settings in `.vscode/settings.json` for single-folder mode.
+# Or use the development script
+./dev-vscode.sh
+```
 
-The VSCode configuration includes:
+Features:
 - C/C++ IntelliSense with clang-20
-- CMake integration with Ninja
 - MLIR/TableGen language support
 - Debugging configurations for sharp-opt
-- Code formatting with clang-format
-- Python environment for MLIR/CIRCT bindings
-- Build tasks integration with pixi
-
-Install recommended extensions when prompted for the best experience.
+- Integrated build tasks with pixi
 
 ## Documentation
 
-- **[USAGE.md](./USAGE.md)** - Comprehensive guide for setup, building, and using Sharp
-- **[docs/](./docs/)** - Additional technical documentation
+- **[STATUS.md](./STATUS.md)** - Current implementation status and roadmap
+- **[USAGE.md](./USAGE.md)** - Comprehensive setup and usage guide
+- **[docs/txn_to_firrtl.md](./docs/txn_to_firrtl.md)** - Txn to FIRRTL conversion details
+- **[docs/txn.md](./docs/txn.md)** - Transaction dialect specification
 
 ## Project Status
 
-- ✅ Build system with clang-20 and unified LLVM/MLIR/CIRCT build
-- ✅ sharp-opt tool successfully built and working
-- ✅ Initial Sharp Core dialect with basic operations
-- ✅ Python bindings following CIRCT's pattern
-- ⚠️ Sharp dialect parser needs minor adjustments
-- ⚠️ Python bindings have a runtime issue under investigation
-- 🚧 More dialect operations and transformations in development
+### ✅ Completed
+- Txn dialect with modules, methods, rules, and scheduling
+- Conflict matrix support with inference analysis
+- Complete Txn-to-FIRRTL conversion pass
+- Parametric primitive types (Register<T>, Wire<T>)
+- Automatic primitive instantiation
+- 45/45 tests passing
 
-See [USAGE.md](./USAGE.md#current-status) for detailed status information.
+### 🚧 In Progress
+- Additional hardware primitives (FIFO, Memory)
+- Verilog export through CIRCT
+
+### 📋 Planned
+- Formal verification primitives
+- Performance optimization passes
+- IDE language server support
+
+See [STATUS.md](./STATUS.md) for detailed implementation status.

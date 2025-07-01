@@ -38,7 +38,8 @@ namespace txn {
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc,
                                                             StringAttr::get(builder.getContext(), name),
                                                             builder.getStringAttr("hw"),
-                                                            TypeAttr::get(moduleType));
+                                                            TypeAttr::get(moduleType),
+                                                            /*type_parameters=*/ArrayAttr());
   
   // Create a new builder for the primitive body
   OpBuilder::InsertionGuard guard(builder);
@@ -114,6 +115,9 @@ circt::firrtl::FModuleOp createWireFIRRTLModule(OpBuilder &builder, Location loc
   ports.push_back({builder.getStringAttr("read_data"), 
                    firrtlType,
                    circt::firrtl::Direction::Out, {}, loc});
+  ports.push_back({builder.getStringAttr("read_enable"), 
+                   circt::firrtl::UIntType::get(builder.getContext(), 1),
+                   circt::firrtl::Direction::In, {}, loc});
   ports.push_back({builder.getStringAttr("write_data"), 
                    firrtlType,
                    circt::firrtl::Direction::In, {}, loc});
@@ -139,8 +143,9 @@ circt::firrtl::FModuleOp createWireFIRRTLModule(OpBuilder &builder, Location loc
     [[maybe_unused]] auto clock = firrtlBody->getArgument(0);
     [[maybe_unused]] auto reset = firrtlBody->getArgument(1);
     auto readData = firrtlBody->getArgument(2);
-    auto writeData = firrtlBody->getArgument(3);
-    auto writeEnable = firrtlBody->getArgument(4);
+    [[maybe_unused]] auto readEnable = firrtlBody->getArgument(3);
+    auto writeData = firrtlBody->getArgument(4);
+    auto writeEnable = firrtlBody->getArgument(5);
     
     // Create wire
     auto wireOp = builder.create<circt::firrtl::WireOp>(

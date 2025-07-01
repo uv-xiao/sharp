@@ -4,239 +4,114 @@ This document tracks the implementation progress of features outlined in PLAN.md
 
 ## Overview
 
-Sharp is implementing transaction-based hardware description with conflict matrix support and FIRRTL/Verilog generation capabilities.
+Sharp is a transaction-based hardware description language with conflict matrix support and FIRRTL/Verilog generation capabilities. The project implements custom MLIR dialects for hardware description using transaction-level modeling inspired by Bluespec and Koika.
 
 ## Feature Status
 
 ### ✅ Completed
+
+#### Core Infrastructure
 - Basic Sharp Core dialect with constant operations
 - Sharp Txn dialect with modules, methods, rules, and scheduling
 - MLIR infrastructure setup with CIRCT integration
 - Build system with Pixi package manager
-- Testing infrastructure with lit/FileCheck
-- **Conflict Matrix (CM) on schedule operations** (2025-06-29)
-  - Added CM dictionary attribute to txn.schedule operations (not modules)
+- Testing infrastructure with lit/FileCheck (45/45 tests passing)
+
+#### Txn Dialect Features (2025-06-29)
+- **Conflict Matrix (CM) on schedule operations**
+  - Added CM dictionary attribute to txn.schedule operations
   - Uses ConflictRelation enum: SB=0, SA=1, C=2, CF=3
   - Supports action-to-action conflict specifications
-- **Timing attributes for rules/methods** (2025-06-29)
+- **Timing attributes for rules/methods**
   - Added timing string attribute: "combinational" | "static(n)" | "dynamic"
   - Integrated into rule and method operations
-- **All tests passing** (2025-06-29)
-  - Fixed module parser to use TableGen-generated assembly format
-  - Updated all test files to match current implementation
-  - Removed FIRRTL-dependent tests pending dialect registration
-- **Conflict Matrix Inference Pass** (2025-06-29)
+- **Primitive Operations and Infrastructure**
+  - Added FirValueMethodOp, FirActionMethodOp, ClockByOp, ResetByOp operations
+  - Implemented Register and Wire primitive constructors
+  - Separated txn primitive interface from FIRRTL implementation
+  - Added bridging attributes (firrtl.port, firrtl.data_port, firrtl.enable_port)
+
+#### Analysis Passes (2025-06-29 to 2025-06-30)
+- **Conflict Matrix Inference Pass**
   - Implemented as analysis pass in `lib/Analysis/ConflictMatrixInference.cpp`
   - Supports all inference rules from PLAN.md
   - Uses StringMap for efficient conflict storage
-  - Test coverage in `test/Analysis/conflict-matrix-inference.mlir`
-- **FIRRTL Primitive Structure** (2025-06-29)
-  - Created directory structure under `lib/Dialect/Txn/primitives/`
-  - Added FIRRTL module definitions for Register and Wire primitives
-  - Prepared for txn-to-FIRRTL conversion implementation
-- **Primitive Operations and Constructors** (2025-06-29)
-  - Added FirValueMethodOp, FirActionMethodOp, ClockByOp, ResetByOp operations
-  - Implemented Register and Wire primitive constructors in C++
-  - Register: read CF write conflict matrix
-  - Wire: read SB write conflict matrix
-  - Test coverage in `test/Dialect/Txn/primitives.mlir`
-
-- **Txn Primitive Infrastructure** (2025-06-29)
-  - Separated txn primitive interface from FIRRTL implementation
-  - Created separate constructors for primitives and FIRRTL modules
-  - Added bridging attributes (firrtl.port, firrtl.data_port, firrtl.enable_port)
-  - Enabled gtest support in LLVM build for unit testing
-  - Comprehensive documentation in `docs/txn_primitive.md`
-
-- **Pre-synthesis Checking Analysis** (2025-06-29)
-  - Implemented analysis pass in `lib/Analysis/PreSynthesisCheck.cpp`
+- **Pre-synthesis Checking Analysis**
   - Detects non-synthesizable (`spec`) primitives
-  - Verifies no multi-cycle rules/methods (timing != "combinational")
-  - Propagates non-synthesizable status through module hierarchy
-  - Validates operations are from allowed dialects (txn, firrtl, builtin, arith)
-  - Emits clear error messages for unsupported constructs
-  - Test coverage in `test/Analysis/pre-synthesis-check.mlir` and `test/Analysis/pre-synthesis-check-ops.mlir`
+  - Verifies no multi-cycle rules/methods
+  - Validates operations are from allowed dialects
+- **Reachability Analysis**
+  - Computes reachability conditions for method calls within actions
+  - Tracks control flow through txn.if operations
+  - Generates hardware values using arith operations
+- **Method Attribute Validation**
+  - Validates signal name uniqueness for FIRRTL translation
+  - Checks always_ready/always_enable attribute constraints
 
-- **Txn-to-FIRRTL Analysis Passes** (2025-06-30)
-  - Implemented analysis passes per `docs/txn_to_firrtl.md`:
-  - **Reachability Analysis** (`lib/Analysis/ReachabilityAnalysis.cpp`)
-    - Computes reachability conditions for method calls within actions
-    - Tracks control flow through txn.if operations
-    - Generates symbolic condition expressions (e.g., "cond_0", "!cond_1 && cond_2")
-    - Attaches reachability_condition attribute to txn.call operations
-  - **Method Attribute Validation** (`lib/Analysis/MethodAttributeValidation.cpp`)
-    - Validates signal name uniqueness for FIRRTL translation
-    - Checks always_ready/always_enable attribute constraints
-    - Ensures no conflicts with module, instance, or other method names
-  - Updated CallOp printer/parser to support attribute dictionaries
-  - **Note**: Combinational Loop Detection implemented but deprecated pending txn.primitive attribute support
-
-- **Txn-to-FIRRTL Conversion Pass** (2025-06-30, 2025-07-01)
-  - Created comprehensive FIRRTL operations guide (`docs/firrtl_operations_guide.md`)
-  - Implemented complete conversion pass infrastructure:
-    - Pass registration in `include/sharp/Conversion/Passes.td`
-    - Main implementation in `lib/Conversion/TxnToFIRRTL/`
-    - Integration with sharp-opt tool
-  - Core functionality implemented:
-    - FIRRTL circuit with proper module hierarchy
-    - Module ports for clock, reset, and method interfaces
-    - Will-fire signals with conflict matrix checking
-    - Ready signals for action methods based on conflicts
-    - Node operations for named intermediate values
-    - Wire operations for method results
-    - When blocks for conditional execution
-    - Arithmetic operations support (arith.constant, arith.cmpi)
-    - Type conversion from Sharp to FIRRTL types
-  - Successfully converts Counter/Register examples to FIRRTL
-  - Handles value methods, action methods, and rules
-  - Properly sorts modules based on dependency analysis
-  - Comprehensive test suite in `test/Conversion/TxnToFIRRTL/`:
-    - Basic module conversion tests
-    - Complex conflict matrix scenarios
-    - Control flow with txn.if operations
-    - Method guards and ready signal generation
-    - Edge cases and error handling
-    - Nested module hierarchies
-  - Fixed implementation to erase original Txn modules after conversion
-  - All tests passing (30/30) after fixing test CHECK patterns
-
-- **Extended Type Support** (2025-07-01)
-  - Added support for vector types in Txn-to-FIRRTL conversion
-  - Implemented proper type conversion for FIRRTL vector types
-  - Vector types convert to `!firrtl.vector<element_type, size>`
-  - Already supported: integers of any width (i8, i16, i32, i64, etc.)
-  - Test coverage in `test/Conversion/TxnToFIRRTL/wider-types.mlir` and `vector-types.mlir`
-  - All tests passing (32/32)
-
-- **Conflict Inside Detection** (2025-07-01)
-  - Implemented infrastructure for detecting internal conflicts within actions
-  - Added static analysis to identify actions with potentially conflicting method calls
-  - Generated simplified conflict_inside logic in FIRRTL for actions with conflicts
-  - For actions with conflicting calls, generates AND/NOT logic to prevent execution
-  - Test coverage in `test/Conversion/TxnToFIRRTL/simple-conflict-inside.mlir`
-  - All 34 tests passing
-  - Note: Full dynamic reachability analysis with conditional execution paths planned for future enhancement
-
-- **Static and Dynamic Will-Fire Modes** (2025-07-01)
-  - Implemented both static and dynamic will-fire logic generation modes as specified in `docs/txn_to_firrtl.md` section 3
-  - **Static Mode** (conservative): `wf[action] = enabled[action] && !conflicts_with_earlier[action] && !conflict_inside[action]`
-  - **Dynamic Mode** (precise): `wf[action] = enabled[action] && AND{for every m in action, NOT(reach(m, action) && conflict_with_earlier(m))}`
-  - Added command-line option `--convert-txn-to-firrtl="will-fire-mode=static|dynamic"` to choose between modes
-  - Proper action-level conflict detection: infers conflicts between actions from method-level conflicts in conflict matrix
-  - In static mode: if action A calls method M1, action B calls method M2, and M1 conflicts with M2, then A conflicts with B
-  - Static mode generates logic preventing later actions from firing if earlier conflicting actions fire
-  - Dynamic mode uses reachability conditions for more precise conflict detection
-  - Test coverage in `test/Conversion/TxnToFIRRTL/will-fire-modes.mlir` and `will-fire-static-mode.mlir`
-  - All will-fire mode tests passing (40/41 total tests passing - 1 unrelated test failure)
-
-- **Enhanced Reachability Analysis and CallOp** (2025-07-01)
-  - Modified CallOp to support optional condition operand for reachability
-  - Updated CallOp syntax: `txn.call @method if %cond : <type> then (...) : ...`
-  - Condition type is unrestricted (AnyType) to support complex expressions
-  - Improved ReachabilityAnalysis pass to generate hardware values (using arith operations)
-  - Implements proper dominance handling with insertion point management
-  - Generates arith.andi, arith.xori operations for complex conditions
-  - Modified TxnToFIRRTL conversion to use condition operands for conflict_inside calculation
-  - Added pre-pass to convert arith operations to FIRRTL before conflict calculation
-  - Implements proper dynamic conflict detection: `OR(conflict(m1,m2) && reach(m1) && reach(m2))`
-  - Added support for arith::AndIOp, arith::XOrIOp conversion to FIRRTL
-  - Test coverage in reachability-analysis.mlir and dominance-issue-example.mlir
-  - 38 tests total, with conflict_inside support for:
-    - Action methods with block arguments as conditions (conflict-inside-method-args.mlir)
-    - Rules with constant conditions (conflict-inside-rule-simple.mlir)
-    - Simple unconditional conflicts (conflict-inside-simple.mlir)
-    - Complex block argument conditions (conflict-inside-block-args.mlir)
-  - **Block Arguments in Reachability Conditions** (2025-07-01)
-    - Implemented special handling for method arguments used as reachability conditions
-    - Fixed FIRRTL port creation to support multiple arguments (OUT_arg0, OUT_arg1, etc.)
-    - Added global block argument mapping before pre-pass conversion
-    - Block arguments properly converted to FIRRTL ports throughout conflict_inside calculation
-    - All block argument test cases now passing
-
-### 🚧 In Progress
-
-- **Enhanced Txn-to-FIRRTL Features**
-  - [x] Add conflict_inside detection framework (2025-07-01)
-  - [x] Implement submodule instantiation and port connections (already working)
-  - [x] Handle CallOp translation to connect to submodule methods (already working)
-  - [ ] Support proper register/wire state management in primitives
-  - [x] Add support for more complex data types (vectors, wider integers)
-  - [ ] Implement primitive method calls (Register.read, Wire.write, etc.)
-  - [x] Full conflict_inside with conditional reachability (2025-07-01)
-    - Implemented dynamic conflict detection using condition operands
-    - Added conversion for arith operations to FIRRTL
-    - Some edge cases with block arguments still need refinement
+#### Txn-to-FIRRTL Conversion (2025-06-30 to 2025-07-01)
+- **Complete Conversion Pass Implementation**
+  - FIRRTL circuit generation with proper module hierarchy
+  - Module ports for clock, reset, and method interfaces
+  - Will-fire signals with conflict matrix checking
+  - Ready signals for action methods based on conflicts
+  - Submodule instantiation and port connections
+  - Method call translation to FIRRTL connections
+  - Type conversion supporting integers of any width and vectors
+  
+- **Advanced Features**
+  - **Conflict Inside Detection**: Detects and prevents internal conflicts within actions
+  - **Static and Dynamic Will-Fire Modes**: Two modes for conflict resolution logic
+  - **Enhanced CallOp**: Support for conditional method calls with reachability
+  - **Block Argument Handling**: Proper conversion of method arguments to FIRRTL ports
+  
+- **Automatic Primitive Construction with Parametric Typing** (2025-07-01)
+  - Primitives (Register, Wire) created on-demand when referenced
+  - Proper parametric typing support: `@instance of @Module<type1, type2>`
+  - Generates unique FIRRTL modules for each type instantiation
+  - Fixed circuit naming to identify true top-level modules
+  - Complete test coverage with all 45 tests passing
 
 ### 📋 Planned
 
-- **FIRRTL Translation**
-  - Reference: Bourgeat-2020-Koika.pdf, implementation at https://github.com/mit-plv/koika/blob/master/coq/CircuitGeneration.v
-  - Synthesizable primitives:
-    - Place in `lib/Dialect/Txn/primitives/`
-    - Initial primitives needed: Register, Wire
-  - Implement txn-to-FIRRTL conversion pass extending Koika translation
-  - Extended will-fire (wf) logic:
-    - Consider general conflicts from conflict matrix (not just register R/W)
-    - Prevent firing when previous action conflicts per CM
-    - Return false if rule calls same action method multiple times
-  - Bottom-up translation order (submodules first)
-
-- **Txn-level combinational loop detection**
-  - current implementation is not correct, since we don't have attributes in `txn.primitive` to define combinational paths.
+- **Additional Primitives**
+  - FIFO, Memory, and other common hardware primitives
+  - Spec primitives for formal verification
   
 - **Verilog Export**
-  - Add sharp-opt command-line options for triggering translation
-  - Support different export-verilog options from CIRCT
   - Integration with CIRCT's export-verilog infrastructure
+  - Command-line options for different export modes
+  
+- **Txn-level Combinational Loop Detection**
+  - Requires attributes in txn.primitive to define combinational paths
+  
+- **Performance Optimizations**
+  - Optimize will-fire logic generation
+  - Reduce redundant conflict checks
+  - Implement dead code elimination
 
 ### 🚫 Known Limitations
 - Python bindings have runtime issues
 - Multi-cycle operations not yet supported in translation
 - Nonsynthesizable primitives will fail translation
-- ~~Block arguments used as reachability conditions require special handling in TxnToFIRRTL conversion~~ ✅ **COMPLETED** (2025-07-01)
-
-## Implementation Notes
-
-### Conflict Matrix Inference Rules
-1. Any action conflicts (C) with itself
-2. Actions that are both SA and SB conflict (C)
-3. Actions calling same action method of same instance conflict (C)
-4. Conflict propagation through method calls:
-   - m0 SA m1 => a0 SA a1
-   - m0 SB m1 => a0 SB a1
-   - m0 C m1 => a0 C a1
-5. Default to conflict-free (CF) if relationship cannot be determined
-
-### Translation Architecture
-- Bottom-up translation: submodules before parent modules
-- Will-fire logic must consider:
-  - Conflict matrix relationships
-  - Register read/write conflicts
-  - Multiple calls to same action method (always conflicts)
 
 ## Next Steps
-1. ~~Implement conflict matrix attributes in TxnOps.td~~ ✅
-2. ~~Add timing attributes to rule and method operations~~ ✅
-3. ~~Create FIRRTL primitive module templates~~ ✅
-4. ~~Design conflict matrix inference algorithm~~ ✅
-5. ~~Implement primitive operations and constructors~~ ✅
-6. ~~Add actual FIRRTL implementation to primitives~~ ✅
-7. ~~Add pre-synthesis checking for non-synthesizable elements~~ ✅
-8. ~~Implement basic txn-to-FIRRTL conversion pass~~ ✅
-9. ~~Add will-fire logic generation with CM support~~ ✅
-10. ~~Create comprehensive test suite for conversion pass~~ ✅
-11. Complete advanced conversion features:
-    - Implement submodule instantiation and port connections
-    - Handle CallOp translation for inter-module method calls
-    - Add register/wire primitive integration
-    - Support conflict_inside calculation with reachability
-12. Add command-line integration:
-    - Add --convert-txn-to-firrtl flag to sharp-opt
-    - Support --export-verilog option for end-to-end flow
-13. Implement remaining primitives:
-    - FIFO, Memory, and other hardware primitives
-    - Spec primitives for verification
-14. Performance optimizations:
-    - Optimize will-fire logic generation
-    - Reduce redundant conflict checks
-    - Implement dead code elimination
+
+1. **Implement Additional Primitives**
+   - Create FIFO primitive with enqueue/dequeue methods
+   - Add Memory primitive with read/write ports
+   - Design spec primitives for verification
+   
+2. **Verilog Export Pipeline**
+   - Add --export-verilog flag to sharp-opt
+   - Integrate with CIRCT's Verilog emission
+   - Test end-to-end hardware generation
+   
+3. **Enhanced Analysis**
+   - Implement combinational loop detection
+   - Add performance analysis passes
+   - Create resource utilization estimates
+   
+4. **Tooling and Integration**
+   - Fix Python bindings for programmatic access
+   - Create VSCode/IDE language support
+   - Add debugging and visualization tools

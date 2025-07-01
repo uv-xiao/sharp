@@ -25,6 +25,7 @@
 #include "sharp/Dialect/Txn/TxnDialect.h"
 #include "sharp/Dialect/Txn/TxnOps.h"
 #include "sharp/Dialect/Txn/TxnTypes.h"
+#include "sharp/Dialect/Txn/TxnPrimitives.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Debug.h"
@@ -559,6 +560,76 @@ static bool hasConflictingCalls(Operation *action, ConversionContext &ctx) {
   return false;
 }
 
+/// Check if a module is a known primitive (Register, Wire, etc.)
+static bool isKnownPrimitive(StringRef moduleName) {
+  return moduleName == "Register" || moduleName == "Wire";
+}
+
+/// Get the data type for a parametric primitive instance
+static Type getInstanceDataType(::sharp::txn::InstanceOp inst) {
+  // Check if the instance has type arguments
+  auto typeArgsOpt = inst.getTypeArguments();
+  if (!typeArgsOpt)
+    return nullptr;
+    
+  auto typeArgs = typeArgsOpt.value();
+  if (typeArgs.empty())
+    return nullptr;
+  
+  // For now, assume single type parameter
+  if (auto typeAttr = dyn_cast<TypeAttr>(typeArgs[0]))
+    return typeAttr.getValue();
+    
+  return nullptr;
+}
+
+/// Create a primitive FIRRTL module if it doesn't exist
+static circt::firrtl::FModuleOp getOrCreatePrimitiveFIRRTLModule(
+    StringRef primitiveType,
+    Type dataType,
+    ::circt::firrtl::CircuitOp circuit,
+    OpBuilder &builder) {
+  
+  // Generate a unique module name based on primitive type and data type
+  std::string baseName;
+  llvm::raw_string_ostream nameStream(baseName);
+  nameStream << primitiveType << "_";
+  dataType.print(nameStream);
+  nameStream.flush();
+  // Replace invalid characters in module name
+  std::replace(baseName.begin(), baseName.end(), '<', '_');
+  std::replace(baseName.begin(), baseName.end(), '>', '_');
+  
+  // The primitive constructors add "_impl" suffix, so check for that name
+  std::string moduleName = baseName + "_impl";
+  
+  // Check if module already exists
+  circt::firrtl::FModuleOp existingModule;
+  circuit.walk([&](circt::firrtl::FModuleOp fmodule) {
+    if (fmodule.getName() == moduleName) {
+      existingModule = fmodule;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  
+  if (existingModule) {
+    return existingModule;
+  }
+  
+  // Create the primitive module
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPointToEnd(circuit.getBodyBlock());
+  
+  if (primitiveType == "Register") {
+    return ::mlir::sharp::txn::createRegisterFIRRTLModule(builder, builder.getUnknownLoc(), baseName, dataType);
+  } else if (primitiveType == "Wire") {
+    return ::mlir::sharp::txn::createWireFIRRTLModule(builder, builder.getUnknownLoc(), baseName, dataType);
+  }
+  
+  return nullptr;
+}
+
 /// Convert method/rule body operations to FIRRTL
 static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
   // Process all blocks in the region
@@ -965,9 +1036,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   ctx.currentFIRRTLModule = firrtlModule;
   ctx.firrtlBuilder.setInsertionPointToStart(firrtlModule.getBodyBlock());
   
-  // Get clock and reset signals
-  Value clock = firrtlModule.getBodyBlock()->getArgument(0);
-  Value reset = firrtlModule.getBodyBlock()->getArgument(1);
+  // Get clock and reset signals - they'll be used when connecting instances
   
   // Create submodule instances
   DenseMap<StringRef, ::circt::firrtl::InstanceOp> firrtlInstances;
@@ -979,8 +1048,10 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     ::circt::firrtl::FModuleOp targetFIRRTLModule;
     
     // Look for the FIRRTL module in the circuit
+    // For primitives, the FIRRTL module might have "_impl" suffix
     circuit.walk([&](::circt::firrtl::FModuleOp fmodule) {
-      if (fmodule.getName() == targetModuleName) {
+      if (fmodule.getName() == targetModuleName || 
+          fmodule.getName() == (targetModuleName + "_impl").str()) {
         targetFIRRTLModule = fmodule;
         return WalkResult::interrupt();
       }
@@ -988,8 +1059,24 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     });
     
     if (!targetFIRRTLModule) {
-      // Module not yet converted - this shouldn't happen with proper ordering
-      return;
+      // Check if this is a primitive module with type arguments
+      if (isKnownPrimitive(targetModuleName)) {
+        // Get the data type from instance type arguments
+        Type dataType = getInstanceDataType(txnInst);
+        if (!dataType) {
+          txnInst.emitError("Parametric primitive instance missing type arguments: ") << targetModuleName;
+          return;
+        }
+        
+        targetFIRRTLModule = getOrCreatePrimitiveFIRRTLModule(targetModuleName, dataType, circuit, ctx.firrtlBuilder);
+        if (!targetFIRRTLModule) {
+          txnInst.emitError("Failed to create primitive FIRRTL module for: ") << targetModuleName;
+          return;
+        }
+      } else {
+        // Module not yet converted - this shouldn't happen with proper ordering
+        return;
+      }
     }
     
     // Create the instance - use the simpler FModuleLike constructor
@@ -1340,7 +1427,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     
     // Generate will-fire signal
     Operation *actionForWF = actionMap[name];
-    Value wf = generateWillFire(name, effectiveEnabled, scheduleOrder, ctx, willFireMode, actionForWF, &actionMap);
+    generateWillFire(name, effectiveEnabled, scheduleOrder, ctx, willFireMode, actionForWF, &actionMap);
   }
   
   // Convert value methods
@@ -1591,9 +1678,27 @@ struct TxnToFIRRTLConversionPass
     OpBuilder builder(ctx);
     builder.setInsertionPointToStart(module.getBody());
     
-    // Find the top-level module name (first module in dependency order)
+    // Find the top-level module name (module that is not instantiated by others)
     StringRef topModuleName = "Top";
-    if (!sortedModules.empty()) {
+    
+    // Build a set of modules that are instantiated by others
+    DenseSet<StringRef> instantiatedModules;
+    for (auto txnModule : sortedModules) {
+      txnModule.walk([&](::sharp::txn::InstanceOp inst) {
+        instantiatedModules.insert(inst.getModuleName());
+      });
+    }
+    
+    // Find the first module that is not instantiated by others (true top module)
+    for (auto txnModule : sortedModules) {
+      if (!instantiatedModules.count(txnModule.getName())) {
+        topModuleName = txnModule.getName();
+        break;
+      }
+    }
+    
+    // If all modules are instantiated (circular), use the last one in dependency order
+    if (topModuleName == "Top" && !sortedModules.empty()) {
       topModuleName = sortedModules.back().getName();
     }
     

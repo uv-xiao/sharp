@@ -47,11 +47,28 @@ ParseResult PrimitiveOp::parse(OpAsmParser &parser, OperationState &result) {
   StringAttr nameAttr;
   StringAttr typeAttr;
   TypeAttr interfaceTypeAttr;
+  SmallVector<Attribute> typeParams;
   
   // Parse symbol name
   if (parser.parseSymbolName(nameAttr, mlir::SymbolTable::getSymbolAttrName(),
                             result.attributes))
     return failure();
+    
+  // Parse optional type parameters: <T1, T2, ...>
+  if (succeeded(parser.parseOptionalLess())) {
+    do {
+      StringRef paramName;
+      if (parser.parseKeyword(&paramName))
+        return failure();
+      typeParams.push_back(parser.getBuilder().getStringAttr(paramName));
+    } while (succeeded(parser.parseOptionalComma()));
+    
+    if (parser.parseGreater())
+      return failure();
+      
+    result.addAttribute("type_parameters", 
+                       parser.getBuilder().getArrayAttr(typeParams));
+  }
     
   // Parse 'type = "hw"' or 'type = "spec"'
   if (parser.parseKeyword("type") || parser.parseEqual())
@@ -92,6 +109,18 @@ ParseResult PrimitiveOp::parse(OpAsmParser &parser, OperationState &result) {
 
 void PrimitiveOp::print(OpAsmPrinter &p) {
   p << " @" << getSymName();
+  
+  // Print type parameters if present
+  if (auto typeParamsOpt = getTypeParameters()) {
+    auto typeParams = typeParamsOpt.value();
+    p << "<";
+    llvm::interleaveComma(typeParams, p, [&](Attribute attr) {
+      if (auto strAttr = dyn_cast<StringAttr>(attr))
+        p << strAttr.getValue();
+    });
+    p << ">";
+  }
+  
   p << " type = \"" << getType() << "\"";
   p << " interface = ";
   p.printType(getInterfaceType());
@@ -99,7 +128,8 @@ void PrimitiveOp::print(OpAsmPrinter &p) {
   p.printRegion(getBody(), /*printEntryBlockArgs=*/false,
                 /*printBlockTerminators=*/true);
   p.printOptionalAttrDict((*this)->getAttrs(), 
-                         {mlir::SymbolTable::getSymbolAttrName(), "type", "interface_type"});
+                         {mlir::SymbolTable::getSymbolAttrName(), "type", 
+                          "interface_type", "type_parameters"});
 }
 
 LogicalResult PrimitiveOp::verify() {
@@ -108,6 +138,86 @@ LogicalResult PrimitiveOp::verify() {
   if (type != "hw" && type != "spec")
     return emitOpError("type must be either 'hw' or 'spec'");
   
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// InstanceOp
+//===----------------------------------------------------------------------===//
+
+ParseResult InstanceOp::parse(OpAsmParser &parser, OperationState &result) {
+  StringAttr nameAttr;
+  FlatSymbolRefAttr moduleRef;
+  SmallVector<Attribute> typeArgs;
+  Type resultType;
+
+  // Parse: @instance_name
+  if (parser.parseSymbolName(nameAttr, mlir::SymbolTable::getSymbolAttrName(),
+                            result.attributes))
+    return failure();
+
+  // Parse: of
+  if (parser.parseKeyword("of"))
+    return failure();
+
+  // Parse: @ModuleName
+  if (parser.parseAttribute(moduleRef, "module_name", result.attributes))
+    return failure();
+
+  // Parse optional type arguments: <type1, type2, ...>
+  if (succeeded(parser.parseOptionalLess())) {
+    do {
+      TypeAttr typeAttr;
+      Type type;
+      if (parser.parseType(type))
+        return failure();
+      typeAttr = TypeAttr::get(type);
+      typeArgs.push_back(typeAttr);
+    } while (succeeded(parser.parseOptionalComma()));
+    
+    if (parser.parseGreater())
+      return failure();
+      
+    result.attributes.push_back(parser.getBuilder().getNamedAttr(
+        "type_arguments", parser.getBuilder().getArrayAttr(typeArgs)));
+  }
+
+  // Parse optional attributes
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  // Parse: : type
+  if (parser.parseColon() || parser.parseType(resultType))
+    return failure();
+
+  result.addTypes(resultType);
+  return success();
+}
+
+void InstanceOp::print(OpAsmPrinter &p) {
+  p << " @" << getSymName() << " of ";
+  p.printAttribute(getModuleNameAttr());
+  
+  // Print type arguments if present
+  if (auto typeArgsOpt = getTypeArguments()) {
+    auto typeArgs = typeArgsOpt.value();
+    p << "<";
+    llvm::interleaveComma(typeArgs, p, [&](Attribute attr) {
+      if (auto typeAttr = dyn_cast<TypeAttr>(attr))
+        p.printType(typeAttr.getValue());
+    });
+    p << ">";
+  }
+  
+  p.printOptionalAttrDict((*this)->getAttrs(), 
+                         {mlir::SymbolTable::getSymbolAttrName(), 
+                          "module_name", "type_arguments"});
+  p << " : ";
+  p.printType(getType());
+}
+
+LogicalResult InstanceOp::verify() {
+  // TODO: Add verification for type arguments matching primitive parameters
   return success();
 }
 

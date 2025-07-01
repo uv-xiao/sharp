@@ -10,5 +10,6 @@ add_mlir_library(SharpTxnToFIRRTL
   MLIRTransformUtils
   MLIRArithDialect
   SharpTxn
+  SharpTxnPrimitives
   CIRCTFIRRTL
   )

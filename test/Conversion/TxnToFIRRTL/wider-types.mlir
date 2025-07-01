@@ -35,4 +35,4 @@ txn.module @WiderTypes {
 // CHECK: %c42_si8 = firrtl.constant 42 : !firrtl.sint<8>
 // CHECK: %c1_si64 = firrtl.constant 1 : !firrtl.sint<64>
 // CHECK: %c2_si64 = firrtl.constant 2 : !firrtl.sint<64>
-// CHECK: firrtl.add %c1_si64, %c2_si64 : (!firrtl.sint<64>, !firrtl.sint<64>) -> !firrtl.sint<65>
+// CHECK: firrtl.add %{{.*}}, %{{.*}} : (!firrtl.sint<64>, !firrtl.sint<64>) -> !firrtl.sint<65>
