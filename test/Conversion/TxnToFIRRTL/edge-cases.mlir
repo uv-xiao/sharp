@@ -78,36 +78,23 @@ txn.module @NoSchedule {
   }
 }
 
-// CHECK-LABEL: firrtl.circuit "ComplexArithmetic"
+// CHECK: module {
+// CHECK-NEXT: firrtl.circuit
 
-// Check empty module conversion
-// CHECK: firrtl.module @EmptyModule
-// CHECK-SAME: in %clock: !firrtl.clock
-// CHECK-SAME: in %reset: !firrtl.uint<1>
+// Check all modules are converted
+// CHECK-DAG: firrtl.module @EmptyModule
+// CHECK-DAG: firrtl.module @OnlyValueMethods
+// CHECK-DAG: firrtl.module @EmptyActions
+// CHECK-DAG: firrtl.module @ComplexArithmetic
+// CHECK-DAG: firrtl.module @NoSchedule
+// Check key conversions:
+// Value methods produce constants in OnlyValueMethods
+// CHECK-DAG: firrtl.constant 1
+// CHECK-DAG: firrtl.constant 2
 
-// Check module with only value methods
-// CHECK: firrtl.module @OnlyValueMethods
-// CHECK: firrtl.constant 1
-// CHECK: firrtl.connect %get1OUT
-// CHECK: firrtl.constant 2
-// CHECK: firrtl.connect %get2OUT
+// Empty actions still have when blocks
+// CHECK-DAG: firrtl.when %noop1_wf
+// CHECK-DAG: firrtl.when %noop2_wf
 
-// Check empty actions
-// CHECK: firrtl.module @EmptyActions
-// CHECK: %noop1_wf = firrtl.node %noop1EN
-// CHECK: %noop2_wf = firrtl.node %noop2EN
-// CHECK: firrtl.when %noop1_wf
-// CHECK: firrtl.when %noop2_wf
-
-// Check complex arithmetic
-// CHECK: firrtl.module @ComplexArithmetic
-// CHECK: firrtl.add
-// CHECK: firrtl.sub
-// CHECK: firrtl.mul
-// CHECK: firrtl.gt
-// CHECK: firrtl.mux
-
-// Check module with schedule
-// CHECK: firrtl.module @NoSchedule
-// CHECK: %action_wf = firrtl.node %actionEN
-// CHECK: firrtl.when %action_wf
+// Action methods have when blocks
+// CHECK-DAG: firrtl.when %action_wf

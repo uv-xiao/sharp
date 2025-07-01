@@ -68,7 +68,8 @@ txn.module @ComplexConflicts {
   }
 }
 
-// CHECK-LABEL: firrtl.circuit "ComplexConflicts"
+// CHECK: module {
+// CHECK-NEXT: firrtl.circuit "ComplexConflicts" {
 // CHECK: firrtl.module @ComplexConflicts
 
 // Check will-fire signals exist
@@ -80,14 +81,14 @@ txn.module @ComplexConflicts {
 // CHECK: %r3_wf = firrtl.node
 
 // Check ready signals are connected
-// CHECK: firrtl.connect %a1RDY
-// CHECK: firrtl.connect %a2RDY
-// CHECK: firrtl.connect %a3RDY
+// CHECK-DAG: firrtl.connect %a1RDY
+// CHECK-DAG: firrtl.connect %a2RDY
+// CHECK-DAG: firrtl.connect %a3RDY
 
 // Check when blocks exist for all actions
-// CHECK: firrtl.when %a1_wf
-// CHECK: firrtl.when %a2_wf
-// CHECK: firrtl.when %a3_wf
-// CHECK: firrtl.when %r1_wf
-// CHECK: firrtl.when %r2_wf
-// CHECK: firrtl.when %r3_wf
+// CHECK-DAG: firrtl.when %a1_wf
+// CHECK-DAG: firrtl.when %a2_wf
+// CHECK-DAG: firrtl.when %a3_wf
+// CHECK-DAG: firrtl.when %r1_wf
+// CHECK-DAG: firrtl.when %r2_wf
+// CHECK-DAG: firrtl.when %r3_wf

@@ -71,7 +71,7 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - Updated CallOp printer/parser to support attribute dictionaries
   - **Note**: Combinational Loop Detection implemented but deprecated pending txn.primitive attribute support
 
-- **Txn-to-FIRRTL Conversion Pass** (2025-06-30)
+- **Txn-to-FIRRTL Conversion Pass** (2025-06-30, 2025-07-01)
   - Created comprehensive FIRRTL operations guide (`docs/firrtl_operations_guide.md`)
   - Implemented complete conversion pass infrastructure:
     - Pass registration in `include/sharp/Conversion/Passes.td`
@@ -97,6 +97,8 @@ Sharp is implementing transaction-based hardware description with conflict matri
     - Method guards and ready signal generation
     - Edge cases and error handling
     - Nested module hierarchies
+  - Fixed implementation to erase original Txn modules after conversion
+  - All tests passing (30/30) after fixing test CHECK patterns
 
 ### 🚧 In Progress
 

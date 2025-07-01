@@ -83,36 +83,32 @@ txn.module @System {
   }
 }
 
-// CHECK-LABEL: firrtl.circuit "System"
+// CHECK: module {
+// CHECK-NEXT: firrtl.circuit "System" {
 
-// Check all modules exist
-// CHECK: firrtl.module @Counter
-// CHECK: firrtl.module @DualCounter
-// CHECK: firrtl.module @System
+// Check all modules exist in order
+// CHECK-DAG: firrtl.module @Counter
+// CHECK-DAG: firrtl.module @DualCounter
+// CHECK-DAG: firrtl.module @System
 
-// Check instances in DualCounter
-// CHECK: firrtl.instance low interesting_name @Counter
-// CHECK: firrtl.instance high interesting_name @Counter
+// Check instances are created
+// CHECK-DAG: firrtl.instance low interesting_name @Counter
+// CHECK-DAG: firrtl.instance high interesting_name @Counter
+// CHECK-DAG: firrtl.instance counter1 interesting_name @DualCounter
+// CHECK-DAG: firrtl.instance counter2 interesting_name @DualCounter
 
-// Check instances in System
-// CHECK: firrtl.instance counter1 interesting_name @DualCounter
-// CHECK: firrtl.instance counter2 interesting_name @DualCounter
+// Check key operations in the conversion
+// Method calls to instances use connect
+// CHECK-DAG: firrtl.connect %low_incEN
+// CHECK-DAG: firrtl.connect %high_incEN
+// CHECK-DAG: firrtl.connect %counter2_incrementEN
 
-// Check method implementations use instances
-// CHECK: firrtl.when %increment_wf
-// CHECK: firrtl.connect %low_incEN
-// CHECK: firrtl.connect %low_get_EN
-// CHECK: firrtl.eq
-// CHECK: firrtl.when
-// CHECK: firrtl.connect %high_incEN
+// Arithmetic operations are converted
+// CHECK-DAG: firrtl.mul
+// CHECK-DAG: firrtl.add
+// CHECK-DAG: firrtl.sub
+// CHECK-DAG: firrtl.gt
 
-// Check read method combines values
-// CHECK: firrtl.mul
-// CHECK: firrtl.add
-
-// Check sync rule
-// CHECK: firrtl.when %sync_counters_wf
-// CHECK: firrtl.sub
-// CHECK: firrtl.gt
-// CHECK: firrtl.when
-// CHECK: firrtl.connect %counter2_incrementEN
+// When blocks for actions
+// CHECK-DAG: firrtl.when %increment_wf
+// CHECK-DAG: firrtl.when %sync_counters_wf

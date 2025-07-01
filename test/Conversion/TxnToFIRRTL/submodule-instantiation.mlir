@@ -35,22 +35,23 @@ txn.module @Top {
   }
 }
 
-// CHECK-LABEL: firrtl.circuit "Top"
+// CHECK: module {
+// CHECK-NEXT: firrtl.circuit "Top" {
 // CHECK: firrtl.module @Register
 // CHECK: firrtl.module @Top
 
 // Check instances are created
-// CHECK: firrtl.instance reg1 interesting_name @Register
-// CHECK: firrtl.instance reg2 interesting_name @Register
+// CHECK-DAG: firrtl.instance reg1 interesting_name @Register
+// CHECK-DAG: firrtl.instance reg2 interesting_name @Register
 
-// Check clock/reset connections
-// CHECK: firrtl.connect %reg1_clock, %clock
-// CHECK: firrtl.connect %reg1_reset, %reset
-// CHECK: firrtl.connect %reg2_clock, %clock
-// CHECK: firrtl.connect %reg2_reset, %reset
+// Check clock/reset connections are made
+// CHECK-DAG: firrtl.connect %reg1_clock, %clock
+// CHECK-DAG: firrtl.connect %reg1_reset, %reset
+// CHECK-DAG: firrtl.connect %reg2_clock, %clock
+// CHECK-DAG: firrtl.connect %reg2_reset, %reset
 
-// Check rule creates method calls
-// CHECK: firrtl.when %copy_rule_wf
-// CHECK: firrtl.connect %reg1_read_EN
-// CHECK: firrtl.connect %reg2_writeOUT
-// CHECK: firrtl.connect %reg2_writeEN
+// Check rule creates method calls via connections
+// CHECK-DAG: firrtl.when %copy_rule_wf
+// CHECK-DAG: firrtl.connect %reg1_read_EN
+// CHECK-DAG: firrtl.connect %reg2_writeOUT
+// CHECK-DAG: firrtl.connect %reg2_writeEN

@@ -1153,7 +1153,10 @@ struct TxnToFIRRTLConversionPass
       ++numModulesConverted;
     }
     
-    // TODO: Remove original Txn modules after successful conversion
+    // Remove original Txn modules after successful conversion
+    for (auto txnModule : sortedModules) {
+      txnModule.erase();
+    }
     
     LLVM_DEBUG(llvm::dbgs() << "Converted " << numModulesConverted 
                            << " modules to FIRRTL\n");

@@ -2,13 +2,12 @@
 
 // Test basic Txn to FIRRTL conversion
 
-// CHECK-LABEL: module @Counter
+// CHECK-LABEL: firrtl.circuit "Counter"
+// CHECK: firrtl.module @Register
+// CHECK: firrtl.module @Counter
+
 txn.module @Counter {
   %reg = txn.instance @count of @Register : !txn.module<"Register">
-  
-  // CHECK-LABEL: firrtl.circuit "Counter"
-  // CHECK: firrtl.module @Register
-  // CHECK: firrtl.module @Counter
   
   txn.rule @increment {
     %val = txn.call @count::@read() : () -> i32

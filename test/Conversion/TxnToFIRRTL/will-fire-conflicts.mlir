@@ -1,6 +1,10 @@
 // RUN: sharp-opt --convert-txn-to-firrtl %s | FileCheck %s
 
 // Test will-fire logic with conflict matrix
+
+// CHECK-LABEL: firrtl.circuit "ConflictTest"
+// CHECK: firrtl.module @ConflictTest
+
 txn.module @ConflictTest {
   txn.action_method @a1() {
     txn.return
@@ -26,9 +30,6 @@ txn.module @ConflictTest {
   }
 }
 
-// CHECK-LABEL: firrtl.circuit "ConflictTest"
-// CHECK: firrtl.module @ConflictTest
-
 // Check will-fire generation
 // CHECK: %a1_wf = firrtl.node %a1EN
 // CHECK: firrtl.not %a1_wf
@@ -37,11 +38,11 @@ txn.module @ConflictTest {
 // CHECK: %a3_wf = firrtl.node
 
 // Check ready signals are generated
-// CHECK: firrtl.connect %a1RDY
-// CHECK: firrtl.connect %a2RDY
-// CHECK: firrtl.connect %a3RDY
+// CHECK-DAG: firrtl.connect %a1RDY
+// CHECK-DAG: firrtl.connect %a2RDY
+// CHECK-DAG: firrtl.connect %a3RDY
 
 // Check when blocks for actions
-// CHECK: firrtl.when %a1_wf
-// CHECK: firrtl.when %a2_wf
-// CHECK: firrtl.when %a3_wf
+// CHECK-DAG: firrtl.when %a1_wf
+// CHECK-DAG: firrtl.when %a2_wf
+// CHECK-DAG: firrtl.when %a3_wf

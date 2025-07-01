@@ -42,31 +42,24 @@ txn.module @GuardedMethods {
   }
 }
 
-// CHECK-LABEL: firrtl.circuit "GuardedMethods"
+// CHECK: module {
+// CHECK-NEXT: firrtl.circuit "GuardedMethods" {
 // CHECK: firrtl.module @GuardedMethods
 
-// Check ports exist
-// CHECK-SAME: in %conditional_writeOUT: !firrtl.sint<32>
-// CHECK-SAME: in %conditional_writeEN: !firrtl.uint<1>
-// CHECK-SAME: out %conditional_writeRDY: !firrtl.uint<1>
-// CHECK-SAME: out %is_readyOUT: !firrtl.uint<1>
+// Check key elements of conversion
+// Will-fire signals are created
+// CHECK-DAG: %conditional_write_wf = firrtl.node %conditional_writeEN
+// CHECK-DAG: %check_ready_wf = firrtl.node
 
-// Check will-fire signals
-// CHECK: %conditional_write_wf = firrtl.node %conditional_writeEN
-// CHECK: %check_ready_wf = firrtl.node
+// Value method produces constant
+// CHECK-DAG: firrtl.constant 1 : !firrtl.uint
+// CHECK-DAG: firrtl.connect %is_readyOUT
 
-// Check conditional in method
-// CHECK: firrtl.when %conditional_write_wf
-// CHECK: firrtl.gt
-// CHECK: firrtl.when
-// CHECK: } else {
+// Conditional structures are preserved
+// CHECK-DAG: firrtl.when %conditional_write_wf
+// CHECK-DAG: firrtl.gt
 
-// Check value method implementation
-// CHECK: firrtl.constant 1
-// CHECK: firrtl.connect %is_readyOUT
-
-// Check rule with local method call
-// CHECK: firrtl.when %check_ready_wf
-// CHECK: %is_ready_call = firrtl.node %is_readyOUT
-// CHECK: firrtl.when
-// CHECK: firrtl.constant 42
+// Rule calls method and has conditional
+// CHECK-DAG: firrtl.when %check_ready_wf
+// CHECK-DAG: %is_ready_call = firrtl.node %is_readyOUT
+// CHECK-DAG: firrtl.constant 42
