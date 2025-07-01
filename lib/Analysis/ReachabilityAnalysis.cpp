@@ -10,6 +10,9 @@
 // The pass computes reachability conditions for method calls within rules and
 // action methods by tracking control flow through txn.if operations.
 //
+// The pass adds reachability conditions as operands to txn.call operations,
+// enabling the Txn-to-FIRRTL conversion to generate proper conflict_inside logic.
+//
 //===----------------------------------------------------------------------===//
 
 #include "sharp/Dialect/Txn/TxnOps.h"
@@ -39,25 +42,18 @@ namespace {
 
 /// Analysis state for tracking reachability conditions
 struct ReachabilityState {
-  /// Map from CallOp to its reachability condition
-  DenseMap<Operation*, StringAttr> reachabilityConditions;
+  /// Map from CallOp to its reachability condition value
+  DenseMap<Operation*, Value> reachabilityConditions;
   
-  /// Map from SSA values to their condition names
-  DenseMap<Value, std::string> conditionNames;
+  /// Map to cache created condition values (key is condition value + negation flag as int)
+  DenseMap<std::pair<Value, int>, Value> conditionCache;
   
   /// Counter for generating unique condition names
   unsigned conditionCounter = 0;
   
   /// Get a unique name for a condition
-  std::string getConditionName(Value condition) {
-    auto it = conditionNames.find(condition);
-    if (it != conditionNames.end()) {
-      return it->second;
-    }
-    
-    std::string name = "cond_" + std::to_string(conditionCounter++);
-    conditionNames[condition] = name;
-    return name;
+  std::string getConditionName() {
+    return "reach_cond_" + std::to_string(conditionCounter++);
   }
 };
 
@@ -71,23 +67,28 @@ private:
   void analyzeAction(Operation *actionOp, ReachabilityState &state);
   
   /// Process a region with a given path condition
-  void processRegion(Region &region, StringRef pathCondition,
+  void processRegion(Region &region, Value pathCondition,
                      ReachabilityState &state, OpBuilder &builder);
   
   /// Process an operation and its nested regions
-  void processOperation(Operation *op, StringRef pathCondition,
+  void processOperation(Operation *op, Value pathCondition,
                         ReachabilityState &state, OpBuilder &builder);
   
   /// Build the condition expression for reaching a point
-  StringAttr buildConditionExpr(StringRef baseCondition, Value ifCondition,
-                                bool negated, ReachabilityState &state,
-                                OpBuilder &builder);
+  Value buildConditionExpr(Value baseCondition, Value ifCondition,
+                          bool negated, ReachabilityState &state,
+                          OpBuilder &builder);
+  
+  /// Update a CallOp to include its reachability condition
+  void updateCallOp(CallOp callOp, Value condition, OpBuilder &builder);
+  
+  /// Find a safe insertion point after the given value
+  Block::iterator findInsertionPoint(Value value);
 };
 
 void ReachabilityAnalysisPass::runOnOperation() {
   auto module = getOperation();
   ReachabilityState state;
-  
   
   // Process each txn module
   module.walk([&](txn::ModuleOp txnModule) {
@@ -102,22 +103,20 @@ void ReachabilityAnalysisPass::runOnOperation() {
     });
   });
   
-  // Apply reachability conditions as attributes
+  // Update CallOps with their reachability conditions
+  OpBuilder builder(module);
   for (auto &[callOp, condition] : state.reachabilityConditions) {
-    callOp->setAttr("reachability_condition", condition);
-  }
-  
-  // If no conditions were found, might be an issue
-  if (state.reachabilityConditions.empty()) {
-    LLVM_DEBUG(llvm::dbgs() << "Warning: No reachability conditions found\n");
+    if (auto call = dyn_cast<CallOp>(callOp)) {
+      updateCallOp(call, condition, builder);
+    }
   }
   
   LLVM_DEBUG({
     llvm::dbgs() << "Reachability Analysis Results:\n";
     for (auto &[callOp, condition] : state.reachabilityConditions) {
       if (auto call = dyn_cast<CallOp>(callOp)) {
-        llvm::dbgs() << "  Call to " << call.getCallee() << " reachable when: "
-                     << condition.getValue() << "\n";
+        llvm::dbgs() << "  Call to " << call.getCallee() 
+                     << " has condition: " << condition << "\n";
       }
     }
   });
@@ -127,9 +126,6 @@ void ReachabilityAnalysisPass::analyzeAction(Operation *actionOp,
                                               ReachabilityState &state) {
   MLIRContext *ctx = actionOp->getContext();
   OpBuilder builder(ctx);
-  
-  // Start with "true" condition (always reachable at action entry)
-  StringRef initialCondition = "true";
   
   // Get the body region
   Region *bodyRegion = nullptr;
@@ -143,12 +139,16 @@ void ReachabilityAnalysisPass::analyzeAction(Operation *actionOp,
     return;
   }
   
+  // For the initial condition, we use a placeholder that will be replaced
+  // with "true" only when actually needed
+  Value initialCondition = nullptr;
+  
   // Process the body region
   processRegion(*bodyRegion, initialCondition, state, builder);
 }
 
 void ReachabilityAnalysisPass::processRegion(Region &region,
-                                              StringRef pathCondition,
+                                              Value pathCondition,
                                               ReachabilityState &state,
                                               OpBuilder &builder) {
   for (auto &block : region) {
@@ -159,21 +159,21 @@ void ReachabilityAnalysisPass::processRegion(Region &region,
 }
 
 void ReachabilityAnalysisPass::processOperation(Operation *op,
-                                                 StringRef pathCondition,
+                                                 Value pathCondition,
                                                  ReachabilityState &state,
                                                  OpBuilder &builder) {
   // Handle txn.if operations
   if (auto ifOp = dyn_cast<IfOp>(op)) {
     // Build condition for then branch
-    StringAttr thenCondition = buildConditionExpr(
+    Value thenCondition = buildConditionExpr(
         pathCondition, ifOp.getCondition(), false, state, builder);
-    processRegion(ifOp.getThenRegion(), thenCondition.getValue(), state, builder);
+    processRegion(ifOp.getThenRegion(), thenCondition, state, builder);
     
     // Build condition for else branch (if exists)
     if (!ifOp.getElseRegion().empty()) {
-      StringAttr elseCondition = buildConditionExpr(
+      Value elseCondition = buildConditionExpr(
           pathCondition, ifOp.getCondition(), true, state, builder);
-      processRegion(ifOp.getElseRegion(), elseCondition.getValue(), state, builder);
+      processRegion(ifOp.getElseRegion(), elseCondition, state, builder);
     }
     
     // Don't process nested operations again
@@ -182,10 +182,13 @@ void ReachabilityAnalysisPass::processOperation(Operation *op,
   
   // Handle txn.call operations
   if (auto callOp = dyn_cast<CallOp>(op)) {
-    // Record the reachability condition for this call
-    state.reachabilityConditions[op] = StringAttr::get(op->getContext(), pathCondition);
-    LLVM_DEBUG(llvm::dbgs() << "  Found call to " << callOp.getCallee() 
-                            << " with condition: " << pathCondition << "\n");
+    // Only record non-trivial reachability conditions
+    if (pathCondition) {
+      // Record the reachability condition for this call
+      state.reachabilityConditions[op] = pathCondition;
+      LLVM_DEBUG(llvm::dbgs() << "  Found call to " << callOp.getCallee() 
+                              << " with condition: " << pathCondition << "\n");
+    }
     return;
   }
   
@@ -195,28 +198,126 @@ void ReachabilityAnalysisPass::processOperation(Operation *op,
   }
 }
 
-StringAttr ReachabilityAnalysisPass::buildConditionExpr(StringRef baseCondition,
-                                                         Value ifCondition,
-                                                         bool negated,
-                                                         ReachabilityState &state,
-                                                         OpBuilder &builder) {
-  MLIRContext *ctx = builder.getContext();
-  
-  // Get the symbolic name for the if condition value
-  std::string condName = state.getConditionName(ifCondition);
-  
-  // Build the expression string
-  std::string expr;
-  if (baseCondition == "true") {
-    // Simplify: true && cond => cond, true && !cond => !cond
-    expr = negated ? ("!" + condName) : condName;
-  } else {
-    // General case: base && cond or base && !cond
-    expr = std::string(baseCondition) + " && ";
-    expr += negated ? ("!" + condName) : condName;
+Block::iterator ReachabilityAnalysisPass::findInsertionPoint(Value value) {
+  // If the value is a block argument, insert at the beginning of the block
+  if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+    return blockArg.getOwner()->begin();
   }
   
-  return StringAttr::get(ctx, expr);
+  // Otherwise, insert after the defining operation
+  Operation *defOp = value.getDefiningOp();
+  assert(defOp && "Value must have a defining operation");
+  
+  // Find the operation in its block
+  Block *block = defOp->getBlock();
+  auto it = block->begin();
+  while (&*it != defOp) {
+    ++it;
+  }
+  
+  // Insert after the defining operation
+  return ++it;
+}
+
+Value ReachabilityAnalysisPass::buildConditionExpr(Value baseCondition,
+                                                    Value ifCondition,
+                                                    bool negated,
+                                                    ReachabilityState &state,
+                                                    OpBuilder &builder) {
+  // Check cache first
+  auto key = std::make_pair(ifCondition, negated ? 1 : 0);
+  auto it = state.conditionCache.find(key);
+  if (it != state.conditionCache.end()) {
+    return it->second;
+  }
+  
+  // Find a safe insertion point
+  Block::iterator insertPt = findInsertionPoint(ifCondition);
+  
+  // If we have a base condition, we need to ensure we insert after it too
+  if (baseCondition) {
+    Block::iterator basePt = findInsertionPoint(baseCondition);
+    Block *block = ifCondition.getDefiningOp() ? 
+                   ifCondition.getDefiningOp()->getBlock() : 
+                   cast<BlockArgument>(ifCondition).getOwner();
+    
+    // Use the later insertion point
+    if (basePt->getBlock() == block) {
+      // Compare iterators in the same block
+      for (auto it = block->begin(); it != block->end(); ++it) {
+        if (&*it == &*basePt) {
+          // basePt comes first, use insertPt
+          break;
+        }
+        if (&*it == &*insertPt) {
+          // insertPt comes first, use basePt
+          insertPt = basePt;
+          break;
+        }
+      }
+    }
+  }
+  
+  // Set insertion point
+  Block *insertBlock = ifCondition.getDefiningOp() ? 
+                       ifCondition.getDefiningOp()->getBlock() : 
+                       cast<BlockArgument>(ifCondition).getOwner();
+  builder.setInsertionPoint(insertBlock, insertPt);
+  
+  // Create the condition expression
+  Value condExpr = ifCondition;
+  
+  // Negate if needed
+  if (negated) {
+    auto trueVal = builder.create<arith::ConstantIntOp>(ifCondition.getLoc(), 1, 1);
+    condExpr = builder.create<arith::XOrIOp>(ifCondition.getLoc(), 
+                                              condExpr, trueVal);
+  }
+  
+  // If no base condition, this is the root condition
+  if (!baseCondition) {
+    state.conditionCache[key] = condExpr;
+    return condExpr;
+  }
+  
+  // General case: base && cond
+  auto result = builder.create<arith::AndIOp>(ifCondition.getLoc(), 
+                                               baseCondition, condExpr);
+  state.conditionCache[key] = result;
+  return result;
+}
+
+void ReachabilityAnalysisPass::updateCallOp(CallOp callOp, Value condition, 
+                                             OpBuilder &builder) {
+  // Don't update if the call already has a condition
+  if (callOp.getCondition()) {
+    return;
+  }
+  
+  // Create a new CallOp with the condition
+  builder.setInsertionPoint(callOp);
+  
+  // Create new call with condition
+  auto newCall = builder.create<CallOp>(
+      callOp.getLoc(),
+      callOp.getResultTypes(),
+      callOp.getCalleeAttr(),
+      condition,
+      callOp.getArgs()
+  );
+  
+  // Copy attributes except operandSegmentSizes (which will be set by the builder)
+  SmallVector<NamedAttribute> newAttrs;
+  for (auto attr : callOp->getAttrs()) {
+    if (attr.getName() != "operandSegmentSizes") {
+      newAttrs.push_back(attr);
+    }
+  }
+  newCall->setAttrs(newAttrs);
+  
+  // Replace uses and erase old call
+  callOp.replaceAllUsesWith(newCall);
+  callOp.erase();
 }
 
 } // namespace

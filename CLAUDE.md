@@ -182,8 +182,9 @@ Sharp implements custom MLIR dialects following CIRCT patterns:
 
 - `--sharp-infer-conflict-matrix` - Infers conflict relationships between actions
 - `--sharp-validate-method-attributes` - Validates signal names and method constraints
-- `--sharp-reachability-analysis` - Computes reachability conditions for method calls
+- `--sharp-reachability-analysis` - Computes reachability conditions for method calls (adds condition operands to txn.call)
 - `--sharp-pre-synthesis-check` - Checks for non-synthesizable constructs
+- `--convert-txn-to-firrtl` - Converts Txn modules to FIRRTL (includes conflict_inside calculation)
 
 ### Current Development Status
 

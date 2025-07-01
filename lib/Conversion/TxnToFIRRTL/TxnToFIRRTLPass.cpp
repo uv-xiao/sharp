@@ -219,79 +219,80 @@ static Value generateWillFire(StringRef actionName, Value enabled,
   return wfNode.getResult();
 }
 
-/// Analyze method calls in an action to track reachability
-static void analyzeActionReachability(Operation *action, ConversionContext &ctx) {
-  // Track current path condition (starts as true)
-  auto loc = action->getLoc();
-  auto intType = IntType::get(ctx.firrtlBuilder.getContext(), false, 1);
-  Value trueVal = ctx.firrtlBuilder.create<ConstantOp>(loc, Type(intType), APSInt(APInt(1, 1), true));
-  
-  struct ReachabilityState {
-    Value pathCondition;
-    Region *region;
-  };
-  SmallVector<ReachabilityState> workList;
-  
-  // Helper to process a region with given path condition
-  auto processRegion = [&](Region &region, Value pathCond) {
-    for (auto &op : region.getOps()) {
-      if (auto ifOp = dyn_cast<IfOp>(&op)) {
-        // Get the converted FIRRTL condition
-        Value firrtlCond = ctx.txnToFirrtl.lookup(ifOp.getCondition());
-        if (!firrtlCond) {
-          // If condition hasn't been converted yet, skip this if
-          continue;
+// Forward declaration
+static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx);
+
+/// Build reachability conditions for method calls in an action's body
+static void buildReachabilityConditions(Region &region, Value currentCond, 
+                                       ConversionContext &ctx,
+                                       DenseMap<CallOp, Value> &reachMap) {
+  for (auto &op : region.front()) {
+    if (auto ifOp = dyn_cast<IfOp>(&op)) {
+      // Convert the condition
+      Value cond = ifOp.getCondition();
+      if (ctx.txnToFirrtl.count(cond)) {
+        cond = ctx.txnToFirrtl[cond];
+      } else {
+        // Convert the condition if not already converted
+        if (auto cmpOp = cond.getDefiningOp<arith::CmpIOp>()) {
+          Value lhs = ctx.txnToFirrtl.lookup(cmpOp.getLhs());
+          Value rhs = ctx.txnToFirrtl.lookup(cmpOp.getRhs());
+          if (lhs && rhs) {
+            switch (cmpOp.getPredicate()) {
+              case arith::CmpIPredicate::eq:
+                cond = ctx.firrtlBuilder.create<EQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+                break;
+              case arith::CmpIPredicate::ne:
+                cond = ctx.firrtlBuilder.create<NEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+                break;
+              case arith::CmpIPredicate::slt:
+              case arith::CmpIPredicate::ult:
+                cond = ctx.firrtlBuilder.create<LTPrimOp>(cmpOp.getLoc(), lhs, rhs);
+                break;
+              case arith::CmpIPredicate::sle:
+              case arith::CmpIPredicate::ule:
+                cond = ctx.firrtlBuilder.create<LEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+                break;
+              case arith::CmpIPredicate::sgt:
+              case arith::CmpIPredicate::ugt:
+                cond = ctx.firrtlBuilder.create<GTPrimOp>(cmpOp.getLoc(), lhs, rhs);
+                break;
+              case arith::CmpIPredicate::sge:
+              case arith::CmpIPredicate::uge:
+                cond = ctx.firrtlBuilder.create<GEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+                break;
+            }
+            ctx.txnToFirrtl[ifOp.getCondition()] = cond;
+          }
         }
-        
-        // Update path condition for then branch
-        Value thenCond = ctx.firrtlBuilder.create<AndPrimOp>(
-            ifOp.getLoc(), pathCond, firrtlCond);
-        workList.push_back({thenCond, &ifOp.getThenRegion()});
-        
-        // Update path condition for else branch if exists
-        if (!ifOp.getElseRegion().empty()) {
-          Value notCond = ctx.firrtlBuilder.create<NotPrimOp>(
-              ifOp.getLoc(), firrtlCond);
-          Value elseCond = ctx.firrtlBuilder.create<AndPrimOp>(
-              ifOp.getLoc(), pathCond, notCond);
-          workList.push_back({elseCond, &ifOp.getElseRegion()});
-        }
-      } else if (auto callOp = dyn_cast<CallOp>(&op)) {
-        // Record reachability condition for this method call
-        ctx.reachabilityConditions[callOp] = pathCond;
       }
+      
+      // Process then branch
+      Value thenCond = ctx.firrtlBuilder.create<AndPrimOp>(
+          ifOp.getLoc(), currentCond, cond);
+      buildReachabilityConditions(ifOp.getThenRegion(), thenCond, ctx, reachMap);
+      
+      // Process else branch if exists
+      if (!ifOp.getElseRegion().empty()) {
+        Value notCond = ctx.firrtlBuilder.create<NotPrimOp>(ifOp.getLoc(), cond);
+        Value elseCond = ctx.firrtlBuilder.create<AndPrimOp>(
+            ifOp.getLoc(), currentCond, notCond);
+        buildReachabilityConditions(ifOp.getElseRegion(), elseCond, ctx, reachMap);
+      }
+    } else if (auto callOp = dyn_cast<CallOp>(&op)) {
+      // Record reachability condition for this call
+      reachMap[callOp] = currentCond;
     }
-  };
-  
-  // Start with the body of the action
-  if (auto rule = dyn_cast<RuleOp>(action)) {
-    processRegion(rule.getBody(), trueVal);
-  } else if (auto method = dyn_cast<ActionMethodOp>(action)) {
-    processRegion(method.getBody(), trueVal);
-  }
-  
-  // Process all regions in the worklist
-  while (!workList.empty()) {
-    auto state = workList.pop_back_val();
-    processRegion(*state.region, state.pathCondition);
   }
 }
 
-/// Calculate conflict_inside for an action
-static Value calculateConflictInside(Operation *action, ConversionContext &ctx) {
-  // First analyze reachability
-  analyzeActionReachability(action, ctx);
-  
-  // Collect all method calls in this action
+/// Check if action has potential internal conflicts (simple check)
+static bool hasConflictingCalls(Operation *action, ConversionContext &ctx) {
+  // Collect all method calls
   SmallVector<CallOp> methodCalls;
   action->walk([&](CallOp call) {
     methodCalls.push_back(call);
   });
-  
-  // Start with false (no conflicts)
-  auto loc = action->getLoc();
-  auto intType = IntType::get(ctx.firrtlBuilder.getContext(), false, 1);
-  Value conflictInside = ctx.firrtlBuilder.create<ConstantOp>(loc, Type(intType), APSInt(APInt(1, 0), true));
   
   // Check each pair of method calls
   for (size_t i = 0; i < methodCalls.size(); ++i) {
@@ -314,30 +315,25 @@ static Value calculateConflictInside(Operation *action, ConversionContext &ctx) 
         method2 = callee2.getNestedReferences()[0].getValue();
       }
       
-      // Build the conflict key
-      std::string key = (inst1 + "::" + method1 + "," + inst2 + "::" + method2).str();
+      // Build the conflict key - check both orderings
+      std::string key1 = (inst1 + "::" + method1 + "," + inst2 + "::" + method2).str();
+      std::string key2 = (inst2 + "::" + method2 + "," + inst1 + "::" + method1).str();
       
       // Check if methods conflict
-      auto it = ctx.conflictMatrix.find(key);
-      if (it != ctx.conflictMatrix.end() && it->second == static_cast<int>(ConflictRelation::Conflict)) {
-        // Get reachability conditions
-        Value reach1 = ctx.reachabilityConditions[call1];
-        Value reach2 = ctx.reachabilityConditions[call2];
-        
-        if (reach1 && reach2) {
-          // Both methods can be reached if both conditions can be true
-          Value bothReachable = ctx.firrtlBuilder.create<AndPrimOp>(
-              action->getLoc(), reach1, reach2);
-          
-          // Add to conflict_inside
-          conflictInside = ctx.firrtlBuilder.create<OrPrimOp>(
-              action->getLoc(), conflictInside, bothReachable);
-        }
+      auto it1 = ctx.conflictMatrix.find(key1);
+      auto it2 = ctx.conflictMatrix.find(key2);
+      
+      if (it1 != ctx.conflictMatrix.end()) {
+        auto rel = static_cast<ConflictRelation>(it1->second);
+        if (rel == ConflictRelation::Conflict) return true;
+      } else if (it2 != ctx.conflictMatrix.end()) {
+        auto rel = static_cast<ConflictRelation>(it2->second);
+        if (rel == ConflictRelation::Conflict) return true;
       }
     }
   }
   
-  return conflictInside;
+  return false;
 }
 
 /// Convert method/rule body operations to FIRRTL
@@ -369,6 +365,15 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
     } else if (auto callOp = dyn_cast<CallOp>(&op)) {
       // Handle method calls
       auto callee = callOp.getCallee();
+      
+      // If the call has a condition, ensure it's mapped to FIRRTL
+      if (callOp.getCondition()) {
+        Value condition = callOp.getCondition();
+        if (!ctx.txnToFirrtl.count(condition)) {
+          // The condition should already be converted, but if not, map it
+          ctx.txnToFirrtl[condition] = condition;
+        }
+      }
       
       if (callee.getNestedReferences().size() == 0) {
         // Local method call (within same module)
@@ -425,8 +430,8 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
           } else {
             // Action method call
             // Set input arguments
-            for (size_t i = 0; i < callOp.getNumOperands(); ++i) {
-              auto argValue = ctx.txnToFirrtl.lookup(callOp.getOperand(i));
+            for (size_t i = 0; i < callOp.getArgs().size(); ++i) {
+              auto argValue = ctx.txnToFirrtl.lookup(callOp.getArgs()[i]);
               if (argValue) {
                 auto argPortName = (methodName + "OUT").str(); // For single arg
                 auto argPort = instPorts->second.find(argPortName);
@@ -451,9 +456,9 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
         }
         
         // For action methods with arguments (like write)
-        if (callOp.getNumOperands() > 0 && methodName == "write") {
+        if (callOp.getArgs().size() > 0 && methodName == "write") {
           // Convert the argument
-          Value arg = callOp.getOperand(0);
+          Value arg = callOp.getArgs()[0];
           Value firrtlArg = ctx.txnToFirrtl.lookup(arg);
           if (firrtlArg) {
             // In a real implementation, this would connect to the instance's input port
@@ -611,6 +616,22 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
         auto mux = ctx.firrtlBuilder.create<MuxPrimOp>(
             selectOp.getLoc(), cond, trueVal, falseVal);
         ctx.txnToFirrtl[selectOp.getResult()] = mux;
+      }
+    } else if (auto andOp = dyn_cast<arith::AndIOp>(&op)) {
+      // Convert bitwise AND operation
+      Value lhs = ctx.txnToFirrtl.lookup(andOp.getLhs());
+      Value rhs = ctx.txnToFirrtl.lookup(andOp.getRhs());
+      if (lhs && rhs) {
+        auto result = ctx.firrtlBuilder.create<AndPrimOp>(andOp.getLoc(), lhs, rhs);
+        ctx.txnToFirrtl[andOp.getResult()] = result;
+      }
+    } else if (auto xorOp = dyn_cast<arith::XOrIOp>(&op)) {
+      // Convert bitwise XOR operation
+      Value lhs = ctx.txnToFirrtl.lookup(xorOp.getLhs());
+      Value rhs = ctx.txnToFirrtl.lookup(xorOp.getRhs());
+      if (lhs && rhs) {
+        auto result = ctx.firrtlBuilder.create<XorPrimOp>(xorOp.getLoc(), lhs, rhs);
+        ctx.txnToFirrtl[xorOp.getResult()] = result;
       }
     }
     // Add more operation conversions as needed
@@ -777,6 +798,98 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   // Store instance ports in context for method call connections
   ctx.instancePorts = instancePorts;
   
+  // Pre-pass: Convert all arith operations that might be used as conditions
+  // This ensures reachability conditions are available in FIRRTL
+  // We need multiple passes to handle dependencies
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    txnModule.walk([&](Operation *op) {
+      // Skip if already converted
+      if (op->getNumResults() > 0 && ctx.txnToFirrtl.count(op->getResult(0))) {
+        return;
+      }
+      
+      if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
+        // Convert constants to FIRRTL
+        if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue())) {
+          auto firrtlType = convertType(constOp.getType());
+          if (firrtlType) {
+            auto apInt = intAttr.getValue();
+            bool isUnsigned = isa<UIntType>(firrtlType);
+            auto firrtlConst = ctx.firrtlBuilder.create<ConstantOp>(
+                constOp.getLoc(), Type(firrtlType), 
+                APSInt(apInt, isUnsigned));
+            ctx.txnToFirrtl[constOp.getResult()] = firrtlConst;
+            changed = true;
+          }
+        } else if (auto boolAttr = dyn_cast<BoolAttr>(constOp.getValue())) {
+          // Convert boolean constants
+          auto intType = IntType::get(ctx.firrtlBuilder.getContext(), false, 1);
+          auto value = boolAttr.getValue() ? 1 : 0;
+          auto firrtlConst = ctx.firrtlBuilder.create<ConstantOp>(
+              constOp.getLoc(), Type(intType), 
+              APSInt(APInt(1, value), true));
+          ctx.txnToFirrtl[constOp.getResult()] = firrtlConst;
+          changed = true;
+        }
+      } else if (auto andOp = dyn_cast<arith::AndIOp>(op)) {
+        // Convert AND operation
+        Value lhs = ctx.txnToFirrtl.lookup(andOp.getLhs());
+        Value rhs = ctx.txnToFirrtl.lookup(andOp.getRhs());
+        if (lhs && rhs) {
+          auto result = ctx.firrtlBuilder.create<AndPrimOp>(andOp.getLoc(), lhs, rhs);
+          ctx.txnToFirrtl[andOp.getResult()] = result;
+          changed = true;
+        }
+      } else if (auto xorOp = dyn_cast<arith::XOrIOp>(op)) {
+        // Convert XOR operation
+        Value lhs = ctx.txnToFirrtl.lookup(xorOp.getLhs());
+        Value rhs = ctx.txnToFirrtl.lookup(xorOp.getRhs());
+        if (lhs && rhs) {
+          auto result = ctx.firrtlBuilder.create<XorPrimOp>(xorOp.getLoc(), lhs, rhs);
+          ctx.txnToFirrtl[xorOp.getResult()] = result;
+          changed = true;
+        }
+      } else if (auto cmpOp = dyn_cast<arith::CmpIOp>(op)) {
+        // Convert comparison operations
+        Value lhs = ctx.txnToFirrtl.lookup(cmpOp.getLhs());
+        Value rhs = ctx.txnToFirrtl.lookup(cmpOp.getRhs());
+        if (lhs && rhs) {
+          Value result;
+          switch (cmpOp.getPredicate()) {
+            case arith::CmpIPredicate::eq:
+              result = ctx.firrtlBuilder.create<EQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+              break;
+            case arith::CmpIPredicate::ne:
+              result = ctx.firrtlBuilder.create<NEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+              break;
+            case arith::CmpIPredicate::slt:
+            case arith::CmpIPredicate::ult:
+              result = ctx.firrtlBuilder.create<LTPrimOp>(cmpOp.getLoc(), lhs, rhs);
+              break;
+            case arith::CmpIPredicate::sle:
+            case arith::CmpIPredicate::ule:
+              result = ctx.firrtlBuilder.create<LEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+              break;
+            case arith::CmpIPredicate::sgt:
+            case arith::CmpIPredicate::ugt:
+              result = ctx.firrtlBuilder.create<GTPrimOp>(cmpOp.getLoc(), lhs, rhs);
+              break;
+            case arith::CmpIPredicate::sge:
+            case arith::CmpIPredicate::uge:
+              result = ctx.firrtlBuilder.create<GEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+              break;
+          }
+          if (result) {
+            ctx.txnToFirrtl[cmpOp.getResult()] = result;
+            changed = true;
+          }
+        }
+      }
+    });
+  }
+  
   // Generate will-fire logic for each action in schedule order
   auto scheduleArrayAttr = schedule.getActions();
   SmallVector<StringRef> scheduleOrder;
@@ -785,9 +898,10 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     scheduleOrder.push_back(symRef.getRootReference().getValue());
   }
   
-  // First pass: generate enabled signals and conflict_inside
+  // First pass: Calculate conflict_inside for each action and generate enabled signals
   DenseMap<StringRef, Value> enabledSignals;
   DenseMap<StringRef, Value> conflictInsideSignals;
+  DenseMap<StringRef, Operation*> actionMap;
   
   for (StringRef name : scheduleOrder) {
     // Find the action (rule or method)
@@ -824,6 +938,15 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       return txnModule.emitError("Action not found in schedule: ") << name;
     }
     
+    actionMap[name] = action;
+    
+    // Check if this action has potential conflicts
+    // We'll calculate the actual conflict_inside logic later
+    if (hasConflictingCalls(action, ctx)) {
+      // Mark this action as needing conflict_inside calculation
+      conflictInsideSignals[name] = nullptr; // Placeholder - will calculate later
+    }
+    
     // Generate enabled signal
     Value enabled;
     if (auto rule = dyn_cast<RuleOp>(action)) {
@@ -852,12 +975,9 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     }
     
     enabledSignals[name] = enabled;
-    
-    // Don't calculate conflict_inside yet - will do after body conversion
-    conflictInsideSignals[name] = nullptr;
   }
   
-  // Second pass: generate will-fire signals with proper conflict checking
+  // Second pass: generate will-fire signals with simplified conflict_inside
   for (StringRef name : scheduleOrder) {
     Value enabled = enabledSignals[name];
     if (!enabled) {
@@ -865,20 +985,106 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       continue;
     }
     
-    Value conflictInside = conflictInsideSignals[name];
+    Value effectiveEnabled = enabled;
     
-    // Check for conflicts with earlier actions and conflict_inside
-    Value wf = enabled;
-    
-    // Add conflict_inside check
-    if (conflictInside) {
-      Value noConflictInside = ctx.firrtlBuilder.create<NotPrimOp>(
-          conflictInside.getLoc(), conflictInside);
-      wf = ctx.firrtlBuilder.create<AndPrimOp>(wf.getLoc(), wf, noConflictInside);
+    // If this action has conflicting calls, add conflict_inside check using reachability
+    if (conflictInsideSignals.count(name)) {
+      auto action = actionMap[name];
+      if (action) {
+        auto loc = action->getLoc();
+        auto intType = IntType::get(mlirCtx, false, 1);
+        
+        // Now collect method calls with their reachability conditions
+        SmallVector<std::pair<CallOp, Value>> methodCallsWithConditions;
+        action->walk([&](CallOp call) {
+          // Get the reachability condition if available
+          Value condition;
+          if (call.getCondition()) {
+            // Look up the condition in FIRRTL - should be converted in pre-pass
+            condition = ctx.txnToFirrtl.lookup(call.getCondition());
+            if (!condition) {
+              call.emitError("Condition not converted to FIRRTL");
+              condition = ctx.firrtlBuilder.create<ConstantOp>(loc, Type(intType), 
+                                                              APSInt(APInt(1, 1), true));
+            }
+          } else {
+            // No condition means always reachable
+            condition = ctx.firrtlBuilder.create<ConstantOp>(loc, Type(intType), 
+                                                            APSInt(APInt(1, 1), true));
+          }
+          methodCallsWithConditions.push_back({call, condition});
+        });
+        
+        // Check each pair of method calls for conflicts
+        Value conflictInside;
+        bool hasConflicts = false;
+        
+        for (size_t i = 0; i < methodCallsWithConditions.size(); ++i) {
+          for (size_t j = i + 1; j < methodCallsWithConditions.size(); ++j) {
+            auto [call1, cond1] = methodCallsWithConditions[i];
+            auto [call2, cond2] = methodCallsWithConditions[j];
+            
+            // Get the called methods from the callee symbol reference
+            auto callee1 = call1.getCallee();
+            auto callee2 = call2.getCallee();
+            
+            // Extract instance and method from nested symbol ref
+            StringRef inst1, method1, inst2, method2;
+            if (callee1.getNestedReferences().size() == 1) {
+              inst1 = callee1.getRootReference().getValue();
+              method1 = callee1.getNestedReferences()[0].getValue();
+            }
+            if (callee2.getNestedReferences().size() == 1) {
+              inst2 = callee2.getRootReference().getValue();
+              method2 = callee2.getNestedReferences()[0].getValue();
+            }
+            
+            // Build the conflict key - check both orderings
+            std::string key1 = (inst1 + "::" + method1 + "," + inst2 + "::" + method2).str();
+            std::string key2 = (inst2 + "::" + method2 + "," + inst1 + "::" + method1).str();
+            
+            // Check if methods conflict
+            auto it1 = ctx.conflictMatrix.find(key1);
+            auto it2 = ctx.conflictMatrix.find(key2);
+            
+            bool pairConflicts = false;
+            if (it1 != ctx.conflictMatrix.end()) {
+              auto rel = static_cast<ConflictRelation>(it1->second);
+              if (rel == ConflictRelation::Conflict) pairConflicts = true;
+            } else if (it2 != ctx.conflictMatrix.end()) {
+              auto rel = static_cast<ConflictRelation>(it2->second);
+              if (rel == ConflictRelation::Conflict) pairConflicts = true;
+            }
+            
+            if (pairConflicts) {
+              // These methods conflict - create: conflict(m1,m2) && reach(m1) && reach(m2)
+              Value bothReachable = ctx.firrtlBuilder.create<AndPrimOp>(loc, cond1, cond2);
+              
+              if (!hasConflicts) {
+                conflictInside = bothReachable;
+                hasConflicts = true;
+              } else {
+                // OR with previous conflicts
+                conflictInside = ctx.firrtlBuilder.create<OrPrimOp>(loc, conflictInside, bothReachable);
+              }
+            }
+          }
+        }
+        
+        // If we found conflicts, negate and include in enabled calculation
+        if (hasConflicts) {
+          // conflict_inside = OR of all (conflict(m1,m2) && reach(m1) && reach(m2))
+          // noConflictInside = !conflict_inside
+          Value noConflictInside = ctx.firrtlBuilder.create<NotPrimOp>(loc, conflictInside);
+          
+          // Include in enabled calculation
+          effectiveEnabled = ctx.firrtlBuilder.create<AndPrimOp>(loc, enabled, noConflictInside);
+        }
+      }
     }
     
-    // Generate final will-fire signal
-    wf = generateWillFire(name, wf, scheduleOrder, ctx);
+    // Generate will-fire signal
+    Value wf = generateWillFire(name, effectiveEnabled, scheduleOrder, ctx);
   }
   
   // Convert value methods
@@ -1029,7 +1235,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
           }
         }
       }
-      
+        
       if (failed(convertBodyOps(actionMethod.getBody(), ctx))) {
         actionMethod.emitError("Failed to convert action method body");
         return;
@@ -1037,7 +1243,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     });
   });
   
-  // Convert rules
+  // Third pass: Convert rules
   for (StringRef ruleName : scheduleOrder) {
     txnModule.walk([&](RuleOp rule) {
       if (rule.getSymName() != ruleName) return;
@@ -1057,8 +1263,8 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     });
   }
   
-  // TODO: Add conflict_inside calculation in a future enhancement
-  // For now, we assume no internal conflicts within actions
+  // For now, skip conflict_inside calculation to avoid dominance issues
+  // This will be addressed in a future enhancement
   
   return success();
 }

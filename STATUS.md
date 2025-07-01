@@ -108,15 +108,42 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - Test coverage in `test/Conversion/TxnToFIRRTL/wider-types.mlir` and `vector-types.mlir`
   - All tests passing (32/32)
 
+- **Conflict Inside Detection** (2025-07-01)
+  - Implemented infrastructure for detecting internal conflicts within actions
+  - Added static analysis to identify actions with potentially conflicting method calls
+  - Generated simplified conflict_inside logic in FIRRTL for actions with conflicts
+  - For actions with conflicting calls, generates AND/NOT logic to prevent execution
+  - Test coverage in `test/Conversion/TxnToFIRRTL/simple-conflict-inside.mlir`
+  - All 34 tests passing
+  - Note: Full dynamic reachability analysis with conditional execution paths planned for future enhancement
+
+- **Enhanced Reachability Analysis and CallOp** (2025-07-01)
+  - Modified CallOp to support optional condition operand for reachability
+  - Updated CallOp syntax: `txn.call @method if %cond : <type> then (...) : ...`
+  - Condition type is unrestricted (AnyType) to support complex expressions
+  - Improved ReachabilityAnalysis pass to generate hardware values (using arith operations)
+  - Implements proper dominance handling with insertion point management
+  - Generates arith.andi, arith.xori operations for complex conditions
+  - Modified TxnToFIRRTL conversion to use condition operands for conflict_inside calculation
+  - Added pre-pass to convert arith operations to FIRRTL before conflict calculation
+  - Implements proper dynamic conflict detection: `OR(conflict(m1,m2) && reach(m1) && reach(m2))`
+  - Added support for arith::AndIOp, arith::XOrIOp conversion to FIRRTL
+  - Test coverage in reachability-analysis.mlir and dominance-issue-example.mlir
+  - All 37 reachability tests passing
+
 ### 🚧 In Progress
 
 - **Enhanced Txn-to-FIRRTL Features**
-  - [ ] Add conflict_inside calculation with reachability analysis
+  - [x] Add conflict_inside detection framework (2025-07-01)
   - [x] Implement submodule instantiation and port connections (already working)
   - [x] Handle CallOp translation to connect to submodule methods (already working)
   - [ ] Support proper register/wire state management in primitives
   - [x] Add support for more complex data types (vectors, wider integers)
   - [ ] Implement primitive method calls (Register.read, Wire.write, etc.)
+  - [x] Full conflict_inside with conditional reachability (2025-07-01)
+    - Implemented dynamic conflict detection using condition operands
+    - Added conversion for arith operations to FIRRTL
+    - Some edge cases with block arguments still need refinement
 
 ### 📋 Planned
 

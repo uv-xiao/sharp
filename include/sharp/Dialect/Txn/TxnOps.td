@@ -267,23 +267,51 @@ def AbortOp : TxnOp<"abort", [Terminator]> {
   let assemblyFormat = "attr-dict";
 }
 
-def CallOp : TxnOp<"call", []> {
+def CallOp : TxnOp<"call", [AttrSizedOperandSegments]> {
   let summary = "Call a method on a module";
   let description = [{
     Invokes a value or action method on a module instance.
     The callee can be either a method in the current module (@method)
     or a method on an instance (@instance.method).
+    
+    An optional reachability condition can be provided as the first operand.
+    If present, it must be of type i1 and represents the condition under which
+    this call can be reached during execution.
   }];
 
   let arguments = (ins 
     SymbolRefAttr:$callee,  // Changed to SymbolRefAttr to support nested references
-    Variadic<AnyType>:$operands
+    Optional<AnyType>:$condition,  // Optional reachability condition (any type)
+    Variadic<AnyType>:$args  // Renamed from operands to avoid overlap
   );
   let results = (outs Variadic<AnyType>:$results);
 
 
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
+  
+  let builders = [
+    OpBuilder<(ins "SymbolRefAttr":$callee, "ValueRange":$args, 
+                   "TypeRange":$results), [{
+      build($_builder, $_state, results, callee, Value(), args);
+    }]>,
+    OpBuilder<(ins "SymbolRefAttr":$callee, "Value":$condition,
+                   "ValueRange":$args, "TypeRange":$results), [{
+      build($_builder, $_state, results, callee, condition, args);
+    }]>
+  ];
+  
+  let extraClassDeclaration = [{
+    /// Get the operands to the called method (alias for args)
+    OperandRange getOperands() {
+      return getArgs();
+    }
+    
+    /// Get the types of the operands to the called method
+    TypeRange getOperandTypes() {
+      return getArgs().getTypes();
+    }
+  }];
 }
 
 //===----------------------------------------------------------------------===//

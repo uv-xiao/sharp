@@ -14,11 +14,11 @@ txn.module @SimpleConditional {
     %cond = arith.cmpi "eq", %val, %c0 : i32
     
     txn.if %cond {
-      // CHECK: txn.call @state::@write({{.*}}) {{.*}} {reachability_condition = "cond_0"}
+      // CHECK: txn.call @state::@write if %{{.*}} : i1 then(%{{.*}}) : (i32) -> ()
       txn.call @state::@write(%c1) : (i32) -> ()
       txn.yield
     } else {
-      // CHECK: txn.call @state::@write({{.*}}) {{.*}} {reachability_condition = "!cond_0"}
+      // CHECK: txn.call @state::@write if %{{.*}} : i1 then(%{{.*}}) : (i32) -> ()
       txn.call @state::@write(%c0) : (i32) -> ()
       txn.yield
     }
@@ -39,15 +39,15 @@ txn.module @NestedConditionals {
     
     %cond1 = arith.cmpi "eq", %arg0, %c0 : i32
     txn.if %cond1 {
-      // CHECK: txn.call @r1::@write({{.*}}) {{.*}} {reachability_condition = "cond_{{[0-9]+}}"}
+      // CHECK: txn.call @r1::@write if %{{.*}} : i1 then(%{{.*}}) : (i32) -> ()
       txn.call @r1::@write(%c0) : (i32) -> ()
       txn.yield
     } else {
       %cond2 = arith.cmpi "sgt", %arg0, %c10 : i32
       txn.if %cond2 {
-        // CHECK: txn.call @r2::@write(%arg0) {{.*}} {reachability_condition = "!cond_{{[0-9]+}} && cond_{{[0-9]+}}"}
+        // CHECK: txn.call @r2::@write if %{{.*}} : i1 then(%arg0) : (i32) -> ()
         txn.call @r2::@write(%arg0) : (i32) -> ()
-        // CHECK: txn.call @r1::@write({{.*}}) {{.*}} {reachability_condition = "!cond_{{[0-9]+}} && cond_{{[0-9]+}}"}
+        // CHECK: txn.call @r1::@write if %{{.*}} : i1 then(%{{.*}}) : (i32) -> ()
         txn.call @r1::@write(%c10) : (i32) -> ()
         txn.yield
       } else {
@@ -66,7 +66,8 @@ txn.module @UnconditionalCalls {
   
   // CHECK-LABEL: txn.value_method @getValue
   txn.value_method @getValue() -> i32 {
-    // CHECK: txn.call @w::@read() {{.*}}
+    // CHECK: txn.call @w::@read() : () -> i32
+    // CHECK-NOT: if
     %val = txn.call @w::@read() : () -> i32
     txn.return %val : i32
   }
@@ -74,7 +75,8 @@ txn.module @UnconditionalCalls {
   // CHECK-LABEL: txn.rule @alwaysRule
   txn.rule @alwaysRule {
     %c42 = arith.constant 42 : i32
-    // CHECK: txn.call @w::@write({{.*}}) {{.*}} {reachability_condition = "true"}
+    // CHECK: txn.call @w::@write(%{{.*}}) : (i32) -> ()
+    // CHECK-NOT: if
     txn.call @w::@write(%c42) : (i32) -> ()
     txn.return
   }
@@ -97,7 +99,7 @@ txn.module @ComplexControlFlow {
     // First level condition
     %cond1 = arith.cmpi "slt", %val, %c5 : i32
     txn.if %cond1 {
-      // CHECK: txn.call @counter::@write({{.*}}) {{.*}} {reachability_condition = "cond_{{[0-9]+}}"}
+      // CHECK: txn.call @counter::@write if %{{.*}} : i1 then(%{{.*}}) : (i32) -> ()
       txn.call @counter::@write(%c0) : (i32) -> ()
       txn.yield
     } else {
@@ -105,11 +107,11 @@ txn.module @ComplexControlFlow {
       %cond2 = arith.cmpi "slt", %val, %c10 : i32
       txn.if %cond2 {
         %inc = arith.addi %val, %c1 : i32
-        // CHECK: txn.call @counter::@write({{.*}}) {{.*}} {reachability_condition = "!cond_{{[0-9]+}} && cond_{{[0-9]+}}"}
+        // CHECK: txn.call @counter::@write if %{{.*}} : i1 then(%{{.*}}) : (i32) -> ()
         txn.call @counter::@write(%inc) : (i32) -> ()
         txn.yield
       } else {
-        // CHECK: txn.call @counter::@write({{.*}}) {{.*}} {reachability_condition = "!cond_{{[0-9]+}} && !cond_{{[0-9]+}}"}
+        // CHECK: txn.call @counter::@write if %{{.*}} : i1 then(%{{.*}}) : (i32) -> ()
         txn.call @counter::@write(%c10) : (i32) -> ()
         txn.yield
       }

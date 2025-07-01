@@ -302,10 +302,26 @@ ParseResult CallOp::parse(OpAsmParser &parser, OperationState &result) {
   SmallVector<OpAsmParser::UnresolvedOperand, 4> operands;
   SmallVector<Type> operandTypes;
   SmallVector<Type> resultTypes;
+  OpAsmParser::UnresolvedOperand conditionOperand;
+  Type conditionType;
+  bool hasCondition = false;
 
   // Parse @callee or @instance.method
   if (parser.parseAttribute(calleeAttr, "callee", result.attributes))
     return failure();
+
+  // Check for optional condition operand: if <cond> : <type> then (operands)
+  if (succeeded(parser.parseOptionalKeyword("if"))) {
+    hasCondition = true;
+    if (parser.parseOperand(conditionOperand))
+      return failure();
+    if (parser.parseColon())
+      return failure();
+    if (parser.parseType(conditionType))
+      return failure();
+    if (parser.parseKeyword("then"))
+      return failure();
+  }
 
   // Parse (operands)
   if (parser.parseOperandList(operands, OpAsmParser::Delimiter::Paren))
@@ -329,23 +345,52 @@ ParseResult CallOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOptionalAttrDict(result.attributes))
     return failure();
 
-  return parser.resolveOperands(operands, operandTypes, parser.getNameLoc(),
+  // Resolve operands
+  SmallVector<OpAsmParser::UnresolvedOperand> allOperands;
+  SmallVector<Type> allOperandTypes;
+  
+  if (hasCondition) {
+    allOperands.push_back(conditionOperand);
+    allOperandTypes.push_back(conditionType);
+  }
+  
+  allOperands.append(operands.begin(), operands.end());
+  allOperandTypes.append(operandTypes.begin(), operandTypes.end());
+
+  // Set operandSegmentSizes attribute for AttrSizedOperandSegments trait
+  SmallVector<int32_t, 2> segmentSizes;
+  segmentSizes.push_back(hasCondition ? 1 : 0);  // condition
+  segmentSizes.push_back(operands.size());        // args
+  result.addAttribute("operandSegmentSizes",
+                      parser.getBuilder().getDenseI32ArrayAttr(segmentSizes));
+
+  return parser.resolveOperands(allOperands, allOperandTypes, parser.getNameLoc(),
                                result.operands);
 }
 
 void CallOp::print(OpAsmPrinter &p) {
   p << " ";
   p.printAttributeWithoutType(getCalleeAttr());
+  
+  // Check if we have a condition operand
+  if (getCondition()) {
+    p << " if ";
+    p.printOperand(getCondition());
+    p << " : ";
+    p.printType(getCondition().getType());
+    p << " then";
+  }
+  
   p << "(";
-  p.printOperands(getOperands());
+  p.printOperands(getArgs());
   p << ") : ";
   
   // Print as function type
   auto funcType = FunctionType::get(getContext(), getOperandTypes(), getResultTypes());
   p.printType(funcType);
   
-  // Print attributes (excluding callee which was already printed)
-  SmallVector<StringRef> elidedAttrs = {"callee"};
+  // Print attributes (excluding callee and operandSegmentSizes)
+  SmallVector<StringRef> elidedAttrs = {"callee", "operandSegmentSizes"};
   p.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
 }
 
