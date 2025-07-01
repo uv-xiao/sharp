@@ -2,9 +2,80 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Using Gemini CLI for Large Codebase Analysis
 
-Sharp is an MLIR-based infrastructure that bridges hardware, architecture, and programming. It provides custom MLIR dialects for hardware description and integrates with CIRCT for RTL generation.
+When analyzing large codebases or multiple files that might exceed context limits, use the Gemini CLI with its massive
+context window. Use `gemini -p` to leverage Google Gemini's large context capacity.
+
+### File and Directory Inclusion Syntax
+
+Use the `@` syntax to include files and directories in your Gemini prompts. The paths should be relative to WHERE you run the
+  gemini command:
+
+#### Examples:
+
+**Single file analysis:**
+gemini -p "@src/main.py Explain this file's purpose and structure"
+
+Multiple files:
+gemini -p "@package.json @src/index.js Analyze the dependencies used in the code"
+
+Entire directory:
+gemini -p "@src/ Summarize the architecture of this codebase"
+
+Multiple directories:
+gemini -p "@src/ @tests/ Analyze test coverage for the source code"
+
+Current directory and subdirectories:
+gemini -p "@./ Give me an overview of this entire project"
+
+## Or use --all_files flag:
+gemini --all_files -p "Analyze the project structure and dependencies"
+
+### Implementation Verification Examples
+
+Check if a feature is implemented:
+gemini -p "@src/ @lib/ Has dark mode been implemented in this codebase? Show me the relevant files and functions"
+
+Verify authentication implementation:
+gemini -p "@src/ @middleware/ Is JWT authentication implemented? List all auth-related endpoints and middleware"
+
+Check for specific patterns:
+gemini -p "@src/ Are there any React hooks that handle WebSocket connections? List them with file paths"
+
+Verify error handling:
+gemini -p "@src/ @api/ Is proper error handling implemented for all API endpoints? Show examples of try-catch blocks"
+
+Check for rate limiting:
+gemini -p "@backend/ @middleware/ Is rate limiting implemented for the API? Show the implementation details"
+
+Verify caching strategy:
+gemini -p "@src/ @lib/ @services/ Is Redis caching implemented? List all cache-related functions and their usage"
+
+Check for specific security measures:
+gemini -p "@src/ @api/ Are SQL injection protections implemented? Show how user inputs are sanitized"
+
+Verify test coverage for features:
+gemini -p "@src/payment/ @tests/ Is the payment processing module fully tested? List all test cases"
+
+When to Use Gemini CLI
+
+Use gemini -p when:
+- Analyzing entire codebases or large directories
+- Comparing multiple large files
+- Need to understand project-wide patterns or architecture
+- Current context window is insufficient for the task
+- Working with files totaling more than 100KB
+- Verifying if specific features, patterns, or security measures are implemented
+- Checking for the presence of certain coding patterns across the entire codebase
+
+Important Notes
+
+- Paths in @ syntax are relative to your current working directory when invoking gemini
+- The CLI will include file contents directly in the context
+- No need for --yolo flag for read-only analysis
+- Gemini's context window can handle entire codebases that would overflow Claude's context
+- When checking implementations, be specific about what you're looking for to get accurate results
 
 ## Essential Commands
 
@@ -25,6 +96,12 @@ pixi run test-python       # Test Python bindings
 
 # Run a single test file
 ./build/bin/llvm-lit test/Dialect/Txn/basic.mlir -v
+
+# Alternative: use the full path to llvm-lit from the unified build
+/home/uvxiao/sharp/.install/unified-build/bin/llvm-lit test/Dialect/Txn/basic.mlir -v
+
+# Debug a test by running sharp-opt directly
+./build/bin/sharp-opt test/Dialect/Txn/basic.mlir
 ```
 
 ### Development Commands
@@ -36,6 +113,9 @@ pixi run shell            # Enter development shell with proper environment
 # Run sharp-opt (the main compiler tool)
 ./build/bin/sharp-opt <input.mlir>
 pixi run run-opt
+
+# VSCode development
+./dev-vscode.sh    # Opens configured VSCode workspace
 ```
 
 ## Architecture Overview
@@ -51,6 +131,8 @@ Sharp implements custom MLIR dialects following CIRCT patterns:
    - Transaction-based hardware description
    - Key concepts: Modules, Methods (value/action), Rules, Scheduling
    - Inspired by Fjfj language for concurrent hardware verification
+   - Conflict matrix support: SB=0, SA=1, C=2, CF=3
+   - Timing attributes: "combinational", "static(n)", "dynamic"
    - See `docs/txn.md` for detailed semantics
 
 ### Key Implementation Patterns
@@ -64,7 +146,8 @@ Sharp implements custom MLIR dialects following CIRCT patterns:
 **Conversion Passes:**
 - Conversions go in `lib/Conversion/`
 - Follow the pattern: source dialect → target dialect
-- Register in `lib/Conversion/PassDetail.h`
+- Register in `include/sharp/Conversion/Passes.td`
+- Main pass implementation in `lib/Conversion/SourceToTarget/SourceToTargetPass.cpp`
 
 **Analysis Passes:**
 - Implement in `lib/Analysis/`
@@ -83,21 +166,43 @@ Sharp implements custom MLIR dialects following CIRCT patterns:
 - Uses LLVM lit with FileCheck
 - Integration tests in `test/` mirror the source structure
 - Test files use `.mlir` extension with RUN lines
-- Example test pattern:
+- Common test patterns:
   ```mlir
   // RUN: sharp-opt %s | FileCheck %s
+  // RUN: sharp-opt --convert-txn-to-firrtl %s | FileCheck %s
+  // RUN: sharp-opt %s -sharp-infer-conflict-matrix | FileCheck %s
   ```
+- FileCheck directives:
+  - `CHECK-LABEL:` - Anchors to specific operations
+  - `CHECK:` - Exact matching
+  - `CHECK-DAG:` - Order-independent matching
+  - `CHECK-NEXT:` - Must appear on next line
 
-### Current Development Focus
+### Analysis Passes Available
 
-Per `PLAN.md`, active work includes:
-- Conflict matrix (CM) implementation for scheduling
-- Timing attributes for rules/methods
-- Translation from txn dialect to FIRRTL/Verilog
-- Multi-cycle rule support
+- `--sharp-infer-conflict-matrix` - Infers conflict relationships between actions
+- `--sharp-validate-method-attributes` - Validates signal names and method constraints
+- `--sharp-reachability-analysis` - Computes reachability conditions for method calls
+- `--sharp-pre-synthesis-check` - Checks for non-synthesizable constructs
+
+### Current Development Status
+
+Per `STATUS.md`:
+- **Completed**: Conflict matrix on schedule ops, timing attributes, Txn-to-FIRRTL conversion
+- **In Progress**: Enhanced conversion features (primitive method calls, state management)
+- **Planned**: Verilog export, additional hardware primitives
 
 ## Known Issues
 
 - Python bindings have a runtime issue under investigation
-- Sharp Txn to FIRRTL conversion is in planning phase
-- Multi-cycle operations not yet supported
+- Multi-cycle operations not yet supported in translation
+- Combinational loop detection pending txn.primitive attribute support
+
+## Key Documentation Files
+
+- `PLAN.md` - Detailed technical roadmap and algorithm specifications
+- `STATUS.md` - Current implementation status and completed features
+- `docs/txn.md` - Transaction dialect semantics and operation definitions
+- `docs/txn_to_firrtl.md` - Conversion algorithm documentation
+- `docs/txn_primitive.md` - Primitive infrastructure documentation
+- `docs/firrtl_operations_guide.md` - FIRRTL operations reference

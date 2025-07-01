@@ -85,6 +85,22 @@ static FIRRTLType convertType(Type type) {
     }
   }
   
+  // Handle vector types
+  if (auto vectorType = dyn_cast<VectorType>(type)) {
+    // Convert to FIRRTL vector type
+    auto elementType = convertType(vectorType.getElementType());
+    if (!elementType) {
+      return nullptr;
+    }
+    // FIRRTL uses FVectorType for vectors
+    // Need to cast to FIRRTLBaseType
+    if (auto baseType = dyn_cast<FIRRTLBaseType>(elementType)) {
+      return FVectorType::get(baseType, vectorType.getNumElements());
+    }
+    llvm::errs() << "Vector element type must be a FIRRTL base type\n";
+    return nullptr;
+  }
+  
   // Handle module types - not directly converted
   if (isa<ModuleType>(type)) {
     return nullptr;

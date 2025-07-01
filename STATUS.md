@@ -100,14 +100,22 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - Fixed implementation to erase original Txn modules after conversion
   - All tests passing (30/30) after fixing test CHECK patterns
 
+- **Extended Type Support** (2025-07-01)
+  - Added support for vector types in Txn-to-FIRRTL conversion
+  - Implemented proper type conversion for FIRRTL vector types
+  - Vector types convert to `!firrtl.vector<element_type, size>`
+  - Already supported: integers of any width (i8, i16, i32, i64, etc.)
+  - Test coverage in `test/Conversion/TxnToFIRRTL/wider-types.mlir` and `vector-types.mlir`
+  - All tests passing (32/32)
+
 ### 🚧 In Progress
 
 - **Enhanced Txn-to-FIRRTL Features**
   - [ ] Add conflict_inside calculation with reachability analysis
-  - [ ] Implement submodule instantiation and port connections
-  - [ ] Handle CallOp translation to connect to submodule methods
+  - [x] Implement submodule instantiation and port connections (already working)
+  - [x] Handle CallOp translation to connect to submodule methods (already working)
   - [ ] Support proper register/wire state management in primitives
-  - [ ] Add support for more complex data types beyond i1/i32
+  - [x] Add support for more complex data types (vectors, wider integers)
   - [ ] Implement primitive method calls (Register.read, Wire.write, etc.)
 
 ### 📋 Planned
