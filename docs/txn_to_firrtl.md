@@ -130,11 +130,20 @@ auto firrtlModule = builder.create<FModuleOp>(loc, moduleName, ports);
 3. **Method Logic**: Combinational logic for each method
 4. **Scheduling Logic**: Will-fire calculation and conflict resolution
 
-### 3. Will-Fire (WF) Logic Generation
+### 3. Will-Fire (WF) Logic Generation 
+
 
 The will-fire logic determines whether an action (rule or method) can execute in the current cycle.
 
+There should be two modes: static and dynamic:
+- static mode: For a module of actions `[a0, a1, .., an]` (in order), it determines each actions' will-fire logic according to the "might conflict" relationships between them. For example, if action `a0` calls method `m0` from an instance and action `a1` calls method `m1` from the same instance, and `m0` and `m1` might conflict, then `a0` and `a1` might conflict. Then, the static mode will prevent `a1` from executing if `a0` has already executed.
+- dynamic mode: For a module of actions `[a0, a1, .., an]` (in order), it determines each actions' will-fire logic according to the actual execution status of the instance actions, their conflict relationships, and their reachability conditions. For example, if action `a0` calls method `m0` (under condition `c0`) from an instance and action `a1` calls method `m1` (under condition `c1`) from the same instance, and `m0` and `m1` conflict. Then, the dynamic mode will prevent `a1` from executing if `a0` has already executed and `c0` is true (that is, `a0` acturally executes `m0`).
+
+
+#### 3.1 Static Mode
+
 #### Basic WF Calculation
+
 ```
 wf[action] = enabled[action] && !conflicts_with_earlier[action] && !conflict_inside[action]
 ```
@@ -148,11 +157,6 @@ conflicts(a1, a2) =
   (CM[a1,a2] == SA && wf[a1])             // a1 must happen after a2, but a1 has already happened
 ```
 
-**Method Call Tracking**: Track which action methods have been called
-```
-method_called[m] = OR(wf[a] for all a that calls m)
-```
-
 **Conflict with earlier actions**:
 ```
 conflicts_with_earlier[a] = OR(wf[a1] && conflict(a1, a) for all a1 that is scheduled before a)
@@ -160,12 +164,45 @@ conflicts_with_earlier[a] = OR(wf[a1] && conflict(a1, a) for all a1 that is sche
 
 **Conflict inside an action**:
 ```
-conflict_inside[a] = OR(conflict(m1, m2) && reach(m1) && reach(m2) for every m1, m2 in a, m1 is before m2)
+conflict_inside[a] = OR(conflict(M1, M2) && reach(m1) && reach(m2) for every m1, m2 in a, m1 is before m2)
 // where reach(m) is a hardware signal representing the condition under which method call m 
 // can be reached from the root of the action (considering all `txn.if` conditions along the path)
-// Note: reach(m1) && reach(m2) evaluates to true in hardware when both methods can be reached 
-// under some execution path
+// For example:
+// rule @r {
+//   if %cond1 {
+//     %val1 = txn.call @i:@m() : () -> i32
+//   } 
+//   if %cond2 {
+//     %val2 = txn.call @i:@m() : () -> i32
+//   }
+// }
+// In this case, @i:@m is called twice, and they have two reachability conditions:
+// - reach(@i:@m # 1) = %cond1
+// - reach(@i:@m # 2) = %cond2
+// If %cond1 is false, then the second call shouldn't be prevented by the conflict_inside logic.
+// We use `M` to represent a instance method (e.g., @i:@m),
+//   and we use `m in M` to represent a specific call of the method (e.g., @i:@m # 1, @i:@m # 2).
 ```
+
+### 3.2 Dynamic Mode
+
+
+
+```
+wf[action] = enabled[action] && AND{for every m in action, NOT(reach(m, action) && conflict_with_earlier(m))}
+```
+
+**Method Call Tracking**: Track which action methods have been called
+```
+method_called[M] = OR{wf[a] && OR(reach(m, action) for m in M) for every action that has been scheduled and calls M} 
+                  || OR(reach(m, current_action) for every m in M and m has been processed in the current action) 
+```
+
+**Conflict with earlier actions**: For the method call `m in M` to be processed in the current action,
+```
+conflict_with_earlier(m) = OR(method_called[M'] && conflict(M', M) for every M' in method_called)
+```
+
 
 
 ### 4. Method Implementation

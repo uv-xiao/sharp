@@ -117,6 +117,18 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - All 34 tests passing
   - Note: Full dynamic reachability analysis with conditional execution paths planned for future enhancement
 
+- **Static and Dynamic Will-Fire Modes** (2025-07-01)
+  - Implemented both static and dynamic will-fire logic generation modes as specified in `docs/txn_to_firrtl.md` section 3
+  - **Static Mode** (conservative): `wf[action] = enabled[action] && !conflicts_with_earlier[action] && !conflict_inside[action]`
+  - **Dynamic Mode** (precise): `wf[action] = enabled[action] && AND{for every m in action, NOT(reach(m, action) && conflict_with_earlier(m))}`
+  - Added command-line option `--convert-txn-to-firrtl="will-fire-mode=static|dynamic"` to choose between modes
+  - Proper action-level conflict detection: infers conflicts between actions from method-level conflicts in conflict matrix
+  - In static mode: if action A calls method M1, action B calls method M2, and M1 conflicts with M2, then A conflicts with B
+  - Static mode generates logic preventing later actions from firing if earlier conflicting actions fire
+  - Dynamic mode uses reachability conditions for more precise conflict detection
+  - Test coverage in `test/Conversion/TxnToFIRRTL/will-fire-modes.mlir` and `will-fire-static-mode.mlir`
+  - All will-fire mode tests passing (40/41 total tests passing - 1 unrelated test failure)
+
 - **Enhanced Reachability Analysis and CallOp** (2025-07-01)
   - Modified CallOp to support optional condition operand for reachability
   - Updated CallOp syntax: `txn.call @method if %cond : <type> then (...) : ...`
@@ -129,7 +141,17 @@ Sharp is implementing transaction-based hardware description with conflict matri
   - Implements proper dynamic conflict detection: `OR(conflict(m1,m2) && reach(m1) && reach(m2))`
   - Added support for arith::AndIOp, arith::XOrIOp conversion to FIRRTL
   - Test coverage in reachability-analysis.mlir and dominance-issue-example.mlir
-  - All 37 reachability tests passing
+  - 38 tests total, with conflict_inside support for:
+    - Action methods with block arguments as conditions (conflict-inside-method-args.mlir)
+    - Rules with constant conditions (conflict-inside-rule-simple.mlir)
+    - Simple unconditional conflicts (conflict-inside-simple.mlir)
+    - Complex block argument conditions (conflict-inside-block-args.mlir)
+  - **Block Arguments in Reachability Conditions** (2025-07-01)
+    - Implemented special handling for method arguments used as reachability conditions
+    - Fixed FIRRTL port creation to support multiple arguments (OUT_arg0, OUT_arg1, etc.)
+    - Added global block argument mapping before pre-pass conversion
+    - Block arguments properly converted to FIRRTL ports throughout conflict_inside calculation
+    - All block argument test cases now passing
 
 ### 🚧 In Progress
 
@@ -171,6 +193,7 @@ Sharp is implementing transaction-based hardware description with conflict matri
 - Python bindings have runtime issues
 - Multi-cycle operations not yet supported in translation
 - Nonsynthesizable primitives will fail translation
+- ~~Block arguments used as reachability conditions require special handling in TxnToFIRRTL conversion~~ ✅ **COMPLETED** (2025-07-01)
 
 ## Implementation Notes
 

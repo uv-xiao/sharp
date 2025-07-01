@@ -18,6 +18,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
+#include "llvm/ADT/StringMap.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "sharp/Conversion/Passes.h"
@@ -145,12 +146,13 @@ static void populateConflictMatrix(ScheduleOp schedule, ConversionContext &ctx) 
   }
 }
 
-/// Get conflict relation between two actions
-static ConflictRelation getConflictRelation(StringRef a1, StringRef a2,
-                                           const ConversionContext &ctx) {
+/// Get conflict relation between two method calls (for dynamic mode)
+static ConflictRelation getConflictRelationFromString(const std::string &method1, 
+                                                     const std::string &method2,
+                                                     const ConversionContext &ctx) {
   // Check both orderings
-  std::string key1 = (a1 + "," + a2).str();
-  std::string key2 = (a2 + "," + a1).str();
+  std::string key1 = method1 + "," + method2;
+  std::string key2 = method2 + "," + method1;
   
   auto it1 = ctx.conflictMatrix.find(key1);
   if (it1 != ctx.conflictMatrix.end()) {
@@ -170,43 +172,133 @@ static ConflictRelation getConflictRelation(StringRef a1, StringRef a2,
   return ConflictRelation::ConflictFree;
 }
 
-/// Generate will-fire logic for an action
-static Value generateWillFire(StringRef actionName, Value enabled,
-                            ArrayRef<StringRef> schedule,
-                            ConversionContext &ctx) {
+/// Get conflict relation between two actions by examining their method calls
+static ConflictRelation getConflictRelation(StringRef a1, StringRef a2,
+                                           const ConversionContext &ctx,
+                                           const DenseMap<StringRef, Operation*> &actionMap) {
+  // First check if there's a direct action-to-action conflict in the matrix
+  std::string key1 = (a1 + "," + a2).str();
+  std::string key2 = (a2 + "," + a1).str();
+  
+  auto it1 = ctx.conflictMatrix.find(key1);
+  if (it1 != ctx.conflictMatrix.end()) {
+    return static_cast<ConflictRelation>(it1->second);
+  }
+  
+  auto it2 = ctx.conflictMatrix.find(key2);
+  if (it2 != ctx.conflictMatrix.end()) {
+    // Swap SB and SA when reversing order
+    auto rel = static_cast<ConflictRelation>(it2->second);
+    if (rel == ConflictRelation::SequenceBefore) return ConflictRelation::SequenceAfter;
+    if (rel == ConflictRelation::SequenceAfter) return ConflictRelation::SequenceBefore;
+    return rel;
+  }
+  
+  // Infer conflict from method calls: if action a1 calls method m1 and action a2 calls method m2,
+  // and m1 conflicts with m2, then a1 conflicts with a2
+  auto it_a1 = actionMap.find(a1);
+  auto it_a2 = actionMap.find(a2);
+  if (it_a1 == actionMap.end() || it_a2 == actionMap.end()) {
+    return ConflictRelation::ConflictFree;
+  }
+  
+  Operation *action1 = it_a1->second;
+  Operation *action2 = it_a2->second;
+  
+  // Collect method calls from both actions
+  SmallVector<std::string> methods1, methods2;
+  action1->walk([&](CallOp call) {
+    auto callee = call.getCallee();
+    if (callee.getNestedReferences().size() == 1) {
+      // Build full method name: instance::method
+      StringRef inst = callee.getRootReference().getValue();
+      StringRef method = callee.getNestedReferences()[0].getValue();
+      std::string fullName = (inst + "::" + method).str();
+      methods1.push_back(fullName);
+    }
+  });
+  action2->walk([&](CallOp call) {
+    auto callee = call.getCallee();
+    if (callee.getNestedReferences().size() == 1) {
+      // Build full method name: instance::method
+      StringRef inst = callee.getRootReference().getValue();
+      StringRef method = callee.getNestedReferences()[0].getValue();
+      std::string fullName = (inst + "::" + method).str();
+      methods2.push_back(fullName);
+    }
+  });
+  
+  // Check for conflicts between any method pairs
+  ConflictRelation maxConflict = ConflictRelation::ConflictFree;
+  for (const std::string &m1 : methods1) {
+    for (const std::string &m2 : methods2) {
+      auto rel = getConflictRelationFromString(m1, m2, ctx);
+      // Prioritize conflicts: C > SA/SB > CF
+      if (rel == ConflictRelation::Conflict) {
+        return ConflictRelation::Conflict; // Highest priority
+      } else if (rel == ConflictRelation::SequenceBefore || rel == ConflictRelation::SequenceAfter) {
+        maxConflict = rel; // Remember sequence constraints
+      }
+    }
+  }
+  
+  return maxConflict;
+}
+
+/// Generate static mode will-fire logic for an action
+/// wf[action] = enabled[action] && !conflicts_with_earlier[action] && !conflict_inside[action]
+static Value generateStaticWillFire(StringRef actionName, Value enabled,
+                                  ArrayRef<StringRef> schedule,
+                                  ConversionContext &ctx,
+                                  const DenseMap<StringRef, Operation*> &actionMap) {
   auto &builder = ctx.firrtlBuilder;
   auto loc = builder.getUnknownLoc();
-  [[maybe_unused]] MLIRContext *mlirCtx = builder.getContext();
   
   // Start with enabled signal
   Value wf = enabled;
   
   if (!wf) {
-    llvm::errs() << "generateWillFire: enabled signal is null for " << actionName << "\n";
+    llvm::errs() << "generateStaticWillFire: enabled signal is null for " << actionName << "\n";
     return nullptr;
   }
   
-  // Check conflicts with earlier actions
+  // Check conflicts with earlier actions (static mode)
+  // conflicts_with_earlier[a] = OR(wf[a1] && conflict(a1, a) for all a1 scheduled before a)
   for (StringRef earlier : schedule) {
     if (earlier == actionName) break;
     
-    auto rel = getConflictRelation(earlier, actionName, ctx);
+    auto rel = getConflictRelation(earlier, actionName, ctx, actionMap);
     
     // Generate conflict check if needed
-    if (rel == ConflictRelation::Conflict || rel == ConflictRelation::SequenceBefore) {
-      Value earlierWF = ctx.willFireSignals[earlier];
-      if (!earlierWF) {
-        // Skip - this is likely a value method which doesn't have will-fire
+    // conflicts(a1, a2) = (CM[a1,a2] == C) || (CM[a1,a2] == SA && wf[a1])
+    if (rel == ConflictRelation::Conflict) {
+      auto wfIt = ctx.willFireSignals.find(earlier);
+      if (wfIt == ctx.willFireSignals.end()) {
+        // Earlier action hasn't been processed yet or is a value method
+        llvm::errs() << "Warning: no will-fire signal found for earlier action " << earlier << "\n";
         continue;
       }
+      Value earlierWF = wfIt->second;
       
-      // Create: wf = wf & !earlier_wf
+      // Create: wf = wf & !earlier_wf (static conflict)
+      auto notEarlier = builder.create<NotPrimOp>(loc, earlierWF);
+      wf = builder.create<AndPrimOp>(loc, wf, notEarlier);
+    } else if (rel == ConflictRelation::SequenceBefore) {
+      // SA: a1 must happen after a2, but a1 has already happened
+      auto wfIt = ctx.willFireSignals.find(earlier);
+      if (wfIt == ctx.willFireSignals.end()) {
+        llvm::errs() << "Warning: no will-fire signal found for earlier action " << earlier << "\n";
+        continue;
+      }
+      Value earlierWF = wfIt->second;
+      
+      // Create: wf = wf & !earlier_wf (sequence violation)
       auto notEarlier = builder.create<NotPrimOp>(loc, earlierWF);
       wf = builder.create<AndPrimOp>(loc, wf, notEarlier);
     }
   }
   
-  // TODO: Add conflict_inside calculation once reachability is integrated
+  // conflict_inside is already handled in the main logic
   
   // Create node for will-fire signal
   auto wfNode = builder.create<NodeOp>(loc, wf,
@@ -217,6 +309,137 @@ static Value generateWillFire(StringRef actionName, Value enabled,
   ctx.willFireSignals[actionName] = wfNode.getResult();
   
   return wfNode.getResult();
+}
+
+/// Generate dynamic mode will-fire logic for an action
+/// wf[action] = enabled[action] && AND{for every m in action, NOT(reach(m, action) && conflict_with_earlier(m))}
+static Value generateDynamicWillFire(StringRef actionName, Value enabled,
+                                   ArrayRef<StringRef> schedule,
+                                   ConversionContext &ctx,
+                                   Operation *action,
+                                   const DenseMap<StringRef, Operation*> &actionMap) {
+  auto &builder = ctx.firrtlBuilder;
+  auto loc = builder.getUnknownLoc();
+  auto intType = IntType::get(builder.getContext(), false, 1);
+  
+  // Start with enabled signal
+  Value wf = enabled;
+  
+  if (!wf) {
+    llvm::errs() << "generateDynamicWillFire: enabled signal is null for " << actionName << "\n";
+    return nullptr;
+  }
+  
+  // Track method calls that have been made by earlier actions
+  // method_called[M] = OR{wf[a] && OR(reach(m, action) for m in M) for every earlier action}
+  llvm::StringMap<Value> methodCalled;
+  
+  // Analyze earlier actions to see what methods they might call
+  for (StringRef earlierName : schedule) {
+    if (earlierName == actionName) break;
+    
+    Value earlierWF = ctx.willFireSignals[earlierName];
+    if (!earlierWF) continue;
+    
+    // Find the earlier action operation from actionMap
+    auto it = actionMap.find(earlierName);
+    if (it == actionMap.end()) continue;
+    Operation *earlierAction = it->second;
+    
+    // Collect method calls from earlier action
+    earlierAction->walk([&](CallOp call) {
+      StringRef methodKey = call.getCallee().getRootReference().getValue();
+      
+      // Get reachability condition for this call
+      Value condition;
+      if (call.getCondition()) {
+        condition = ctx.txnToFirrtl.lookup(call.getCondition());
+        if (!condition) {
+          condition = builder.create<ConstantOp>(loc, Type(intType), 
+                                                APSInt(APInt(1, 1), true));
+        }
+      } else {
+        condition = builder.create<ConstantOp>(loc, Type(intType), 
+                                              APSInt(APInt(1, 1), true));
+      }
+      
+      // method_called[M] |= wf[earlier] && reach(m, earlier)
+      Value callCondition = builder.create<AndPrimOp>(loc, earlierWF, condition);
+      if (methodCalled.count(methodKey)) {
+        methodCalled[methodKey] = builder.create<OrPrimOp>(loc, methodCalled[methodKey], callCondition);
+      } else {
+        methodCalled[methodKey] = callCondition;
+      }
+    });
+  }
+  
+  // For each method call in current action, check for conflicts with earlier calls
+  action->walk([&](CallOp call) {
+    StringRef methodKey = call.getCallee().getRootReference().getValue();
+    
+    // Get reachability condition for this call
+    Value condition;
+    if (call.getCondition()) {
+      condition = ctx.txnToFirrtl.lookup(call.getCondition());
+      if (!condition) {
+        condition = builder.create<ConstantOp>(loc, Type(intType), 
+                                              APSInt(APInt(1, 1), true));
+      }
+    } else {
+      condition = builder.create<ConstantOp>(loc, Type(intType), 
+                                            APSInt(APInt(1, 1), true));
+    }
+    
+    // Check for conflicts with any earlier method calls
+    for (auto &[earlierMethodKey, earlierCalled] : methodCalled) {
+      // Check if these methods conflict
+      auto rel = getConflictRelationFromString(earlierMethodKey.str(), methodKey.str(), ctx);
+      
+      if (rel == ConflictRelation::Conflict) {
+        // conflict_with_earlier(m) = method_called[M'] && conflict(M', M)
+        Value conflictCondition = builder.create<AndPrimOp>(loc, earlierCalled, condition);
+        
+        // wf = wf && !(reach(m) && conflict_with_earlier(m))
+        auto notConflict = builder.create<NotPrimOp>(loc, conflictCondition);
+        wf = builder.create<AndPrimOp>(loc, wf, notConflict);
+      }
+    }
+  });
+  
+  // conflict_inside is already handled in the main logic
+  
+  // Create node for will-fire signal
+  auto wfNode = builder.create<NodeOp>(loc, wf,
+                                      (actionName.str() + "_wf"),
+                                      NameKindEnum::DroppableName);
+  
+  // Store in context
+  ctx.willFireSignals[actionName] = wfNode.getResult();
+  
+  return wfNode.getResult();
+}
+
+/// Generate will-fire logic for an action (dispatcher for static/dynamic modes)
+static Value generateWillFire(StringRef actionName, Value enabled,
+                            ArrayRef<StringRef> schedule,
+                            ConversionContext &ctx,
+                            const std::string &willFireMode = "static",
+                            Operation *action = nullptr,
+                            const DenseMap<StringRef, Operation*> *actionMap = nullptr) {
+  if (!actionMap) {
+    llvm::errs() << "generateWillFire: actionMap is required for all modes\n";
+    return nullptr;
+  }
+  
+  if (willFireMode == "dynamic") {
+    if (!action) {
+      llvm::errs() << "generateWillFire: dynamic mode requires action operation\n";
+      return generateStaticWillFire(actionName, enabled, schedule, ctx, *actionMap);
+    }
+    return generateDynamicWillFire(actionName, enabled, schedule, ctx, action, *actionMap);
+  } else {
+    return generateStaticWillFire(actionName, enabled, schedule, ctx, *actionMap);
+  }
 }
 
 // Forward declaration
@@ -643,7 +866,8 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
 /// Convert a Txn module to FIRRTL
 static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule, 
                                  ConversionContext &ctx,
-                                 ::circt::firrtl::CircuitOp circuit) {
+                                 ::circt::firrtl::CircuitOp circuit,
+                                 const std::string &willFireMode = "static") {
   MLIRContext *mlirCtx = txnModule->getContext();
   OpBuilder builder(mlirCtx);
   
@@ -697,10 +921,15 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       
       // Add data input ports for arguments
       auto funcType = actionMethod.getFunctionType();
-      if (funcType.getNumInputs() > 0) {
-        // For simplicity, assume single argument
-        if (auto firrtlType = convertType(funcType.getInput(0))) {
-          ports.push_back({builder.getStringAttr((prefix + resultPostfix).str()),
+      for (unsigned i = 0; i < funcType.getNumInputs(); ++i) {
+        if (auto firrtlType = convertType(funcType.getInput(i))) {
+          std::string portName;
+          if (funcType.getNumInputs() == 1) {
+            portName = (prefix + resultPostfix).str();
+          } else {
+            portName = (prefix + resultPostfix + "_arg" + std::to_string(i)).str();
+          }
+          ports.push_back({builder.getStringAttr(portName),
                           firrtlType, Direction::In});
         }
       }
@@ -797,6 +1026,30 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   
   // Store instance ports in context for method call connections
   ctx.instancePorts = instancePorts;
+  
+  // First step: Map all block arguments to FIRRTL ports for all action methods
+  txnModule.walk([&](ActionMethodOp actionMethod) {
+    StringRef prefix = actionMethod.getPrefix().value_or(actionMethod.getSymName());
+    auto methodPortNames = firrtlModule.getPortNames();
+    auto methodBlockArgs = firrtlModule.getBodyBlock()->getArguments();
+    
+    // Map method arguments to FIRRTL ports
+    for (unsigned i = 0; i < actionMethod.getNumArguments(); ++i) {
+      Value methodArg = actionMethod.getArgument(i);
+      // Find corresponding FIRRTL input port
+      std::string argPortName = (prefix + "OUT").str();
+      if (actionMethod.getNumArguments() > 1) {
+        argPortName = (prefix + "OUT_arg" + std::to_string(i)).str();
+      }
+      
+      for (size_t j = 0; j < methodPortNames.size(); ++j) {
+        if (cast<StringAttr>(methodPortNames[j]).getValue() == argPortName) {
+          ctx.txnToFirrtl[methodArg] = methodBlockArgs[j];
+          break;
+        }
+      }
+    }
+  });
   
   // Pre-pass: Convert all arith operations that might be used as conditions
   // This ensures reachability conditions are available in FIRRTL
@@ -994,6 +1247,8 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
         auto loc = action->getLoc();
         auto intType = IntType::get(mlirCtx, false, 1);
         
+        // Block arguments are already mapped globally at the top of the function
+        
         // Now collect method calls with their reachability conditions
         SmallVector<std::pair<CallOp, Value>> methodCallsWithConditions;
         action->walk([&](CallOp call) {
@@ -1084,7 +1339,8 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     }
     
     // Generate will-fire signal
-    Value wf = generateWillFire(name, effectiveEnabled, scheduleOrder, ctx);
+    Operation *actionForWF = actionMap[name];
+    Value wf = generateWillFire(name, effectiveEnabled, scheduleOrder, ctx, willFireMode, actionForWF, &actionMap);
   }
   
   // Convert value methods
@@ -1192,7 +1448,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
             // Skip value methods - they don't have will-fire signals
             if (!ctx.willFireSignals.count(other)) continue;
             
-            auto rel = getConflictRelation(other, actionMethod.getSymName(), ctx);
+            auto rel = getConflictRelation(other, actionMethod.getSymName(), ctx, actionMap);
             if (rel == ConflictRelation::Conflict || rel == ConflictRelation::SequenceBefore) {
               // If other action will fire, this method is not ready
               Value otherWF = ctx.willFireSignals[other];
@@ -1215,26 +1471,8 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     // Execute method body when will-fire is true
     ctx.firrtlBuilder.create<WhenOp>(actionMethod.getLoc(), wf, false, [&]() {
       // Convert method body
-      ctx.txnToFirrtl.clear();
-      
-      // Map method arguments to FIRRTL ports
-      auto methodPortNames = firrtlModule.getPortNames();
-      auto methodBlockArgs = firrtlModule.getBodyBlock()->getArguments();
-      for (unsigned i = 0; i < actionMethod.getNumArguments(); ++i) {
-        Value methodArg = actionMethod.getArgument(i);
-        // Find corresponding FIRRTL input port
-        std::string argPortName = (prefix + "OUT").str();
-        if (actionMethod.getNumArguments() > 1) {
-          argPortName = (prefix + "OUT_arg" + std::to_string(i)).str();
-        }
-        
-        for (size_t j = 0; j < methodPortNames.size(); ++j) {
-          if (cast<StringAttr>(methodPortNames[j]).getValue() == argPortName) {
-            ctx.txnToFirrtl[methodArg] = methodBlockArgs[j];
-            break;
-          }
-        }
-      }
+      // Note: Don't clear ctx.txnToFirrtl here to preserve block argument mappings
+      // Block arguments and pre-converted conditions are preserved
         
       if (failed(convertBodyOps(actionMethod.getBody(), ctx))) {
         actionMethod.emitError("Failed to convert action method body");
@@ -1254,7 +1492,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       // Execute rule body when will-fire is true
       ctx.firrtlBuilder.create<WhenOp>(rule.getLoc(), wf, false, [&]() {
         // Convert rule body
-        ctx.txnToFirrtl.clear();
+        // Note: Don't clear ctx.txnToFirrtl here to preserve pre-converted conditions
         if (failed(convertBodyOps(rule.getBody(), ctx))) {
           rule.emitError("Failed to convert rule body");
           return;
@@ -1368,7 +1606,7 @@ struct TxnToFIRRTLConversionPass
       if (!isa<::sharp::txn::ModuleOp>(txnModule)) continue;
       if (txnModule.getName() == "firrtl_generated") continue;
       
-      if (failed(convertModule(txnModule, convCtx, firrtlCircuit))) {
+      if (failed(convertModule(txnModule, convCtx, firrtlCircuit, willFireMode))) {
         signalPassFailure();
         return;
       }
