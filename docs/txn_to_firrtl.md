@@ -1,144 +1,714 @@
-# Sharp Txn to FIRRTL Conversion
+# Sharp Txn to FIRRTL Conversion Algorithm
 
 ## Overview
 
-This document describes the implemented algorithm for converting Sharp Txn modules to FIRRTL. The conversion extends the Koika approach to support transaction-based hardware description with methods, conflict matrices, and parametric primitives.
+This document provides a comprehensive description of the algorithm for converting Sharp Txn modules to FIRRTL. The conversion extends the Koika approach to support transaction-based hardware description with methods, conflict matrices, and parametric primitives.
 
-## Key Features
+The Sharp Txn dialect provides a high-level abstraction for hardware design with explicit conflict management, while FIRRTL serves as the low-level RTL representation. This conversion bridges the gap between these two levels, ensuring that the transaction semantics are correctly translated into synthesizable hardware.
 
-### Transaction Model Extensions
-- **Methods**: Reusable action/value methods with conflict resolution
-- **Conflict Matrix**: Explicit specification of action relationships (SB, SA, C, CF)
-- **Module Hierarchy**: Support for instantiating submodules and primitives
-- **Parametric Types**: Register<T>, Wire<T> with automatic instantiation
+**Important Note**: Throughout this document, FIRRTL code examples are shown in plain text for illustration purposes. However, the actual implementation MUST use CIRCT's FIRRTL dialect APIs (e.g., `builder.create<FModuleOp>`, `builder.create<ConnectOp>`, etc.) rather than generating text. The plain FIRRTL examples help understand the intended structure, but all generation should be done programmatically through the CIRCT APIs.
 
-### Method Attributes
-Methods support attributes to control FIRRTL signal generation:
-- `prefix`: Custom prefix for signal names (default: method name)
-- `result`: Postfix for data signals (default: "OUT")
-- `ready`/`enable`: Postfixes for handshake signals (action methods only)
-- `always_ready`/`always_enable`: Optimize away handshake signals when possible
+## Background and Motivation
+
+### Koika Translation Model
+Koika pioneered the approach of translating rule-based hardware descriptions to RTL with these key principles:
+1. **Atomic Rule Execution**: Each rule executes atomically within a single cycle
+2. **Will-Fire Logic**: Dynamic determination of which rules can execute
+3. **Conflict Resolution**: Managing register read/write conflicts automatically
+4. **One-Rule-At-A-Time Semantics**: Conceptually, rules execute sequentially
+
+### Sharp Txn Extensions
+Sharp extends Koika's model with several important features:
+- **Methods**: Reusable action/value methods that encapsulate behavior
+- **Explicit Conflict Matrix**: Declarative specification of action relationships (SB, SA, C, CF)
+- **Module Hierarchy**: First-class support for instantiating submodules
+- **Parametric Primitives**: Type-safe primitives like `Register<T>`, `Wire<T>`
+- **Conditional Execution**: Support for control flow within actions
+- **Method Attributes**: Fine-grained control over FIRRTL signal generation
+
+These extensions provide more modularity and explicit control over hardware behavior while maintaining the benefits of atomic execution and automatic conflict resolution.
+
+## Core Concepts
+
+### Conflict Matrix Relationships
+The conflict matrix defines relationships between actions:
+- **SB (Sequential Before, value=0)**: Action A must complete before action B starts
+- **SA (Sequential After, value=1)**: Action A must start after action B completes  
+- **C (Conflict, value=2)**: Actions A and B cannot execute in the same cycle
+- **CF (Conflict-Free, value=3)**: Actions A and B can execute concurrently
+
+### Method Types
+1. **Value Methods**: Pure combinational functions with no side effects
+2. **Action Methods**: Methods that can modify state or have side effects
+3. **Rules**: Top-level actions that execute based on conditions
+
+### Primitives
+Primitives bridge the gap between Txn methods and FIRRTL ports:
+- Provide hardware implementations for basic components
+- Support parametric types for reusability
+- Examples: `Register<i32>`, `Wire<i8>`
+- Automatically instantiated when referenced but not defined
+
+## Method Attributes for FIRRTL Generation
+
+Sharp provides fine-grained control over FIRRTL signal generation through method attributes:
+
+### Signal Naming Attributes
+
+```mlir
+txn.action_method @doReset() attributes {
+  prefix = "rst",      // Signal prefix (default: method name)
+  result = "_data",    // Data signal postfix (default: "OUT")
+  enable = "_en",      // Enable signal postfix (default: "EN")
+  ready = "_rdy"       // Ready signal postfix (default: "RDY")
+}
+```
+
+Generated signals: `rst_en` (input), `rst_rdy` (output)
+
+### Protocol Optimization Attributes
+
+```mlir
+txn.action_method @alwaysReady() attributes {
+  always_ready        // No ready signal needed
+}
+
+txn.value_method @pureCombo() attributes {
+  always_enable       // No enable signal needed
+}
+```
+
+These attributes optimize away handshake signals when methods have constant availability.
 
 ## Translation Process
 
-### 1. Module Processing Order
-Modules are processed bottom-up based on dependencies:
-1. Build dependency graph from instance relationships
-2. Topologically sort (primitives and leaves first)
-3. Identify top-level module (not instantiated by others)
+### 1. Module Dependency Analysis
 
-### 2. FIRRTL Module Generation
-Each Txn module generates a FIRRTL module with:
-- Clock and reset ports
-- Method interface ports (data, enable, ready)
-- Instance ports for submodules
-- Internal logic for rules and methods
+The conversion begins by analyzing module dependencies to ensure correct processing order:
 
-### 3. Will-Fire Logic
-
-The will-fire (WF) logic determines when actions can execute:
-
-#### Static Mode (Conservative)
-```
-wf[action] = enabled[action] && !conflicts_with_earlier[action] && !conflict_inside[action]
-```
-
-#### Dynamic Mode (Precise)
-```
-wf[action] = enabled[action] && AND{for every m in action, NOT(reach(m) && conflict_with_earlier(m))}
-```
-
-### 4. Conflict Resolution
-
-#### Conflict Detection
-- Actions conflict based on the methods they call
-- If action A calls method M1 and action B calls method M2, and M1 conflicts with M2, then A conflicts with B
-- The conflict matrix specifies relationships: SB (sequential before), SA (sequential after), C (conflict), CF (conflict-free)
-
-#### Conflict Inside
-Detects conflicts within a single action:
-- Analyzes all method calls within an action
-- Computes reachability conditions considering control flow
-- Generates hardware to prevent execution when internal conflicts would occur
-
-### 5. Primitive Support
-
-#### Parametric Primitives
-- Primitives are instantiated on-demand when referenced
-- Type parameters create unique FIRRTL modules: `Register_i32_impl`, `Wire_i8_impl`
-- Automatic construction during conversion if primitive not found
-
-#### Built-in Primitives
-- **Register<T>**: State element with read/write methods
-- **Wire<T>**: Combinational connection with read/write methods
-
-## Implementation Details
-
-### Pass Structure
-1. **Pre-synthesis Check**: Validates synthesizable constructs
-2. **Conflict Matrix Inference**: Completes partial conflict specifications
-3. **Reachability Analysis**: Computes conditions for method calls
-4. **Method Attribute Validation**: Ensures valid signal names
-5. **TxnToFIRRTL Conversion**: Main translation pass
-
-### Key Data Structures
 ```cpp
-struct ConversionContext {
-  DenseMap<Value, Value> txnToFirrtl;           // Value mapping
-  DenseMap<StringRef, Value> willFireSignals;   // WF signals
-  DenseMap<StringRef, SmallVector<StringRef>> methodCallers;
-  DenseMap<Operation*, Value> reachabilityConditions;
-  DenseMap<StringRef, DenseMap<StringRef, Value>> instancePorts;
-};
+// Build dependency graph from instance relationships
+DenseMap<StringRef, SmallVector<StringRef>> dependencies;
+module.walk([&](InstanceOp inst) {
+  dependencies[currentModule].push_back(inst.getModuleName());
+});
+
+// Topological sort ensures dependencies are processed first
+SmallVector<ModuleOp> sortedModules = topologicalSort(dependencies);
+
+// Identify top-level module (not instantiated by others)
+StringRef topModule = findTopLevelModule(sortedModules);
 ```
 
-## Example
+Key insights:
+- Primitives and leaf modules are processed first
+- The top-level module becomes the FIRRTL circuit name
+- Circular dependencies are detected and reported as errors
+- Missing modules trigger automatic primitive construction
 
-### Input Txn
-```mlir
-txn.module @Counter {
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+### 2. FIRRTL Module Structure Generation
+
+Each Txn module generates a corresponding FIRRTL module with carefully constructed ports:
+
+```cpp
+SmallVector<PortInfo> ports;
+
+// Standard ports
+ports.push_back({builder.getStringAttr("clock"), 
+                 ClockType::get(ctx), Direction::In});
+ports.push_back({builder.getStringAttr("reset"), 
+                 UIntType::get(ctx, 1), Direction::In});
+
+// Value method ports (output only)
+for (auto method : module.getOps<ValueMethodOp>()) {
+  auto prefix = method.getPrefix().value_or(method.getSymName());
+  auto resultPostfix = method.getResult().value_or("OUT");
+  ports.push_back({
+    builder.getStringAttr(prefix + resultPostfix), 
+    convertType(method.getResultType()), 
+    Direction::Out
+  });
+}
+
+// Action method ports (enable input, ready output, data as needed)
+for (auto method : module.getOps<ActionMethodOp>()) {
+  auto prefix = method.getPrefix().value_or(method.getSymName());
   
-  txn.action_method @increment() {
-    %val = txn.call @count::@read() : () -> i32
-    %inc = arith.addi %val, %c1 : i32
-    txn.call @count::@write(%inc) : (i32) -> ()
-    txn.return
+  // Input data ports for method arguments
+  for (auto [idx, argType] : enumerate(method.getArgumentTypes())) {
+    ports.push_back({
+      builder.getStringAttr(prefix + "OUT_arg" + std::to_string(idx)),
+      convertType(argType),
+      Direction::In
+    });
   }
   
-  txn.schedule [@increment] {
-    conflict_matrix = {}
+  // Enable input (unless always_enable)
+  if (!method.getAlwaysEnable()) {
+    ports.push_back({
+      builder.getStringAttr(prefix + method.getEnable().value_or("EN")),
+      UIntType::get(ctx, 1),
+      Direction::In
+    });
+  }
+  
+  // Ready output (unless always_ready)
+  if (!method.getAlwaysReady()) {
+    ports.push_back({
+      builder.getStringAttr(prefix + method.getReady().value_or("RDY")),
+      UIntType::get(ctx, 1),
+      Direction::Out
+    });
   }
 }
 ```
 
-### Generated FIRRTL Structure
-- Module with clock, reset, increment_EN, increment_RDY ports
-- Instance of Register_i32_impl primitive
-- Will-fire logic for increment method
-- Connections to register read/write ports
+### 3. Will-Fire Logic - The Heart of Conflict Resolution
 
-## Current Status
+The will-fire (WF) logic determines which actions can execute in the current cycle. This is the most critical part of the translation as it enforces the transaction semantics.
 
-### Completed
-- ✅ Full TxnToFIRRTL conversion pass
-- ✅ Parametric primitive support
-- ✅ Conflict inside detection
-- ✅ Static and dynamic will-fire modes
-- ✅ Reachability analysis with conditional calls
+#### Static Mode (Conservative)
+In static mode, conflicts are determined pessimistically based on what methods *might* be called:
+
+```
+wf[action] = enabled[action] && !conflicts_with_earlier[action] && !conflict_inside[action]
+```
+
+Key algorithm:
+1. **Action-level conflict inference**: If action A calls method M1 and action B calls method M2, and M1 conflicts with M2, then A conflicts with B
+2. **Schedule enforcement**: Earlier actions in the schedule prevent later conflicting actions
+3. **Internal conflict detection**: Actions that might call conflicting methods internally are prevented
+
+**Conflict with earlier actions**:
+```
+conflicts_with_earlier[a] = OR(wf[a1] && conflict(a1, a) for all a1 that is scheduled before a)
+```
+
+**Conflict inside an action**:
+```
+conflict_inside[a] = OR(conflict(M1, M2) && reach(m1) && reach(m2) for every m1, m2 in a, m1 is before m2)
+// where reach(m) is a hardware signal representing the condition under which method call m 
+// can be reached from the root of the action (considering all txn.if conditions along the path)
+```
+
+#### Dynamic Mode (Precise) 
+Dynamic mode uses reachability analysis to determine actual conflicts:
+
+```
+wf[action] = enabled[action] && 
+             AND{for every method m in action: 
+                 NOT(reach(m, action) && conflict_with_earlier(m))}
+```
+
+This mode generates more complex hardware but allows more concurrency by considering actual execution paths.
+
+**Method Call Tracking**: Track which action methods have been called
+```
+method_called[M] = OR{wf[a] && OR(reach(m, action) for m in M) for every action that has been scheduled and calls M} 
+                  || OR(reach(m, current_action) for every m in M and m has been processed in the current action) 
+```
+
+**Conflict with earlier actions**: For the method call `m in M` to be processed in the current action,
+```
+conflict_with_earlier(m) = OR(method_called[M'] && conflict(M', M) for every M' in method_called)
+```
+
+**Trade-offs**:
+- Static mode: Simpler hardware, conservative conflict resolution, may block valid concurrent executions
+- Dynamic mode: Complex hardware with reachability tracking, precise conflict detection, maximum concurrency
+
+### 4. Reachability Analysis
+
+Reachability analysis is crucial for precise conflict detection. It computes hardware signals representing when each method call can be reached:
+
+```cpp
+class ReachabilityAnalysis {
+  void analyzeAction(ActionOp action, ConversionContext &ctx) {
+    // Start with unconditional reachability
+    Value pathCondition = createTrue();
+    
+    // Walk the action tracking control flow
+    action.walk([&](Operation *op) {
+      if (auto ifOp = dyn_cast<IfOp>(op)) {
+        // Branch creates two path conditions
+        Value thenCond = createAnd(pathCondition, ifOp.getCondition());
+        Value elseCond = createAnd(pathCondition, createNot(ifOp.getCondition()));
+        
+        // Recursively process branches
+        processRegion(ifOp.getThenRegion(), thenCond, ctx);
+        processRegion(ifOp.getElseRegion(), elseCond, ctx);
+        
+        return WalkResult::skip(); // Don't walk into regions
+      }
+      
+      if (auto callOp = dyn_cast<CallOp>(op)) {
+        // Record: this call is reachable when pathCondition is true
+        ctx.reachabilityConditions[callOp] = pathCondition;
+      }
+    });
+  }
+};
+```
+
+**Implementation Details**:
+- Path conditions are built using FIRRTL's boolean operations
+- Nested if statements multiply path conditions
+- Each method call gets a unique reachability condition
+- The analysis runs before will-fire calculation
+
+#### Example: Complex Reachability
+```mlir
+txn.rule @complex {
+  %c1 = arith.cmpi eq, %x, %c0 : i32
+  txn.if %c1 {
+    txn.call @reg::@write(%v1) : (i32) -> ()     // reach = %c1
+  } else {
+    %c2 = arith.cmpi gt, %y, %c10 : i32
+    txn.if %c2 {
+      txn.call @reg::@write(%v2) : (i32) -> ()   // reach = !%c1 && %c2
+    }
+  }
+}
+```
+
+The two write calls conflict, but `conflict_inside = %c1 && (!%c1 && %c2) = false`, so no internal conflict exists.
+
+### 5. Conflict Inside Calculation
+
+This detects when an action might call conflicting methods:
+
+```cpp
+Value calculateConflictInside(ActionOp action, ConversionContext &ctx) {
+  // First run reachability analysis for this action
+  ReachabilityAnalysis reachAnalysis;
+  reachAnalysis.analyzeAction(action, ctx);
+  
+  // Get all method calls with their reachability
+  auto methodCalls = collectMethodCalls(action);
+  
+  Value conflictInside = createFalse();
+  
+  // Check every pair of method calls
+  for (size_t i = 0; i < methodCalls.size(); ++i) {
+    for (size_t j = i + 1; j < methodCalls.size(); ++j) {
+      auto [inst1, method1] = methodCalls[i];
+      auto [inst2, method2] = methodCalls[j];
+      
+      // Skip if different instances (no conflict possible)
+      if (inst1 != inst2) continue;
+      
+      // Check if methods conflict
+      if (hasConflict(method1, method2)) {
+        // Conflict occurs when both are reachable
+        Value reach1 = ctx.reachabilityConditions[callOp1];
+        Value reach2 = ctx.reachabilityConditions[callOp2];
+        Value bothReach = createAnd(reach1, reach2);
+        
+        conflictInside = createOr(conflictInside, bothReach);
+      }
+    }
+  }
+  
+  return conflictInside;
+}
+```
+
+**Critical Insights**:
+- Only method calls to the *same instance* can conflict internally
+- The conflict matrix of the called module determines method conflicts
+- Reachability conditions prevent false conflicts from exclusive branches
+- The resulting signal blocks action execution when internal conflicts would occur
+
+### 6. Method Implementation Details
+
+#### Value Methods
+Value methods are pure combinational logic:
+
+```cpp
+void convertValueMethod(ValueMethodOp method, ConversionContext &ctx) {
+  // Build combinational logic for method body
+  Value result = convertMethodBody(method.getBody(), ctx);
+  
+  // Connect to output port
+  auto outputPort = ctx.getPort(method.getName() + "_OUT");
+  ctx.builder.create<ConnectOp>(method.getLoc(), outputPort, result);
+}
+```
+
+#### Action Methods
+Action methods involve will-fire logic and side effects:
+
+```cpp
+void convertActionMethod(ActionMethodOp method, ConversionContext &ctx) {
+  // Get enable signal
+  Value enable = method.getAlwaysEnable() ? 
+    createTrue() : ctx.getPort(method.getName() + "_EN");
+  
+  // Calculate conflicts with earlier actions
+  Value noConflicts = calculateNoConflicts(method, ctx);
+  
+  // Will-fire = enabled && no conflicts
+  Value willFire = createAnd(enable, noConflicts);
+  ctx.willFireSignals[method.getName()] = willFire;
+  
+  // Execute body conditionally
+  ctx.builder.create<WhenOp>(willFire, [&] {
+    convertMethodBody(method.getBody(), ctx);
+  });
+  
+  // Set ready signal
+  if (!method.getAlwaysReady()) {
+    auto readyPort = ctx.getPort(method.getName() + "_RDY");
+    ctx.builder.create<ConnectOp>(readyPort, noConflicts);
+  }
+}
+```
+
+### 7. Parametric Primitive Support
+
+The conversion automatically instantiates primitives with correct types:
+
+```cpp
+FModuleOp getOrCreatePrimitive(StringRef primName, Type dataType) {
+  // Generate unique name: Register_i32_impl, Wire_i8_impl, etc.
+  std::string uniqueName = primName.str() + "_" + 
+                          getTypeName(dataType) + "_impl";
+  
+  // Check if already created
+  if (auto existing = symbolTable.lookup<FModuleOp>(uniqueName))
+    return existing;
+  
+  // Create new primitive instance
+  if (primName == "Register") {
+    return createRegisterPrimitive(uniqueName, dataType);
+  } else if (primName == "Wire") {
+    return createWirePrimitive(uniqueName, dataType);
+  }
+  // ... other primitives
+}
+```
+
+**Key Features**:
+- Type parameters extracted from instance operations: `@Register<i32>`
+- Unique FIRRTL modules generated per type: `Register_i32_impl`
+- Primitives constructed on-demand during conversion
+- Proper bit width calculation from MLIR integer types
+
+## Advanced Topics
+
+### Combinational Loop Detection
+
+The converter must detect and prevent combinational loops:
+
+```cpp
+class CombinationalLoopDetector {
+  DenseMap<StringRef, SmallVector<StringRef>> dependencies;
+  
+  void analyze(ModuleOp module) {
+    // Build dependency graph
+    module.walk([&](CallOp call) {
+      if (isValueMethod(call.getCallee())) {
+        // Value method calls create combinational dependencies
+        dependencies[currentMethod].push_back(call.getCallee());
+      }
+    });
+    
+    // Detect cycles using DFS
+    if (hasCycle()) {
+      emitError("Combinational loop detected: " + formatCycle());
+    }
+  }
+};
+```
+
+**Implementation Status**: Awaiting primitive attribute support to define combinational paths through primitives.
+
+### Optimization Opportunities
+
+1. **Common Subexpression Elimination**: Reuse will-fire calculations
+2. **Dead Code Elimination**: Remove unreachable method calls  
+3. **Conflict Reduction**: Simplify conflict checks when possible
+4. **Constant Propagation**: Fold constant conditions in reachability
+5. **Schedule Optimization**: Reorder conflict-free actions for better pipelining
+
+## Implementation Details
+
+### Pass Structure
+
+```cpp
+// Main conversion pipeline
+void TxnToFIRRTLPipeline::runOnModule(ModuleOp module) {
+  // 1. Pre-synthesis checking
+  if (failed(runPreSynthesisCheck(module)))
+    return signalPassFailure();
+    
+  // 2. Conflict matrix inference
+  if (failed(runConflictMatrixInference(module)))
+    return signalPassFailure();
+    
+  // 3. Method attribute validation
+  if (failed(runMethodAttributeValidation(module)))
+    return signalPassFailure();
+    
+  // 4. Combinational loop detection
+  CombinationalLoopDetector detector;
+  if (detector.detectLoops(module)) {
+    module.emitError("Combinational loops detected");
+    return signalPassFailure();
+  }
+  
+  // 5. Module dependency analysis
+  auto sortedModules = topologicalSort(module);
+  
+  // 6. Bottom-up conversion
+  for (auto txnModule : sortedModules) {
+    convertModule(txnModule);
+  }
+}
+```
+
+### Data Structures
+
+```cpp
+struct ConversionContext {
+  // Track generated FIRRTL ops
+  DenseMap<Value, Value> txnToFirrtl;
+  
+  // Track will-fire signals
+  DenseMap<StringRef, Value> willFireSignals;
+  
+  // Track method calls
+  DenseMap<StringRef, SmallVector<StringRef>> methodCallers;
+  
+  // Conflict matrix for current module
+  ConflictMatrix conflictMatrix;
+  
+  // Reachability conditions for method calls
+  DenseMap<MethodCallOp, Value> reachabilityConditions;
+};
+```
+
+### Key Algorithms
+
+#### Will-Fire Calculation
+```cpp
+Value calculateWillFire(StringRef action, ConversionContext &ctx) {
+  // Base condition: action is enabled
+  Value wf = ctx.enabled[action];
+  
+  // Check conflicts with earlier actions
+  for (auto earlier : ctx.schedule) {
+    if (earlier == action) break;
+    
+    auto conflict = checkConflict(earlier, action, ctx);
+    if (conflict) {
+      wf = builder.create<AndPrimOp>(loc, wf, 
+        builder.create<NotPrimOp>(loc, ctx.willFireSignals[earlier]));
+    }
+  }
+
+  // Check for conflicts inside the action
+  auto conflictInside = calculateConflictInside(action, ctx);
+  if (conflictInside) {
+    wf = builder.create<AndPrimOp>(loc, wf,
+        builder.create<NotPrimOp>(loc, conflictInside));
+  }
+  
+  return wf;
+}
+```
+
+#### Conflict Checking
+```cpp
+bool checkConflict(StringRef a1, StringRef a2, ConversionContext &ctx) {
+  // Direct conflict matrix lookup
+  auto rel = ctx.conflictMatrix.get(a1, a2);
+  
+  switch (rel) {
+    case ConflictRelation::C:  // Conflict
+      return true;
+      
+    case ConflictRelation::SB: // a1 before a2
+      return ctx.willFireSignals[a1] != nullptr;
+      
+    case ConflictRelation::SA: // a1 after a2 (shouldn't happen)
+      assert(false && "Invalid schedule order");
+      
+    case ConflictRelation::CF: // Conflict-free
+      break;
+  }
+  
+  return false;
+}
+```
+
+## Implementation Status
+
+### Completed Features
+- ✅ Full TxnToFIRRTL conversion pass with both static and dynamic modes
+- ✅ Parametric primitive support with automatic instantiation
+- ✅ Conflict inside detection with reachability analysis
+- ✅ Method attribute support for signal naming and optimization
+- ✅ Proper handling of module hierarchy and dependencies
 - ✅ 45/45 tests passing
 
-### Limitations
-- Multi-cycle operations not yet supported
-- Combinational loop detection requires primitive attributes
+### Current Limitations
+- Multi-cycle operations not yet supported (requires timing attributes)
+- Combinational loop detection awaits primitive path attributes
 - Non-synthesizable primitives will fail translation
 
-## Usage
+### Usage Examples
 
 ```bash
-# Convert Txn to FIRRTL
+# Basic conversion (uses dynamic mode by default)
 sharp-opt --convert-txn-to-firrtl input.mlir
 
-# Use static will-fire mode (default is dynamic)
+# Use conservative static mode
 sharp-opt --convert-txn-to-firrtl="will-fire-mode=static" input.mlir
+
+# With other passes in pipeline
+sharp-opt --convert-txn-to-firrtl --firrtl-lower-types output.mlir
 ```
+
+## Example: Complete Translation
+
+### Input Txn Module
+```mlir
+txn.module @Counter {
+  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  
+  txn.rule @increment {
+    %val = txn.call @count::@read() : () -> i32
+    %one = arith.constant 1 : i32
+    %inc = arith.addi %val, %one : i32
+    txn.call @count::@write(%inc) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.action_method @reset() {
+    %zero = arith.constant 0 : i32
+    txn.call @count::@write(%zero) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.schedule [@increment, @reset] {
+    conflict_matrix = {
+      "increment,reset" = 2 : i32  // C (conflict)
+    }
+  }
+}
+```
+
+**Key Points**:
+- Parametric instance `@Register<i32>` triggers automatic primitive construction
+- Both methods call write on the same register (conflict)
+- Schedule specifies explicit conflict relationship
+
+### Generated FIRRTL Structure (Conceptual)
+
+**Note**: The following FIRRTL code is shown in plain text format for illustration purposes only. The actual implementation MUST generate this structure using CIRCT FIRRTL dialect APIs.
+
+```firrtl
+circuit Counter:
+  module Register_i32_impl:  // Auto-generated primitive
+    input clock: Clock
+    input reset: UInt<1>
+    output read_data: UInt<32>
+    input write_enable: UInt<1>
+    input write_data: UInt<32>
+    
+    reg register: UInt<32>, clock with :
+      reset => (reset, UInt<32>(0))
+      
+    ; Read is always available
+    connect read_data, register
+    
+    ; Write updates register when enabled
+    when write_enable:
+      connect register, write_data
+  
+  module Counter:
+    input clock: Clock
+    input reset: UInt<1>
+    
+    ; Action method ports
+    input resetEN: UInt<1>
+    output resetRDY: UInt<1>
+    
+    ; Instance of parametric register
+    inst count of Register_i32_impl
+    connect count.clock, clock
+    connect count.reset, reset
+    
+    ; Rule: increment (always enabled)
+    node increment_condition = UInt<1>(1)  ; always enabled
+    
+    ; Will-fire: increment (no conflicts with earlier actions)
+    node increment_wf = increment_condition
+    
+    ; Rule body
+    connect count.read_enable, increment_wf
+    node inc_value = add(count.read_data, UInt<32>(1))
+    connect count.write_enable, increment_wf
+    connect count.write_data, inc_value
+    
+    ; Method: reset
+    ; Check conflicts with increment (from conflict matrix)
+    node reset_conflicts_increment = and(CM_increment_reset_C, increment_wf)
+    node reset_wf = and(resetEN, not(reset_conflicts_increment))
+    
+    when reset_wf:
+      connect count.write_enable, UInt<1>(1)
+      connect count.write_data, UInt<32>(0)
+    
+    connect resetRDY, not(reset_conflicts_increment)
+```
+
+**Translation Steps**:
+1. Register_i32_impl module generated from Register<i32> primitive
+2. Will-fire logic enforces conflict matrix (increment blocks reset)
+3. Ready signal indicates when reset can execute
+4. Both methods generate appropriate enable/data signals for the register
+
+## Error Handling
+
+### Common Error Scenarios
+
+1. **Cyclic Dependencies**: Modules with circular instantiation
+   - Detection: During dependency analysis
+   - Response: Emit error with cycle path
+
+2. **Unresolved Method Calls**: Calls to non-existent methods
+   - Detection: During method resolution
+   - Response: Emit error with location
+
+3. **Type Mismatches**: Incompatible types in method calls
+   - Detection: During type checking
+   - Response: Emit error with expected/actual types
+
+4. **Scheduling Violations**: Invalid conflict matrix relationships
+   - Detection: During schedule analysis
+   - Response: Emit error with conflict details
+
+## Testing Strategy
+
+1. **Unit Tests**: Individual algorithm components
+2. **Integration Tests**: Full module translations
+3. **Regression Tests**: Known corner cases
+4. **Validation**: Compare with reference implementations
+
+## Future Directions
+
+1. **Multi-cycle Support**: Extend timing attributes for pipelined operations
+2. **Formal Verification**: Generate assertions for conflict properties
+3. **Performance Analysis**: Static timing and resource utilization estimates
+4. **Debug Infrastructure**: Transaction-level debugging support
+5. **Advanced Scheduling**: Support for out-of-order execution with dependencies
+6. **Power Optimization**: Clock gating for inactive methods
+
+## References
+
+- Koika: A Hardware Design Language (PLDI 2020)
+- Bluespec Language Reference
+- CIRCT FIRRTL Dialect Documentation
+- Sharp Transaction Dialect Specification (docs/txn.md)
