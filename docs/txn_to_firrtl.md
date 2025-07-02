@@ -697,6 +697,340 @@ circuit Counter:
 3. **Regression Tests**: Known corner cases
 4. **Validation**: Compare with reference implementations
 
+## Action Scheduling Algorithm
+
+### Overview
+
+The Action Scheduling Algorithm is an analysis pass that automatically completes partial schedules to ensure all actions (rules and methods) are properly ordered while minimizing conflicts. This pass runs after conflict matrix inference and before FIRRTL translation.
+
+### Problem Statement
+
+Given:
+- A module with actions A = {a₁, a₂, ..., aₙ}
+- A (possibly incomplete) partial schedule S_partial ⊆ A
+- A conflict matrix CM where CM[aᵢ, aⱼ] ∈ {SB, SA, C, CF}
+
+Find:
+- A complete schedule S_complete = [s₁, s₂, ..., sₙ] containing all actions in A
+- Such that S_partial order is preserved in S_complete
+- Minimizing the number of "bad edges": conflicts where aᵢ SB aⱼ but i > j in the schedule, or aᵢ SA aⱼ but i < j in the schedule
+
+### Algorithm Design
+
+#### Phase 1: Dependency Graph Construction
+
+```cpp
+struct SchedulingGraph {
+  // Nodes are actions
+  DenseSet<StringRef> actions;
+  
+  // Edges represent ordering constraints
+  // edge (a, b) means a must come before b
+  DenseMap<StringRef, SmallVector<StringRef>> mustPrecede;
+  
+  // Track partial schedule constraints
+  DenseMap<StringRef, int> partialOrder;
+};
+
+void buildSchedulingGraph(ModuleOp module, ConflictMatrix &cm, 
+                         SchedulingGraph &graph) {
+  // 1. Add all actions as nodes
+  for (auto rule : module.getOps<RuleOp>())
+    graph.actions.insert(rule.getSymName());
+  for (auto method : module.getOps<ActionMethodOp>())
+    graph.actions.insert(method.getSymName());
+    
+  // 2. Extract partial schedule constraints
+  if (auto schedule = module.getOps<ScheduleOp>().begin()) {
+    auto partialActions = schedule->getActions();
+    for (size_t i = 0; i < partialActions.size(); ++i) {
+      graph.partialOrder[partialActions[i]] = i;
+      // Add edges to maintain partial order
+      for (size_t j = i + 1; j < partialActions.size(); ++j) {
+        graph.mustPrecede[partialActions[i]].push_back(partialActions[j]);
+      }
+    }
+  }
+  
+  // 3. Add edges from conflict matrix (SA relationships)
+  for (auto [a1, a2] : graph.actions × graph.actions) {
+    if (cm[a1, a2] == ConflictRelation::SA) {
+      // a1 Sequential After a2 means a2 must precede a1
+      graph.mustPrecede[a2].push_back(a1);
+    }
+  }
+}
+```
+
+#### Phase 2: Topological Sort with Conflict Minimization
+
+```cpp
+struct SchedulingCost {
+  int sbViolations = 0;  // Count of SB relationships violated
+  int conflicts = 0;     // Count of C relationships not separated
+};
+
+SmallVector<StringRef> computeOptimalSchedule(SchedulingGraph &graph, 
+                                              ConflictMatrix &cm) {
+  // 1. Check for cycles (would make scheduling impossible)
+  if (hasCycle(graph.mustPrecede)) {
+    emitError("Cyclic dependencies in action scheduling");
+    return {};
+  }
+  
+  // 2. Compute all valid topological orderings
+  SmallVector<SmallVector<StringRef>> validSchedules;
+  generateTopologicalOrderings(graph, validSchedules);
+  
+  // 3. Evaluate each schedule and pick the best
+  SmallVector<StringRef> bestSchedule;
+  SchedulingCost bestCost = {INT_MAX, INT_MAX};
+  
+  for (auto &schedule : validSchedules) {
+    SchedulingCost cost = evaluateSchedule(schedule, cm);
+    if (cost.sbViolations < bestCost.sbViolations ||
+        (cost.sbViolations == bestCost.sbViolations && 
+         cost.conflicts < bestCost.conflicts)) {
+      bestCost = cost;
+      bestSchedule = schedule;
+    }
+  }
+  
+  return bestSchedule;
+}
+
+SchedulingCost evaluateSchedule(ArrayRef<StringRef> schedule, 
+                                ConflictMatrix &cm) {
+  SchedulingCost cost;
+  DenseMap<StringRef, size_t> position;
+  
+  // Build position map
+  for (size_t i = 0; i < schedule.size(); ++i)
+    position[schedule[i]] = i;
+  
+  // Count violations
+  for (size_t i = 0; i < schedule.size(); ++i) {
+    for (size_t j = i + 1; j < schedule.size(); ++j) {
+      auto rel = cm[schedule[i], schedule[j]];
+      
+      if (rel == ConflictRelation::SB) {
+        // schedule[i] should be before schedule[j], which it is
+        // No violation
+      } else if (rel == ConflictRelation::SA) {
+        // schedule[i] should be after schedule[j], but it's before
+        // This should be impossible if graph was built correctly
+        assert(false && "SA constraint violated");
+      } else if (rel == ConflictRelation::C) {
+        // Conflict exists, but at least they're separated
+        cost.conflicts++;
+      }
+    }
+  }
+  
+  // Also check reverse direction for SB violations
+  for (auto [a1, a2] : cm.getAllPairs()) {
+    if (cm[a1, a2] == ConflictRelation::SB) {
+      if (position[a1] > position[a2]) {
+        cost.sbViolations++;
+      }
+    }
+  }
+  
+  return cost;
+}
+```
+
+#### Phase 3: Heuristic Algorithm (for large action sets)
+
+When the number of actions is large, enumerating all topological orderings becomes intractable. Use a greedy heuristic:
+
+```cpp
+SmallVector<StringRef> computeHeuristicSchedule(SchedulingGraph &graph,
+                                                ConflictMatrix &cm) {
+  SmallVector<StringRef> schedule;
+  DenseSet<StringRef> scheduled;
+  DenseMap<StringRef, int> inDegree;
+  
+  // Compute initial in-degrees
+  for (auto action : graph.actions) {
+    inDegree[action] = 0;
+  }
+  for (auto &[from, toList] : graph.mustPrecede) {
+    for (auto to : toList) {
+      inDegree[to]++;
+    }
+  }
+  
+  // Kahn's algorithm with conflict-aware selection
+  while (scheduled.size() < graph.actions.size()) {
+    // Find all actions with in-degree 0
+    SmallVector<StringRef> ready;
+    for (auto action : graph.actions) {
+      if (!scheduled.count(action) && inDegree[action] == 0) {
+        ready.push_back(action);
+      }
+    }
+    
+    // Select best action from ready set
+    StringRef best = selectBestAction(ready, scheduled, schedule, cm);
+    schedule.push_back(best);
+    scheduled.insert(best);
+    
+    // Update in-degrees
+    for (auto successor : graph.mustPrecede[best]) {
+      inDegree[successor]--;
+    }
+  }
+  
+  return schedule;
+}
+
+StringRef selectBestAction(ArrayRef<StringRef> ready,
+                           const DenseSet<StringRef> &scheduled,
+                           ArrayRef<StringRef> currentSchedule,
+                           ConflictMatrix &cm) {
+  StringRef bestAction;
+  int bestScore = INT_MAX;
+  
+  for (auto candidate : ready) {
+    int score = 0;
+    
+    // Penalize placing this action if it has SB relationships
+    // with already scheduled actions
+    for (auto scheduled : currentSchedule) {
+      if (cm[candidate, scheduled] == ConflictRelation::SB) {
+        score += 10;  // Heavy penalty for SB violation
+      } else if (cm[candidate, scheduled] == ConflictRelation::C) {
+        score += 1;   // Light penalty for conflicts
+      }
+    }
+    
+    // Prefer actions from partial schedule in their original order
+    if (auto pos = partialOrder.find(candidate); 
+        pos != partialOrder.end()) {
+      score -= 100;  // Strong preference for maintaining partial order
+    }
+    
+    if (score < bestScore) {
+      bestScore = score;
+      bestAction = candidate;
+    }
+  }
+  
+  return bestAction;
+}
+```
+
+### Implementation as Analysis Pass
+
+```cpp
+class ActionSchedulingPass : public OperationPass<ModuleOp> {
+  void runOnOperation() override {
+    auto module = getOperation();
+    
+    // Skip if schedule is already complete
+    if (hasCompleteSchedule(module))
+      return;
+    
+    // Get conflict matrix (must run after inference pass)
+    auto cmAnalysis = getAnalysis<ConflictMatrixAnalysis>();
+    auto &cm = cmAnalysis.getConflictMatrix(module);
+    
+    // Build scheduling graph
+    SchedulingGraph graph;
+    buildSchedulingGraph(module, cm, graph);
+    
+    // Compute optimal schedule
+    SmallVector<StringRef> schedule;
+    if (graph.actions.size() <= 10) {
+      // Use exact algorithm for small modules
+      schedule = computeOptimalSchedule(graph, cm);
+    } else {
+      // Use heuristic for larger modules
+      schedule = computeHeuristicSchedule(graph, cm);
+    }
+    
+    if (schedule.empty()) {
+      signalPassFailure();
+      return;
+    }
+    
+    // Replace or create schedule operation
+    replaceScheduleOp(module, schedule);
+  }
+  
+  bool hasCompleteSchedule(ModuleOp module) {
+    auto scheduleOps = module.getOps<ScheduleOp>();
+    if (scheduleOps.empty())
+      return false;
+      
+    auto schedule = *scheduleOps.begin();
+    DenseSet<StringRef> scheduled(schedule.getActions().begin(),
+                                  schedule.getActions().end());
+    
+    // Check if all actions are in the schedule
+    for (auto rule : module.getOps<RuleOp>()) {
+      if (!scheduled.count(rule.getSymName()))
+        return false;
+    }
+    for (auto method : module.getOps<ActionMethodOp>()) {
+      if (!scheduled.count(method.getSymName()))
+        return false;
+    }
+    
+    return true;
+  }
+};
+```
+
+### Example Usage
+
+Input with partial schedule:
+```mlir
+txn.module @Example {
+  txn.rule @r1 { ... }
+  txn.rule @r2 { ... }
+  txn.action_method @m1() { ... }
+  txn.action_method @m2() { ... }
+  
+  // Partial schedule only specifies r1 before m1
+  txn.schedule [@r1, @m1] {
+    conflict_matrix = {
+      "r1,r2" = 0 : i32,    // r1 SB r2
+      "r2,m2" = 0 : i32,    // r2 SB m2
+      "m1,m2" = 2 : i32     // m1 C m2
+    }
+  }
+}
+```
+
+After scheduling pass:
+```mlir
+txn.module @Example {
+  txn.rule @r1 { ... }
+  txn.rule @r2 { ... }
+  txn.action_method @m1() { ... }
+  txn.action_method @m2() { ... }
+  
+  // Complete schedule maintains r1 < m1 and minimizes conflicts
+  txn.schedule [@r1, @r2, @m1, @m2] {
+    conflict_matrix = {
+      "r1,r2" = 0 : i32,    // r1 SB r2 ✓
+      "r2,m2" = 0 : i32,    // r2 SB m2 ✓
+      "m1,m2" = 2 : i32     // m1 C m2 (unavoidable)
+    }
+  }
+}
+```
+
+### Properties and Guarantees
+
+1. **Completeness**: The algorithm always produces a complete schedule if one exists
+2. **Partial Order Preservation**: The original partial schedule order is maintained
+3. **Optimality**: For small modules (≤10 actions), finds optimal schedule
+4. **Efficiency**: O(n!) for exact algorithm, O(n²) for heuristic
+5. **Determinism**: Given the same input, produces the same schedule
+
 ## Future Directions
 
 1. **Multi-cycle Support**: Extend timing attributes for pipelined operations

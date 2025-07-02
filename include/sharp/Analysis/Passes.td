@@ -139,4 +139,31 @@ def MethodAttributeValidation : Pass<"sharp-validate-method-attributes", "mlir::
   let dependentDialects = ["::sharp::txn::TxnDialect"];
 }
 
+def ActionScheduling : Pass<"sharp-action-scheduling", "mlir::ModuleOp"> {
+  let summary = "Complete partial schedules to minimize conflicts";
+  let description = [{
+    This pass automatically completes partial schedules to ensure all actions
+    (rules and methods) are properly ordered while minimizing conflicts.
+    
+    The algorithm:
+    1. Builds a dependency graph from SA relationships and partial schedule
+    2. For small modules (≤10 actions), uses exact algorithm to find optimal schedule
+    3. For larger modules, uses a heuristic based on Kahn's algorithm
+    
+    Optimization goals:
+    - Minimize SB violations (where action A should be before B but is scheduled after)
+    - Minimize SA violations (where action A should be after B but is scheduled before)
+    - Minimize unavoidable conflicts (C relationships)
+    - Preserve the original partial schedule order
+    
+    The pass runs after conflict matrix inference and before FIRRTL translation.
+    If the pass fails (e.g., due to cyclic dependencies), FIRRTL translation
+    will not proceed.
+  }];
+  
+  let constructor = "mlir::sharp::createActionSchedulingPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
 #endif // SHARP_ANALYSIS_PASSES

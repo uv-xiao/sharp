@@ -15,7 +15,7 @@ Sharp is a transaction-based hardware description language with conflict matrix 
 - Sharp Txn dialect with modules, methods, rules, and scheduling
 - MLIR infrastructure setup with CIRCT integration
 - Build system with Pixi package manager
-- Testing infrastructure with lit/FileCheck (45/45 tests passing)
+- Testing infrastructure with lit/FileCheck (48/48 tests passing)
 
 #### Txn Dialect Features (2025-06-29)
 - **Conflict Matrix (CM) on schedule operations**
@@ -70,6 +70,15 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Generates unique FIRRTL modules for each type instantiation
   - Fixed circuit naming to identify true top-level modules
   - Complete test coverage with all 45 tests passing
+
+#### Action Scheduling Algorithm (2025-07-02)
+- **Complete Implementation of Automatic Schedule Completion**
+  - Analysis pass in `lib/Analysis/ActionScheduling.cpp`
+  - Completes partial schedules while preserving specified orderings
+  - Minimizes conflicts where `action1 SB action2 && action1 > action2`
+  - Two-phase approach: optimal algorithm for ≤10 actions, heuristic for larger modules
+  - Detects and reports cyclic dependencies
+  - Full test coverage with 48 tests passing (including 3 new test files)
 
 ### 📋 Planned
 

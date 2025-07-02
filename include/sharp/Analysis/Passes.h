@@ -36,6 +36,9 @@ std::unique_ptr<mlir::Pass> createCombinationalLoopDetectionPass();
 /// Create a pass to validate method attributes for FIRRTL translation.
 std::unique_ptr<mlir::Pass> createMethodAttributeValidationPass();
 
+/// Create a pass to complete partial schedules to minimize conflicts.
+std::unique_ptr<mlir::Pass> createActionSchedulingPass();
+
 /// Generate the code for registering analysis passes.
 #define GEN_PASS_REGISTRATION
 #include "sharp/Analysis/Passes.h.inc"
