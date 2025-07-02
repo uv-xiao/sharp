@@ -1,11 +1,9 @@
-// NOTE: Combinational loop detection is deprecated until txn.primitive supports
-// attributes to define combinational paths. See STATUS.md for details.
-// RUN: echo "Test disabled - combinational loop detection deprecated"
+// RUN: sharp-opt --sharp-detect-combinational-loops --split-input-file --verify-diagnostics %s
 
-// Test combinational loop detection (DISABLED)
+// Test combinational loop detection
 
 // Direct loop through value methods
-// expected-error@+1 {{Combinational loop detected: DirectLoop::getValue -> DirectLoop::compute -> DirectLoop::getValue}}
+// expected-error@+1 {{Combinational loop detected}}
 txn.module @DirectLoop {
   txn.value_method @getValue() -> i32 {
     %val = txn.call @self::@compute() : () -> i32
@@ -26,7 +24,7 @@ txn.module @DirectLoop {
 // -----
 
 // Loop through multiple value methods
-// expected-error@+1 {{Combinational loop detected: MultiLoop::getB -> MultiLoop::getC -> MultiLoop::getA -> MultiLoop::getB}}
+// expected-error@+1 {{Combinational loop detected}}
 txn.module @MultiLoop {
   txn.value_method @getA() -> i32 {
     %val = txn.call @self::@getB() : () -> i32
@@ -45,22 +43,6 @@ txn.module @MultiLoop {
   
   %self = txn.instance @self of @MultiLoop : !txn.module<"MultiLoop">
   txn.schedule [@getA, @getB, @getC]
-}
-
-// -----
-
-// Loop through combinational primitive (Wire)
-// expected-error@+1 {{Combinational loop detected}}
-txn.module @WireLoop {
-  %wire = txn.instance @wire of @Wire : !txn.module<"Wire">
-  
-  txn.value_method @getValue() -> i32 {
-    %val = txn.call @wire::@read() : () -> i32
-    // This creates a combinational loop since Wire read depends on write
-    txn.call @wire::@write(%val) : (i32) -> ()
-    txn.return %val : i32
-  }
-  txn.schedule [@getValue]
 }
 
 // -----

@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "sharp/Dialect/Txn/TxnOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/DenseMap.h"
@@ -26,9 +27,6 @@
 namespace mlir {
 namespace sharp {
 
-using ::sharp::txn::CallOp;
-using ::sharp::txn::InstanceOp;
-using ::sharp::txn::ValueMethodOp;
 namespace txn = ::sharp::txn;
 
 #define GEN_PASS_DEF_COMBINATIONALLOOPDETECTION
@@ -125,7 +123,7 @@ private:
   void buildDependencyGraph(txn::ModuleOp module, DependencyGraph &graph);
   
   /// Add dependencies for a value method
-  void analyzeValueMethod(ValueMethodOp method, txn::ModuleOp module,
+  void analyzeValueMethod(txn::ValueMethodOp method, txn::ModuleOp module,
                           DependencyGraph &graph);
   
   /// Add dependencies for method calls in a region
@@ -172,12 +170,12 @@ void CombinationalLoopDetectionPass::runOnOperation() {
 void CombinationalLoopDetectionPass::buildDependencyGraph(txn::ModuleOp module,
                                                           DependencyGraph &graph) {
   // Analyze value methods - they create combinational paths
-  module.walk([&](ValueMethodOp method) {
+  module.walk([&](txn::ValueMethodOp method) {
     analyzeValueMethod(method, module, graph);
   });
   
   // Analyze instances for combinational primitives
-  module.walk([&](InstanceOp inst) {
+  module.walk([&](txn::InstanceOp inst) {
     StringRef instanceName = inst.getSymName();
     StringRef instanceType = inst.getModuleName();
     
@@ -191,7 +189,7 @@ void CombinationalLoopDetectionPass::buildDependencyGraph(txn::ModuleOp module,
   });
 }
 
-void CombinationalLoopDetectionPass::analyzeValueMethod(ValueMethodOp method,
+void CombinationalLoopDetectionPass::analyzeValueMethod(txn::ValueMethodOp method,
                                                          txn::ModuleOp module,
                                                          DependencyGraph &graph) {
   StringRef moduleName = module.getSymName();
@@ -205,24 +203,43 @@ void CombinationalLoopDetectionPass::analyzeCallsInRegion(Region &region,
                                                            StringRef callerName,
                                                            txn::ModuleOp module,
                                                            DependencyGraph &graph) {
-  region.walk([&](CallOp call) {
-    // Parse the callee symbol reference
-    auto callee = call.getCallee();
+  region.walk([&](txn::CallOp call) {
+    // Get the callee as a string
+    auto calleeAttr = call.getCalleeAttr();
+    std::string calleeStr;
+    
+    // Build the full callee string from the symbol ref
+    if (calleeAttr.getNestedReferences().size() > 0) {
+      calleeStr = calleeAttr.getRootReference().str() + "::" + 
+                  calleeAttr.getNestedReferences()[0].getValue().str();
+    } else {
+      calleeStr = calleeAttr.getRootReference().str();
+    }
+    
+    // Split on :: to get instance and method
+    StringRef calleeRef = calleeStr;
     StringRef instance, method;
     
-    // Handle nested symbol references (instance::method)
-    if (callee.getNestedReferences().size() == 1) {
-      instance = callee.getRootReference();
-      method = callee.getLeafReference();
+    auto colonPos = calleeRef.find("::");
+    if (colonPos != StringRef::npos) {
+      instance = calleeRef.substr(0, colonPos);
+      method = calleeRef.substr(colonPos + 2);
     } else {
       // Direct method reference in current module
-      instance = "";
-      method = callee.getRootReference();
+      method = calleeRef;
     }
     
     // Get the type of the instance to determine if it's a value method
-    InstanceOp instOp = module.lookupSymbol<InstanceOp>(instance);
-    if (!instOp) {
+    txn::InstanceOp instOp = nullptr;
+    if (!instance.empty()) {
+      module.walk([&](txn::InstanceOp inst) {
+        if (inst.getSymName() == instance) {
+          instOp = inst;
+        }
+      });
+    }
+    
+    if (!instOp && !instance.empty()) {
       // Could be a primitive or error - skip for now
       return;
     }
@@ -241,7 +258,16 @@ void CombinationalLoopDetectionPass::analyzeCallsInRegion(Region &region,
 std::string CombinationalLoopDetectionPass::getMethodFullName(
     StringRef instance, StringRef method, txn::ModuleOp currentModule) {
   // Look up the instance to get its module type
-  if (auto instOp = currentModule.lookupSymbol<InstanceOp>(instance)) {
+  txn::InstanceOp instOp = nullptr;
+  if (!instance.empty()) {
+    currentModule.walk([&](txn::InstanceOp inst) {
+      if (inst.getSymName() == instance) {
+        instOp = inst;
+      }
+    });
+  }
+  
+  if (instOp) {
     StringRef moduleType = instOp.getModuleName();
     return (moduleType + "::" + method).str();
   }

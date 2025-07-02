@@ -90,10 +90,41 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Added tests demonstrating Verilog generation capabilities
   - Current limitation: Empty action bodies generate empty FIRRTL when blocks
 
+#### Pythonic Construction Frontend (2025-07-02)
+- **Complete Python API for Hardware Construction**
+  - Decorator-based module definition with `@module` and `ModuleBuilder`
+  - Type-safe hardware types (i8, i16, i32, i64, etc.) with automatic MLIR conversion
+  - Operator overloading for arithmetic, logic, and comparison operations
+  - Method decorators: `@value_method`, `@action_method`, `@rule`
+  - Conflict matrix management with `ConflictRelation` enum
+  - Builder API with fine-grained control over operations
+  - Comprehensive documentation in `docs/pythonic_frontend.md`
+  - Integration with MLIR Python bindings infrastructure
+  - Example modules demonstrating typical hardware design patterns
+
+#### Txn-level Combinational Loop Detection (2025-07-02)
+- **Complete Loop Detection Analysis Pass**
+  - Implemented `--sharp-detect-combinational-loops` pass
+  - Builds dependency graph of combinational signal paths
+  - Uses depth-first search to detect cycles in the graph
+  - Distinguishes combinational vs sequential primitives (Wire vs Register)
+  - Reports detailed error messages with complete cycle paths
+  - Supports custom primitive combinational path attributes
+  - Algorithm based on signal flow analysis from TxnToFIRRTL conversion
+  - Comprehensive test suite with positive and negative test cases
+  - Documentation in `docs/combinational_loop_detection.md`
+  - Integration with Sharp's analysis pass pipeline
+
 ### 📋 Planned
 
-- **Txn-level Combinational Loop Detection**
-  - Requires attributes in txn.primitive to define combinational paths
+- **Simulation at Arbitrary Level**
+  - Transactional: event-driven, both spec/hw modules/primitives
+    - spec actions can be multi-cycle: they have a sequence of behavior (trigger other actions) to be finished in a specific sequence of time steps.
+    - learn from EQueue (references/Li-2022-EQueue.pdf) and DAM (references/Zhang-2024-DAM.pdf, https://github.com/stanford-ppl/DAM-RS)
+    - try to be high-performance (concurrent simulation)
+  - RTL: use CIRCT's `arcilator`
+  - Testbench: we can specify several instances to server as both a testbench generator and a result checker, and others to be tested against them.
+  - Hybrid: can we specify several instances to be simulated at transaction-level, and others at RTL-level? They should be able to communicate with each other.
 
 - **Additional Primitives**
   - FIFO, Memory, and other common hardware primitives

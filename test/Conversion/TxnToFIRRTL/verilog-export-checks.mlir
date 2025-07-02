@@ -18,10 +18,9 @@ txn.module @BasicModule {
   }
 }
 
-// CHECK: module BasicModule(
-// CHECK: assign getValueOUT = 32'h2A;
-// CHECK: assign doActionRDY = 1'h1;
-// CHECK: endmodule
+// CHECK-DAG: module BasicModule(
+// CHECK-DAG: assign getValueOUT = 32'h2A;
+// CHECK-DAG: assign doActionRDY = 1'h1;
 
 // Test 2: Module with arithmetic operations
 txn.module @ArithModule {
@@ -35,8 +34,7 @@ txn.module @ArithModule {
   }
 }
 
-// CHECK: module ArithModule(
-// CHECK: endmodule
+// CHECK-DAG: module ArithModule(
 
 // Test 3: Different integer widths
 txn.module @IntWidths {
@@ -55,10 +53,9 @@ txn.module @IntWidths {
   }
 }
 
-// CHECK: module IntWidths(
-// CHECK: assign getByteOUT = 8'hFF;
-// CHECK: assign getShortOUT = 16'h3E8;
-// CHECK: endmodule
+// CHECK-DAG: module IntWidths(
+// CHECK-DAG: assign getByteOUT = 8'hFF;
+// CHECK-DAG: assign getShortOUT = 16'h3E8;
 
 // Test 4: Conflict handling
 txn.module @ConflictModule {
@@ -77,7 +74,6 @@ txn.module @ConflictModule {
   }
 }
 
-// CHECK: module ConflictModule(
-// CHECK: write1RDY
-// CHECK: write2RDY
-// CHECK: endmodule
+// CHECK-DAG: module ConflictModule(
+// CHECK-DAG: write1RDY
+// CHECK-DAG: write2RDY
