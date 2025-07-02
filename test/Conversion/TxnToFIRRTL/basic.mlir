@@ -3,11 +3,11 @@
 // Test basic Txn to FIRRTL conversion
 
 // CHECK-LABEL: firrtl.circuit "Counter"
-// CHECK: firrtl.module @Register
-// CHECK: firrtl.module @Counter
+// CHECK-DAG: firrtl.module @Register_i32_impl
+// CHECK-DAG: firrtl.module @Counter
 
 txn.module @Counter {
-  %reg = txn.instance @count of @Register : !txn.module<"Register">
+  %reg = txn.instance @count of @Register<i32> : !txn.module<"Register">
   
   txn.rule @increment {
     %val = txn.call @count::@read() : () -> i32
@@ -36,19 +36,8 @@ txn.module @Counter {
   }
 }
 
-// Simplified Register primitive for testing
-txn.module @Register {
-  txn.value_method @read() -> i32 {
-    %0 = arith.constant 0 : i32
-    txn.return %0 : i32
-  }
-  txn.action_method @write(%val: i32) -> () {
-    txn.return
-  }
-  txn.schedule [@read, @write] {
-    conflict_matrix = {
-      "write,write" = 2 : i32,
-      "write,read" = 0 : i32
-    }
-  }
+// Register primitive for testing
+txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+  txn.fir_value_method @read() : () -> i32
+  txn.fir_action_method @write() : (i32) -> ()
 }

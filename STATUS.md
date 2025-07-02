@@ -80,18 +80,24 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Detects and reports cyclic dependencies
   - Full test coverage with 48 tests passing (including 3 new test files)
 
+#### Verilog Export (2025-07-02)
+- **Complete Integration with CIRCT's Export Infrastructure**
+  - Added custom pipelines: `--txn-export-verilog` and `--lower-to-hw`
+  - Full conversion pipeline: Txn → FIRRTL → HW → Verilog
+  - Proper handling of clock/reset signals and method interfaces
+  - Support for both single-file and split-file export modes
+  - Created comprehensive documentation in `docs/verilog_export.md`
+  - Added tests demonstrating Verilog generation capabilities
+  - Current limitation: Empty action bodies generate empty FIRRTL when blocks
+
 ### 📋 Planned
+
+- **Txn-level Combinational Loop Detection**
+  - Requires attributes in txn.primitive to define combinational paths
 
 - **Additional Primitives**
   - FIFO, Memory, and other common hardware primitives
-  - Spec primitives for formal verification
-  
-- **Verilog Export**
-  - Integration with CIRCT's export-verilog infrastructure
-  - Command-line options for different export modes
-  
-- **Txn-level Combinational Loop Detection**
-  - Requires attributes in txn.primitive to define combinational paths
+  - Spec primitives for formal verification  
   
 - **Performance Optimizations**
   - Optimize will-fire logic generation
@@ -110,15 +116,14 @@ Sharp is a transaction-based hardware description language with conflict matrix 
    - Add Memory primitive with read/write ports
    - Design spec primitives for verification
    
-2. **Verilog Export Pipeline**
-   - Add --export-verilog flag to sharp-opt
-   - Integrate with CIRCT's Verilog emission
-   - Test end-to-end hardware generation
-   
-3. **Enhanced Analysis**
+2. **Enhanced Analysis**
    - Implement combinational loop detection
    - Add performance analysis passes
    - Create resource utilization estimates
+   
+3. **Fix Empty When Block Issue**
+   - Update TxnToFIRRTL conversion to avoid empty when regions
+   - Ensure all action bodies generate valid FIRRTL
    
 4. **Tooling and Integration**
    - Fix Python bindings for programmatic access

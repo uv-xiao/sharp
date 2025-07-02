@@ -29,6 +29,15 @@ target_link_libraries(sharp-opt PRIVATE
   MLIRParser
   MLIRPass
   MLIRTransforms
+  CIRCTExportVerilog
+  CIRCTFIRRTLToHW
+  CIRCTSeqToSV
+  CIRCTHWToSV
+  CIRCTFIRRTLTransforms
+  CIRCTSeqTransforms
+  CIRCTSVTransforms
+  CIRCTHWTransforms
+  CIRCTSupport
 )
 
 # Make it part of the default build
