@@ -1,7 +1,18 @@
 add_mlir_public_c_api_library(SharpCAPICore
-  Core.cpp
+  Txn.cpp
   
   LINK_LIBS PUBLIC
-    SharpCore
+    SharpTxn
     MLIRCAPIIR
+    # MLIR dialects needed
+    MLIRCAPISCF
+    MLIRCAPISMT
+    MLIRCAPIIndex
+    MLIRCAPIArith
+    # CIRCT dialects needed
+    CIRCTCAPIFIRRTL
+    CIRCTCAPIComb
+    CIRCTCAPIHWArith
+    CIRCTCAPISeq
+    CIRCTCAPISV
 )

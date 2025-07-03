@@ -19,7 +19,6 @@ target_link_libraries(sharp-opt PRIVATE
   ${conversion_libs}
   ${circt_dialect_libs}
   ${circt_conversion_libs}
-  SharpCore
   SharpTxn
   SharpAnalysis
   SharpConversionPasses

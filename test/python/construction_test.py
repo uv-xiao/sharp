@@ -8,15 +8,30 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../build/lib/Bindings/Python'))
 
 try:
-    from sharp.construction import (
+    # Import MLIR first from the environment
+    import mlir
+    import mlir.ir as ir
+    import mlir.dialects
+    
+    # Then import Sharp components
+    import sharp
+    from sharp.edsl import (
         module, ModuleBuilder, i8, i16, i32, i64, 
         ConflictRelation, Value
     )
-    from sharp import ir
-    import sharp.dialects
+    from sharp.dialects import sharp as sharp_dialect
+    
+    # Register Sharp dialects
+    with ir.Context() as ctx:
+        sharp.register_sharp_dialects(ctx)
+        
 except ImportError as e:
     print(f"Import error: {e}")
-    print("Make sure the Sharp Python bindings are built and in PYTHONPATH")
+    import traceback
+    traceback.print_exc()
+    print("\nMake sure the Sharp Python bindings are built and PYTHONPATH includes:")
+    print("  - MLIR Python packages")
+    print("  - Sharp Python packages")
     sys.exit(1)
 
 

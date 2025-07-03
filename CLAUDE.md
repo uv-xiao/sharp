@@ -193,6 +193,10 @@ Per `STATUS.md`:
 - **In Progress**: Enhanced conversion features (primitive method calls, state management)
 - **Planned**: Verilog export, additional hardware primitives
 
+### Development Diary
+
+Claude Code should note down the development progress in `archieves/DIARY.md`. It should be updated every claude code session (how the user interacts with the claude code and what the claude code does). The user could provide some guidance files (like PLAN.md, etc.) to the claude code, and when claude code finished using the files and do not need them anymore, the files should be moved to `archieves/` directory with date marked (e.g., `archieves/2025-06-29-PLAN.md`). The `archieves/DIARY.md` entries should refer to the guidance files.
+
 ## Known Issues
 
 - Python bindings have a runtime issue under investigation
@@ -201,7 +205,6 @@ Per `STATUS.md`:
 
 ## Key Documentation Files
 
-- `PLAN.md` - Detailed technical roadmap and algorithm specifications
 - `STATUS.md` - Current implementation status and completed features
 - `docs/txn.md` - Transaction dialect semantics and operation definitions
 - `docs/txn_to_firrtl.md` - Conversion algorithm documentation

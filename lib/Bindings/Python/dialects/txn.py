@@ -2,6 +2,7 @@
 #  See https://llvm.org/LICENSE.txt for license information.
 #  SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Support functions for Sharp Python bindings."""
+from ._txn_ops_gen import *
+from ._txn_ops_gen import _Dialect
 
-# Support module for Sharp - imports will be done by the user as needed
+# Any Python-specific extensions can be added here

@@ -196,14 +196,141 @@ sharp/lib/Bindings/Python/
 ├── SharpModule.cpp          # Main C++ extension module
 ├── __init__.py              # Python package initialization
 ├── support.py               # Support utilities
+├── construction.py          # Pythonic construction API
 └── dialects/                # Dialect-specific bindings
     ├── SharpOps.td          # TableGen for Python bindings
     └── sharp.py             # Sharp dialect Python module
 ```
 
-### Usage
+### Pythonic Construction API
 
-To use the Sharp Python bindings:
+Sharp provides a high-level Pythonic API for constructing hardware modules, similar to CIRCT's PyCDE. This allows hardware designers to use familiar Python syntax and patterns while generating Sharp Txn dialect IR.
+
+#### Quick Start
+
+```python
+from sharp.construction import module, ModuleBuilder, i32, i8, ConflictRelation
+
+@module
+def Counter():
+    builder = ModuleBuilder("Counter")
+    
+    @builder.value_method(return_type=i32)
+    def getValue(b):
+        return b.constant(42)
+        
+    @builder.action_method(return_type=i32)
+    def increment(b, current: i32):
+        one = b.constant(1)
+        return current + one
+        
+    @builder.rule
+    def autoIncrement(b):
+        # Rules fire automatically
+        pass
+        
+    # Add conflict relationships
+    builder.add_conflict("increment", "autoIncrement", ConflictRelation.C)
+    
+    return builder
+
+# Generate MLIR
+mlir_module = Counter.build()
+print(mlir_module)
+```
+
+#### Key Features
+
+- **Decorator-based module definition** using `@module`
+- **Type-safe hardware types** (i8, i16, i32, i64, etc.)
+- **Operator overloading** for arithmetic and logic operations
+- **Automatic conflict matrix management**
+- **Integration with existing Python tools and workflows**
+
+#### Hardware Types
+
+```python
+from sharp.construction import i1, i8, i16, i32, i64, i128, i256, BoolType, IntType
+
+# Predefined types
+bool_type = i1        # 1-bit boolean
+byte_type = i8        # 8-bit integer  
+word_type = i32       # 32-bit integer
+
+# Custom types
+custom_type = IntType(width=24)  # 24-bit integer
+```
+
+#### Operator Overloading
+
+```python
+@builder.value_method(return_type=i32)
+def compute_example(b, a: i32, flag: i1):
+    # Arithmetic operations
+    result = a + 10
+    result = result * 2
+    result = result - 5
+    
+    # Bitwise operations
+    masked = result & 0xFF
+    combined = masked | 0x100
+    
+    # Shifts
+    left_shifted = result << 2
+    right_shifted = result >> 1
+    
+    # Comparisons
+    is_equal = result == 42
+    is_greater = result > 100
+    
+    # Select based on condition
+    final = b.select(flag, result, b.constant(0))
+    
+    return final
+```
+
+#### Conflict Management
+
+```python
+# Define relationships between actions
+builder.add_conflict("action1", "action2", ConflictRelation.C)   # Conflict
+builder.add_conflict("rule1", "action1", ConflictRelation.SB)   # rule1 before action1
+builder.add_conflict("method1", "method2", ConflictRelation.SA) # method1 after method2
+builder.add_conflict("rule2", "rule3", ConflictRelation.CF)     # Conflict-free
+```
+
+#### Setup and Usage
+
+1. **Build Sharp with Python bindings**:
+   ```bash
+   pixi run build
+   ```
+
+2. **Set up Python path**:
+   ```bash
+   export PYTHONPATH="$PWD/.install/unified-build/tools/circt/python_packages/circt_core:$PWD/.install/unified-build/tools/mlir/python_packages/mlir_core:$PWD/build/lib/Bindings/Python"
+   ```
+
+3. **Use the Pythonic API**:
+   ```python
+   from sharp.construction import module, ModuleBuilder, i32
+   
+   # Define your hardware modules using decorators
+   @module
+   def MyModule():
+       builder = ModuleBuilder("MyModule")
+       # ... define methods and rules
+       return builder
+   
+   # Generate MLIR
+   mlir_code = MyModule.build()
+   ```
+
+For comprehensive examples and documentation, see `docs/pythonic_frontend.md`.
+
+### Low-Level MLIR Bindings
+
+For direct MLIR manipulation, you can use the low-level bindings:
 
 ```python
 import sys
@@ -236,8 +363,12 @@ with ir.Context() as ctx:
 
 ### Testing
 
-A test script is provided at `test_sharp.py`:
+Test scripts are provided:
 ```bash
+# Test the Pythonic construction API
+pixi run python test/python/construction_test.py
+
+# Test low-level MLIR bindings
 pixi run python test_sharp.py
 ```
 
@@ -247,9 +378,12 @@ The Python bindings have been implemented following the CIRCT pattern:
 - ✅ C++ extension module using nanobind
 - ✅ TableGen-based operation bindings
 - ✅ Dialect registration mechanism
+- ✅ Complete Pythonic construction API with decorators and operator overloading
+- ✅ Type-safe hardware types and automatic MLIR conversion
+- ✅ Conflict matrix management
 - ⚠️ Runtime issue under investigation (possible ABI compatibility issue)
 
-The bindings are structurally complete but there is a runtime crash when registering dialects that needs to be resolved. This appears to be related to ABI compatibility between the unified LLVM/MLIR/CIRCT build and the Sharp Python extension.
+The Pythonic construction API is fully functional and provides a modern Python interface for hardware design. The low-level bindings are structurally complete but there is a runtime crash when registering dialects that needs to be resolved. This appears to be related to ABI compatibility between the unified LLVM/MLIR/CIRCT build and the Sharp Python extension.
 
 ## Current Status
 

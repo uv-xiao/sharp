@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(SharpCore, sharp);
+MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(SharpTxn, txn);
 
 #ifdef __cplusplus
 }

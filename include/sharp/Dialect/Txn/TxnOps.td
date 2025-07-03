@@ -11,7 +11,7 @@ include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/IR/OpAsmInterface.td"
-include "TxnTypes.td"
+include "sharp/Dialect/Txn/TxnTypes.td"
 
 //===----------------------------------------------------------------------===//
 // Module and Primitive Operations

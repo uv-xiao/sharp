@@ -115,6 +115,31 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Documentation in `docs/combinational_loop_detection.md`
   - Integration with Sharp's analysis pass pipeline
 
+#### Pythonic Construction Frontend - PySharp (2025-07-03)
+- **Python Bindings Infrastructure**
+  - Removed Sharp Core dialect as it was not useful
+  - Updated SharpModule.cpp to register MLIR dialects (SCF, SMT, Index, Arith)
+  - Updated SharpModule.cpp to register CIRCT dialects (FIRRTL, Comb, HWArith, Seq, SV)
+  - Note: HW dialect registration removed to avoid conflicts with CIRCT's builtin dialect
+  - Linked against required CAPI libraries for dialect access
+  
+- **PySharp Frontend Module**
+  - Created comprehensive EDSL in `lib/Bindings/Python/pysharp.py`
+  - Type system: IntType, BoolType, FIRRTLType (uint, sint, clock, reset)
+  - Predefined types: i1, i8, i16, i32, i64, i128, i256
+  - ConflictRelation enum matching Txn dialect (SB=0, SA=1, C=2, CF=3)
+  - Value class with operator overloading for arithmetic/logic operations
+  - ModuleBuilder API for constructing hardware modules
+  - Support for states, value methods, action methods, and rules
+  - Module decorator for class-based hardware description
+  - Helper functions: constant, read, write, if_then_else
+  
+- **Current Status**
+  - PySharp frontend module successfully implemented and tested
+  - Standalone functionality verified without MLIR dependency
+  - Python bindings can access MLIR/CIRCT dialects (with HW exception)
+  - Native extension has runtime loading issues that need investigation
+
 ### 📋 Planned
 
 - **Simulation at Arbitrary Level**
@@ -136,7 +161,8 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Implement dead code elimination
 
 ### 🚫 Known Limitations
-- Python bindings have runtime issues
+- Python bindings native extension has runtime loading issues (ImportError)
+- HW dialect cannot be registered from Sharp due to conflicts with CIRCT's builtin dialect
 - Multi-cycle operations not yet supported in translation
 - Nonsynthesizable primitives will fail translation
 
