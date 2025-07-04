@@ -2,7 +2,7 @@
 
 from typing import Optional, Union, Any, List
 from .sharp import ir
-from .sharp.dialects import arith, hw
+from .sharp.dialects import arith
 from .types import Type, IntType
 
 class Signal:

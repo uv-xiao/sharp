@@ -1,6 +1,4 @@
 # PySharp dialect extensions
 
-# Re-export dialects from sharp.dialects
-from ..sharp.dialects import *
-
-# Add any PySharp-specific dialect extensions here
+# This module can contain PySharp-specific dialect extensions
+# The actual dialects are imported from ..sharp.dialects when needed

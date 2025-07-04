@@ -1,7 +1,6 @@
 # PySharp type system following PyCDE patterns
 
 from .sharp import ir
-from .sharp.dialects import builtin
 from typing import Union, List, Optional
 import re
 

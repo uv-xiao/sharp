@@ -7,6 +7,7 @@
 include(AddMLIRPython)
 
 # Set the package prefix for Sharp's Python bindings
+# This makes the bindings available as pysharp.sharp.* (similar to pycde.circt.*)
 add_compile_definitions("MLIR_PYTHON_PACKAGE_PREFIX=pysharp.sharp.")
 
 # Declare PySharp Python sources
@@ -44,7 +45,7 @@ add_mlir_python_common_capi_library(PySharp_SharpPythonCAPI
     SharpBindingsPythonExtension
 )
 
-# Create Python modules for Sharp bindings
+# Create Python modules for Sharp bindings (this creates the .sharp import)
 add_mlir_python_modules(PySharp_SharpPythonModules
   ROOT_PREFIX "${PYSHARP_PYTHON_PACKAGE_DIR}/pysharp/sharp"
   INSTALL_PREFIX "python_packages/pysharp/sharp"

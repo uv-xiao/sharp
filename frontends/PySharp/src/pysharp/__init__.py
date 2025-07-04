@@ -1,14 +1,31 @@
 # PySharp - Pythonic hardware description for Sharp
-# Following PyCDE pattern of importing from bundled MLIR/CIRCT
+# Following PyCDE pattern of importing from bundled Sharp bindings
 
-from .sharp import ir
-from . import sharp
+# The .sharp module will be provided by the build system
+# It should contain the Sharp/MLIR/CIRCT Python bindings
+try:
+    from .sharp import ir
+    from . import sharp
+except ImportError:
+    # Fallback for development/testing without full build
+    import warnings
+    warnings.warn("Sharp bindings not available, using stub implementation")
+    # Would need to provide stubs here for testing
+    raise
+
 import atexit
 
 # Push a default context onto the context stack at import time
 DefaultContext = ir.Context()
 DefaultContext.__enter__()
-sharp.register_dialects(DefaultContext)
+
+# Register dialects if the function is available
+if hasattr(sharp, 'register_dialects'):
+    sharp.register_dialects(DefaultContext)
+else:
+    # Load dialects manually
+    DefaultContext.load_all_available_dialects()
+
 DefaultContext.allow_unregistered_dialects = True
 
 @atexit.register

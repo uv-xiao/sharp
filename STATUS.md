@@ -261,9 +261,10 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Created complete PySharp frontend at `frontends/PySharp/` following PyCDE structure
   - Removed old `lib/Bindings/Python/pysharp.py` as requested
   - Implemented PyCDE-style import pattern:
+    - The `.sharp` module is provided by the build system (not manually created)
     - All imports from `.sharp` namespace (no direct _mlir_libs imports)
-    - IR access through `pysharp.sharp.ir`
-    - Dialects through `pysharp.sharp.dialects`
+    - IR access through `from .sharp import ir`
+    - Dialects through `from .sharp.dialects import txn, arith`
   - Core components implemented:
     - `__init__.py`: Context management and core imports
     - `types.py`: Type system (IntType, UIntType, ClockType, etc.)
@@ -273,7 +274,8 @@ Sharp is a transaction-based hardware description language with conflict matrix 
     - `builder.py`: MLIR module construction
     - `support.py`: Utilities for emission and verification
   - Created test example demonstrating counter module
-  - Follows PyCDE's CMake structure for Python module installation
+  - Follows PyCDE's CMake structure where build system creates the bindings
+  - The `pysharp/sharp/` directory will be populated by CMake with Python bindings
   - This architecture should resolve runtime loading issues by bundling dependencies
 
 ### 🚧 In Progress
