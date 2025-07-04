@@ -7,6 +7,7 @@ endfunction()
 
 # Add unit test subdirectories here
 add_subdirectory(Dialect)
+add_subdirectory(Simulation)
 # add_subdirectory(Support)
 
 # Create a shell script that finds and runs all test executables

@@ -48,22 +48,83 @@ The user disagreed with the initial EDSL implementation and requested to follow 
 ### Challenges and Solutions
 - Native extension loading issue persists but doesn't affect standalone functionality
 - Successfully implemented PyCDE-style import pattern with fallbacks
-- Tests demonstrate full PySharp EDSL functionality
 
-### Final Structure
-```
-sharp/
-├── __init__.py      # Sharp bindings wrapper
-├── pysharp.py       # PySharp EDSL implementation
-└── dialects/        # Sharp dialect bindings
-    └── txn.py
+## 2025-07-03 (Session 2) - Simulation Framework Implementation
 
-integration_test/pysharp/
-├── test_*.py        # Integration tests
-└── test_standalone.py # Comprehensive standalone test
-```
+### User Request
+Continue with "Simulation at Arbitrary Level" from STATUS.md:
+- Read EQueue and DAM papers for reference
+- Create docs/simulation.md with design and implementation plan
+- Implement the simulation code
+- Add tests
 
-## 2025-07-03 - Pythonic Construction Frontend
+### Key Actions Taken
+
+1. **Read Reference Papers**
+   - EQueue: Event-driven simulation with dependency tracking
+   - DAM: High-performance dataflow simulation with concurrent execution
+   - Insights: Need event queues, dependency tracking, multi-cycle operations
+
+2. **Created Comprehensive Design Document**
+   - docs/simulation.md with complete architecture
+   - Three levels: Transaction-Level, RTL (via arcilator), Hybrid
+   - Event-driven architecture with conflict matrix support
+   - Multi-cycle operation support for spec primitives
+   - 6-phase implementation plan
+
+3. **Implemented Core Simulation Components**
+   - **Event.h/cpp**: Event structure with dependencies, event queue with priority
+   - **SimModule.h/cpp**: Base module class with conflict matrix, method registration
+   - **Simulator.h/cpp**: Main simulation engine with event scheduling and execution
+   - Support for:
+     - Event dependencies and deferred execution
+     - Conflict checking based on conflict matrix
+     - Multi-cycle operations through continuations
+     - Performance tracking and debugging
+
+4. **Created Simulation Infrastructure**
+   - Added lib/Simulation directory structure:
+     - Core/ - Base simulation components
+     - TransactionLevel/ - Spec primitives
+     - RTL/ - Arcilator integration (placeholder)
+     - Hybrid/ - Bridge components (placeholder)
+   - Updated build system to include simulation library
+   - Created unit tests in unittests/Simulation/
+
+5. **Implemented Spec Primitives**
+   - SpecFIFO<T> - Unbounded FIFO with conflict relations
+   - SpecMemory - Multi-cycle memory with configurable latency
+   - Proper conflict matrix setup for each primitive
+
+6. **Created Test Examples**
+   - counter-sim.mlir - Basic counter with conflict handling
+   - multi-cycle.mlir - Pipeline with multi-cycle operations
+   - hybrid-sim.mlir - Example of hybrid TL/RTL simulation
+
+7. **Defined Simulation Operations**
+   - SimulationOps.td with sharp.sim dialect
+   - Configuration operations for simulation setup
+   - Spec primitives for multi-cycle operations
+   - Performance measurement operations
+
+### Technical Details
+- Event-driven simulation with min-heap priority queue
+- Dependency tracking allows complex causality chains
+- Conflict matrix integration prevents concurrent conflicting operations
+- Continuation support enables multi-cycle spec actions
+- Builder pattern for easy simulation setup
+
+### Status
+- Core transaction-level simulation implemented
+- Basic spec primitives created
+- Test infrastructure established
+- RTL integration (arcilator) and hybrid simulation pending
+
+### Next Steps
+- Complete spec primitive implementations
+- Integrate with arcilator for RTL simulation
+- Implement hybrid simulation bridge
+- Add more comprehensive tests
 
 ### User Request
 The user requested to move forward with the Pythonic Construction Frontend status:

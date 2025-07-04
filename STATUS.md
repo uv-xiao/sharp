@@ -140,16 +140,31 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Python bindings can access MLIR/CIRCT dialects (with HW exception)
   - Native extension has runtime loading issues that need investigation
 
-### 📋 Planned
+### 🚧 In Progress
 
-- **Simulation at Arbitrary Level**
-  - Transactional: event-driven, both spec/hw modules/primitives
-    - spec actions can be multi-cycle: they have a sequence of behavior (trigger other actions) to be finished in a specific sequence of time steps.
-    - learn from EQueue (references/Li-2022-EQueue.pdf) and DAM (references/Zhang-2024-DAM.pdf, https://github.com/stanford-ppl/DAM-RS)
-    - try to be high-performance (concurrent simulation)
-  - RTL: use CIRCT's `arcilator`
-  - Testbench: we can specify several instances to server as both a testbench generator and a result checker, and others to be tested against them.
-  - Hybrid: can we specify several instances to be simulated at transaction-level, and others at RTL-level? They should be able to communicate with each other.
+#### Simulation at Arbitrary Level (2025-07-03)
+- **Transaction-Level Simulation Core**
+  - Implemented event-driven simulation engine with dependency tracking
+  - Created Event, SimModule, and Simulator classes in C++
+  - Support for multi-cycle operations through continuation events
+  - Conflict matrix support with SB/SA/C/CF relations
+  - Performance tracking and debugging infrastructure
+  - Created comprehensive design document in `docs/simulation.md`
+  - Unit tests for basic simulation functionality
+  
+- **Simulation Operations**
+  - Defined SimulationOps.td with configuration and spec primitives
+  - Support for multi-cycle spec operations
+  - Random value generation for testbenches
+  - Performance measurement regions
+  
+- **Test Infrastructure**
+  - Created simulation test examples in MLIR format
+  - Counter module with conflict handling
+  - Pipeline example with multi-cycle processing
+  - Hybrid simulation configuration examples
+
+### 📋 Planned
 
 - **Additional Primitives**
   - FIFO, Memory, and other common hardware primitives
