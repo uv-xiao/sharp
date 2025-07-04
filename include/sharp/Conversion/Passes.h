@@ -32,6 +32,17 @@ namespace sharp {
 void populateTxnToFIRRTLConversionPatterns(RewritePatternSet &patterns);
 
 //===----------------------------------------------------------------------===//
+// TxnToFunc
+//===----------------------------------------------------------------------===//
+
+// Forward declarations
+class TypeConverter;
+
+/// Populate patterns for converting Txn dialect to Func dialect.
+void populateTxnToFuncConversionPatterns(TypeConverter &typeConverter,
+                                        RewritePatternSet &patterns);
+
+//===----------------------------------------------------------------------===//
 // Registration
 //===----------------------------------------------------------------------===//
 

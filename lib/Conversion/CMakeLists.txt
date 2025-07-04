@@ -1,4 +1,5 @@
 add_subdirectory(TxnToFIRRTL)
+add_subdirectory(TxnToFunc)
 
 add_mlir_library(SharpConversionPasses
   PassDetail.cpp
@@ -8,4 +9,5 @@ add_mlir_library(SharpConversionPasses
 
   LINK_LIBS PUBLIC
   SharpTxnToFIRRTL
+  SharpTxnToFunc
   )

@@ -82,41 +82,42 @@ class SimModule {
 
 ### Execution Model
 
-1. **Event Scheduling**:
-   - Events are added to the global event queue
-   - Dependencies are tracked using DAG structure
-   - Conflicts are resolved using the conflict matrix
+Sharp follows a **one-rule-at-a-time (1RaaT)** execution model inspired by Koika, where rules execute atomically and sequentially within each clock cycle. See `docs/execution_model.md` for complete details.
 
-2. **Event Execution**:
+1. **Cycle Execution Phases**:
+   - **Scheduling Phase**: Evaluate guards, resolve conflicts, determine execution order
+   - **Execution Phase**: Execute scheduled rules atomically in order
+   - **Commit Phase**: Apply all state updates simultaneously
+
+2. **Event-Based Implementation**:
    ```
-   while (!event_queue.empty()) {
-       Event e = event_queue.pop_ready();
+   void executeCycle() {
+       // Phase 1: Schedule - determine which rules can execute
+       auto enabled_rules = evaluateGuards();
+       auto schedule = resolveConflicts(enabled_rules, conflict_matrix);
        
-       // Check conflicts with executing events
-       if (has_conflicts(e)) {
-           defer_event(e);
-           continue;
+       // Phase 2: Execute - run rules atomically
+       for (auto& rule : schedule) {
+           Event e = createRuleEvent(rule);
+           e.execute();  // Atomic execution
+           
+           // Handle multi-cycle operations
+           if (e.has_continuation()) {
+               schedule_continuation(e, e.next_cycle());
+           }
        }
        
-       // Execute the event
-       Result r = modules[e.module].execute(e.method, e.args);
-       
-       // Handle multi-cycle operations
-       if (r.is_continuation) {
-           schedule_continuation(e, r.next_cycle);
-       }
-       
-       // Trigger dependent events
-       for (auto triggered : e.triggers) {
-           event_queue.add(triggered);
-       }
+       // Phase 3: Commit - update state atomically
+       commitStateUpdates();
+       advanceClock();
    }
    ```
 
 3. **Multi-Cycle Operations**:
-   - Spec primitives can return continuations
-   - Continuations are scheduled for future cycles
-   - State changes are atomic at cycle boundaries
+   - Static latency: `txn.launch {latency=N} { ... }`
+   - Dynamic latency: `txn.launch until %cond { ... }`
+   - Continuations scheduled for future cycles
+   - State changes remain atomic at cycle boundaries
 
 ### Spec Primitives
 
@@ -131,19 +132,25 @@ Special primitives for modeling and verification:
     txn.action_method @deq() -> i32 { ... }
 }
 
-// Multi-cycle spec action
-txn.action_method @complexOperation(%n: i32) {
-    // Cycle 1: Initiate
-    %state = txn.spec.begin_multi_cycle()
-    
-    // Cycles 2-n: Process
-    txn.spec.continue(%state) {
-        // Trigger other actions
-        txn.call @otherAction()
+// Multi-cycle operations with static latency
+txn.action_method @readMemory(%addr: i32) -> i32 {
+    txn.launch {latency=3} {
+        // This block executes 3 cycles later
+        %data = txn.primitive.call @Memory::read(%addr) : (i32) -> i32
+        txn.return %data : i32
     }
-    
-    // Final cycle: Complete
-    txn.spec.complete(%state)
+}
+
+// Multi-cycle operations with dynamic latency  
+txn.action_method @waitForReady(%data: i32) {
+    %done = txn.launch until %ready {
+        // This block repeats until %ready is true
+        %ready = txn.call @isDeviceReady() : () -> i1
+        txn.if %ready {
+            txn.call @sendData(%data) : (i32) -> ()
+        }
+        txn.return %ready : i1
+    }
 }
 ```
 
@@ -188,14 +195,50 @@ txn.bridge @TLtoRTL(%tl_module: !txn.module, %rtl_module: !hw.module) {
 ### Synchronization
 
 1. **Time Alignment**:
-   - TL simulation runs in logical time
-   - RTL simulation runs in clock cycles
+   - TL simulation runs in logical time (cycle-based)
+   - RTL simulation runs in clock cycles (event-based)
    - Bridge maintains time correspondence
 
 2. **Event Coordination**:
    - TL events can trigger RTL actions
    - RTL signals can generate TL events
    - Proper handling of timing boundaries
+
+3. **Execution Interface**:
+   ```cpp
+   class HybridSimulationInterface {
+       // Synchronize TL and RTL execution
+       void synchronize() {
+           // Wait for both simulators to reach sync point
+           tl_sim.runUntilBarrier();
+           rtl_sim.runUntilBarrier();
+           
+           // Exchange interface signals
+           exchangeMethodCalls();
+           exchangeStateUpdates();
+           
+           // Advance both simulators
+           tl_sim.advanceCycle();
+           rtl_sim.advanceClock();
+       }
+       
+       // Method call translation
+       void bridgeMethodCall(MethodCall& call) {
+           if (call.from_tl) {
+               // TL → RTL: Set RTL input signals
+               rtl_sim.setSignal(call.method + "_en", true);
+               rtl_sim.setSignal(call.method + "_data", call.args);
+               // Wait for RTL ready signal
+               while (!rtl_sim.getSignal(call.method + "_ready"))
+                   rtl_sim.step();
+           } else {
+               // RTL → TL: Create TL event
+               Event e = Event::methodCall(call.module, call.method, call.args);
+               tl_sim.scheduleEvent(e);
+           }
+       }
+   };
+   ```
 
 ## Performance Modeling
 
@@ -241,37 +284,37 @@ The simulation framework collects:
 
 ## Implementation Plan
 
-### Phase 1: Transaction-Level Core (2 weeks)
+### Phase 1: Transaction-Level Core
 1. Basic event queue implementation
 2. Single-module simulation
 3. Simple conflict resolution
 4. Basic performance metrics
 
-### Phase 2: Multi-Module Support (2 weeks)
+### Phase 2: Multi-Module Support
 1. Inter-module communication
 2. Dependency tracking
 3. Concurrent execution
 4. Testbench infrastructure
 
-### Phase 3: Spec Primitives (1 week)
+### Phase 3: Spec Primitives
 1. Spec FIFO implementation
 2. Multi-cycle operation support
 3. Verification primitives
 4. Assertion checking
 
-### Phase 4: RTL Integration (2 weeks)
+### Phase 4: RTL Integration
 1. Arcilator integration
 2. TL-to-RTL lowering
 3. Co-simulation support
 4. Timing verification
 
-### Phase 5: Hybrid Simulation (2 weeks)
+### Phase 5: Hybrid Simulation
 1. Bridge component design
 2. Time synchronization
 3. Mixed-level debugging
 4. Performance analysis
 
-### Phase 6: Advanced Features (ongoing)
+### Phase 6: Advanced Features
 1. Parallel simulation (DAM-inspired)
 2. Visualization tools
 3. Advanced performance models

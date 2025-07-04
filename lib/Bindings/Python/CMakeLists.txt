@@ -14,7 +14,6 @@ declare_mlir_python_sources(SharpBindingsPythonSources
   ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
   SOURCES
     __init__.py
-    pysharp.py
 )
 
 ################################################################################

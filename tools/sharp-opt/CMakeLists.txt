@@ -22,12 +22,15 @@ target_link_libraries(sharp-opt PRIVATE
   SharpTxn
   SharpAnalysis
   SharpConversionPasses
+  SharpSimulationPasses
+  SharpSimulationDialect
   MLIROptLib
   MLIRSupport
   MLIRIR
   MLIRParser
   MLIRPass
   MLIRTransforms
+  MLIRExecutionEngine
   CIRCTExportVerilog
   CIRCTFIRRTLToHW
   CIRCTSeqToSV
@@ -36,6 +39,8 @@ target_link_libraries(sharp-opt PRIVATE
   CIRCTSeqTransforms
   CIRCTSVTransforms
   CIRCTHWTransforms
+  CIRCTArc
+  CIRCTArcToLLVM
   CIRCTSupport
 )
 

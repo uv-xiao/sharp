@@ -71,6 +71,25 @@ public:
   /// Reset module state (for simulation restart)
   virtual void reset() {}
   
+  /// Execute one simulation cycle (for cycle-based simulation)
+  virtual void executeCycle() {}
+  
+  /// Get current simulation time
+  virtual uint64_t getCurrentTime() const { return 0; }
+  
+  /// Commit pending state updates
+  virtual void commitStateUpdates() {}
+  
+  /// Register a rule
+  void registerRule(StringRef name, std::function<bool()> canFire) {
+    rules[name] = canFire;
+  }
+  
+  /// Handle execution result (for continuations)
+  virtual void handleExecutionResult(const ExecutionResult& result) {
+    (void)result; // Default: ignore
+  }
+  
   /// Get performance metrics
   virtual std::map<std::string, uint64_t> getMetrics() const {
     return {{"cycles", cycleCount}, {"calls", callCount}};
@@ -90,6 +109,7 @@ protected:
 private:
   std::string name;
   StringMap<MethodImpl> methods;
+  StringMap<std::function<bool()>> rules;
   
   // Conflict matrix: pair of method names -> relation
   using ConflictKey = std::pair<std::string, std::string>;

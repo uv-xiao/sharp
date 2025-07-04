@@ -6,7 +6,8 @@
 
 #include "sharp/Simulation/SimModule.h"
 #include "llvm/Support/Debug.h"
-#include <stdexcept>
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/ADT/Twine.h"
 
 #define DEBUG_TYPE "sharp-simulation"
 
@@ -17,7 +18,7 @@ ExecutionResult SimModule::execute(StringRef method, ArrayRef<Value> args) {
   // Find the method implementation
   auto it = methods.find(method);
   if (it == methods.end()) {
-    throw std::runtime_error("Method '" + method.str() + "' not found in module '" + name + "'");
+    llvm::report_fatal_error(llvm::Twine("Method '") + method + "' not found in module '" + name + "'");
   }
   
   // Update performance counters
@@ -101,7 +102,7 @@ std::unique_ptr<SimModule> SimModuleFactory::create(StringRef typeName,
                                                    StringRef instanceName) {
   auto it = creators.find(typeName);
   if (it == creators.end()) {
-    throw std::runtime_error("Module type '" + typeName.str() + "' not registered");
+    llvm::report_fatal_error(llvm::Twine("Module type '") + typeName + "' not registered");
   }
   
   auto module = it->second();

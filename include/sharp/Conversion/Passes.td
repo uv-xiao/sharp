@@ -62,4 +62,31 @@ def TxnToFIRRTLConversion : Pass<"convert-txn-to-firrtl", "mlir::ModuleOp"> {
   ];
 }
 
+//===----------------------------------------------------------------------===//
+// TxnToFunc
+//===----------------------------------------------------------------------===//
+
+def ConvertTxnToFuncPass : Pass<"convert-txn-to-func", "mlir::ModuleOp"> {
+  let summary = "Convert Txn dialect to Func dialect";
+  let description = [{
+    This pass converts Txn dialect operations to Func dialect operations,
+    preparing the code for further lowering to LLVM dialect and JIT execution.
+    
+    The conversion includes:
+    - txn.module → func.func operations
+    - txn.value_method/action_method → func.func
+    - txn.rule → func.func
+    - txn.call → func.call
+    - txn.return/yield → func.return
+    
+    This is the first step in the JIT compilation pipeline.
+  }];
+  
+  let dependentDialects = [
+    "::sharp::txn::TxnDialect",
+    "::mlir::func::FuncDialect",
+    "::mlir::arith::ArithDialect"
+  ];
+}
+
 #endif // SHARP_CONVERSION_PASSES_TD

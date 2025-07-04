@@ -6,12 +6,15 @@
 
 #include "sharp/Simulation/SimModule.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "llvm/ADT/ArrayRef.h"
 #include <deque>
 #include <memory>
 
 namespace sharp {
 namespace sim {
 namespace spec {
+
+using llvm::ArrayRef;
 
 /// Unbounded FIFO for specification
 template <typename T>
@@ -36,7 +39,7 @@ public:
     registerMethod("canDeq", [this](ArrayRef<Value>) {
       ExecutionResult result;
       // Can dequeue if not empty
-      bool canDeq = !data.empty();
+      [[maybe_unused]] bool canDeq = !data.empty();
       // In real implementation, create MLIR i1 value
       return result;
     });
@@ -44,7 +47,7 @@ public:
     registerMethod("deq", [this](ArrayRef<Value>) {
       ExecutionResult result;
       if (!data.empty()) {
-        T value = data.front();
+        [[maybe_unused]] T value = data.front();
         data.pop_front();
         // In real implementation, convert to MLIR Value
       }
@@ -54,7 +57,7 @@ public:
     registerMethod("first", [this](ArrayRef<Value>) {
       ExecutionResult result;
       if (!data.empty()) {
-        T value = data.front();
+        [[maybe_unused]] T value = data.front();
         // In real implementation, convert to MLIR Value
       }
       return result;
@@ -91,7 +94,7 @@ public:
   SpecMemory(StringRef name, size_t size, unsigned readLatency = 1)
       : SimModule(name), memory(size), readLatency(readLatency) {
     
-    registerMethod("read", [this](ArrayRef<Value> args) {
+    registerMethod("read", [this, readLatency](ArrayRef<Value> args) {
       ExecutionResult result;
       
       // Extract address from args[0]
@@ -144,7 +147,7 @@ public:
 
 private:
   std::vector<int> memory;
-  unsigned readLatency;
+  [[maybe_unused]] unsigned readLatency;
 };
 
 /// Register spec primitives with the module factory

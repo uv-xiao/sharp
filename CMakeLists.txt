@@ -173,6 +173,11 @@ if(SHARP_INCLUDE_DOCS)
   add_subdirectory(docs)
 endif()
 
+# Add PySharp frontend if Python bindings are enabled
+if(SHARP_BINDINGS_PYTHON_ENABLED)
+  add_subdirectory(frontends/PySharp)
+endif()
+
 # Export targets (commented out until we have targets to export)
 # export(EXPORT SharpTargets
 #   FILE "${CMAKE_CURRENT_BINARY_DIR}/SharpTargets.cmake"

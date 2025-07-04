@@ -7,6 +7,9 @@
 #include "sharp/Simulation/Simulator.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/Twine.h"
 #include <iostream>
 
 #define DEBUG_TYPE "sharp-simulator"
@@ -16,7 +19,7 @@ namespace sim {
 
 void Simulator::addModule(StringRef name, std::unique_ptr<SimModule> module) {
   if (modules.find(name) != modules.end()) {
-    throw std::runtime_error("Module '" + name.str() + "' already exists");
+    llvm::report_fatal_error(llvm::Twine("Module '") + name + "' already exists");
   }
   modules[name] = std::move(module);
 }
@@ -125,7 +128,7 @@ std::map<std::string, std::map<std::string, uint64_t>> Simulator::getStatistics(
   std::map<std::string, std::map<std::string, uint64_t>> stats;
   
   for (const auto& kv : modules) {
-    stats[kv.first()] = kv.second->getMetrics();
+    stats[std::string(kv.first())] = kv.second->getMetrics();
   }
   
   // Add global statistics
@@ -176,38 +179,32 @@ void Simulator::executeEvent(EventPtr event) {
   // Get the module
   auto* module = getModule(event->getModule());
   if (!module) {
-    throw std::runtime_error("Module '" + event->getModule() + "' not found");
+    llvm::report_fatal_error(llvm::Twine("Module '") + event->getModule() + "' not found");
   }
   
   // Add to executing list
   executingEvents.push_back(event);
   
-  try {
-    // Execute the method
-    ExecutionResult result = module->execute(event->getMethod(), event->getArgs());
-    
-    // Handle continuation
-    if (result.isContinuation) {
-      scheduleContinuation(event, result);
-    }
-    
-    // Schedule triggered events
-    for (auto& triggered : result.triggeredEvents) {
-      eventQueue.push(triggered);
-    }
-    
-    // Call callback if present
-    if (event->getCallback()) {
-      event->getCallback()(result.returns);
-    }
-    
-    // Mark event as complete
-    eventQueue.markComplete(event->getID());
-    
-  } catch (const std::exception& e) {
-    std::cerr << "Error executing event: " << e.what() << "\n";
-    throw;
+  // Execute the method
+  ExecutionResult result = module->execute(event->getMethod(), event->getArgs());
+  
+  // Handle continuation
+  if (result.isContinuation) {
+    scheduleContinuation(event, result);
   }
+  
+  // Schedule triggered events
+  for (auto& triggered : result.triggeredEvents) {
+    eventQueue.push(triggered);
+  }
+  
+  // Call callback if present
+  if (event->getCallback()) {
+    event->getCallback()(result.returns);
+  }
+  
+  // Mark event as complete
+  eventQueue.markComplete(event->getID());
   
   // Remove from executing list
   executingEvents.erase(

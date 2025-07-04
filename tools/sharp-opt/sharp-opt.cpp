@@ -31,10 +31,12 @@
 #include "circt/Dialect/HW/HWPasses.h"
 #include "circt/Dialect/SV/SVPasses.h"
 #include "circt/Dialect/Seq/SeqPasses.h"
+#include "circt/Dialect/Arc/ArcPasses.h"
 
 #include "sharp/InitAllDialects.h"
 #include "sharp/Analysis/Passes.h"
 #include "sharp/Conversion/Passes.h"
+#include "sharp/Simulation/Passes.h"
 
 namespace {
 
@@ -80,11 +82,15 @@ int main(int argc, char **argv) {
   mlir::registerAllPasses();
   mlir::sharp::registerPasses();
   mlir::sharp::registerConversionPasses();
+  sharp::registerSimulationPasses();
   
   // Register only the CIRCT passes we need
   circt::registerLowerFIRRTLToHWPass();
   circt::registerLowerSeqToSVPass();
   circt::registerExportSplitVerilogPass();
+  
+  // Register arcilator passes for RTL simulation
+  circt::arc::registerPasses();
   
   // Register our custom pipelines
   registerSharpPipelines();
