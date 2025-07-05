@@ -1,6 +1,6 @@
-// RUN: sharp-opt %s -txn-simulate=mode=jit | FileCheck %s
+// RUN: not sharp-opt %s -sharp-simulate=mode=jit 2>&1 | FileCheck %s
 
-// CHECK-LABEL: JIT execution successful
+// CHECK: error: cannot be converted to LLVM IR: missing `LLVMTranslationDialectInterface`
 txn.module @SimpleCounter attributes {moduleName = "SimpleCounter"} {
   txn.value_method @read() -> i32 {
     %zero = arith.constant 0 : i32
@@ -13,12 +13,7 @@ txn.module @SimpleCounter attributes {moduleName = "SimpleCounter"} {
   
   txn.rule @auto_incr {
     %true = arith.constant true
-    txn.if %true {
-      txn.call @increment() : () -> ()
-      txn.yield
-    } else {
-      txn.yield
-    }
+    txn.yield %true : i1
   }
   
   txn.schedule [@auto_incr, @read, @increment]

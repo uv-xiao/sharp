@@ -228,13 +228,18 @@ struct ConvertTxnToFuncPass
     target.addLegalDialect<mlir::func::FuncDialect>();
     target.addLegalDialect<mlir::arith::ArithDialect>();
     
-    // Mark txn dialect as illegal
-    target.addIllegalDialect<::sharp::txn::TxnDialect>();
+    // Mark specific txn operations as illegal
+    target.addIllegalOp<::sharp::txn::ModuleOp>();
+    target.addIllegalOp<::sharp::txn::ValueMethodOp>();
+    target.addIllegalOp<::sharp::txn::ActionMethodOp>();
+    target.addIllegalOp<::sharp::txn::RuleOp>();
+    target.addIllegalOp<::sharp::txn::ReturnOp>();
+    target.addIllegalOp<::sharp::txn::YieldOp>();
+    target.addIllegalOp<::sharp::txn::CallOp>();
+    target.addIllegalOp<::sharp::txn::IfOp>();
     
-    // Allow txn operations within func bodies temporarily
-    target.addDynamicallyLegalOp<::sharp::txn::ModuleOp>([](::sharp::txn::ModuleOp op) {
-      return false; // Always convert
-    });
+    // Allow txn.schedule and other structural ops temporarily
+    target.addLegalOp<::sharp::txn::ScheduleOp>();
     
     TxnToFuncTypeConverter typeConverter;
     mlir::RewritePatternSet patterns(&getContext());

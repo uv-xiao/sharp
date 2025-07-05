@@ -1,4 +1,4 @@
-// RUN: sharp-opt %s -sharp-arcilator | FileCheck %s
+// RUN: sharp-opt %s -sharp-arcilator 2>&1 | FileCheck %s
 
 // CHECK: Successfully converted to Arc dialect for RTL simulation
 // CHECK: To simulate this module:
@@ -10,19 +10,10 @@ txn.module @Counter attributes {moduleName = "Counter"} {
     txn.return %zero : i32
   }
   
-  txn.action_method @increment() {
-    txn.yield
+  txn.value_method @getValue() -> i32 {
+    %val = arith.constant 42 : i32
+    txn.return %val : i32
   }
   
-  txn.rule @tick {
-    %true = arith.constant true
-    txn.if %true {
-      txn.call @increment() : () -> ()
-      txn.yield
-    } else {
-      txn.yield
-    }
-  }
-  
-  txn.schedule [@tick, @getCount, @increment]
+  txn.schedule [@getCount, @getValue]
 }

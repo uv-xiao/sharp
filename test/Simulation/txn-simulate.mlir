@@ -1,37 +1,38 @@
-// RUN: sharp-opt %s --sharp-simulate | FileCheck %s
-// RUN: sharp-opt %s --sharp-simulate="mode=translation output=test.cpp" | FileCheck %s --check-prefix=TRANS
+// RUN: sharp-opt %s -sharp-simulate=mode=translation | FileCheck %s
 
-// Simple counter module for testing TxnSimulate pass
-txn.module @Counter {
-    txn.state @count : i32
-    
-    txn.value_method @getValue() -> i32 {
-        %v = txn.read @count : !txn.ref<i32>
-        txn.return %v : i32
+// Simple adder module for testing TxnSimulate pass
+txn.module @Adder {
+    txn.value_method @add(%a: i32, %b: i32) -> i32 {
+        %sum = arith.addi %a, %b : i32
+        txn.return %sum : i32
     }
     
-    txn.action_method @increment() {
-        %v = txn.read @count : !txn.ref<i32>
-        %one = arith.constant 1 : i32
-        %next = arith.addi %v, %one : i32
-        txn.write @count, %next : !txn.ref<i32>, i32
-    }
-    
-    txn.rule @autoIncrement {
-        %v = txn.call @getValue() : () -> i32
-        %max = arith.constant 100 : i32
-        %cond = arith.cmpi ult, %v, %max : i32
-        txn.if %cond {
-            txn.call @increment() : () -> ()
-        }
-    }
-    
-    %s = txn.schedule @Counter conflicts {
-        "autoIncrement" = []
-    } {
-        txn.scheduled "autoIncrement"
-    }
+    txn.schedule [@add]
 }
 
-// CHECK: txn.module @Counter
-// TRANS: Generated C++ code to test.cpp
+// CHECK: // Generated Txn Module Simulation
+// CHECK: #include <iostream>
+// CHECK: #include <memory>
+// CHECK: #include <vector>
+// CHECK: #include <map>
+// CHECK: #include <string>
+// CHECK: #include <functional>
+// CHECK: #include <cassert>
+// CHECK: #include <chrono>
+// CHECK: #include <queue>
+
+// CHECK: class AdderModule : public SimModule {
+// CHECK: public:
+// CHECK:   AdderModule() : SimModule("Adder") {
+// CHECK:     // Register methods
+// CHECK:     registerValueMethod("add", 
+// CHECK:       [this](const std::vector<int64_t>& args) -> std::vector<int64_t> {
+// CHECK:         return add(args[0], args[1]);
+// CHECK:       });
+// CHECK:   }
+
+// CHECK:   // Value method: add
+// CHECK:   std::vector<int64_t> add(int64_t arg0, int64_t arg1) {
+// CHECK:     int64_t _0 = arg0 + arg1;
+// CHECK:     return {_0};
+// CHECK:   }

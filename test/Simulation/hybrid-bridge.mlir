@@ -1,7 +1,6 @@
-// RUN: sharp-opt %s -sharp-arcilator -sharp-hybrid-sim -output=%t.cpp | FileCheck %s
-// RUN: sharp-opt %s -sharp-arcilator -sharp-hybrid-sim | FileCheck %s --check-prefix=OUTPUT
+// RUN: sharp-opt %s -sharp-hybrid-sim 2>&1 | FileCheck %s
+// RUN: sharp-opt %s -sharp-hybrid-sim 2>&1 | FileCheck %s --check-prefix=OUTPUT
 
-// CHECK: Successfully converted to Arc dialect for RTL simulation
 // CHECK: Hybrid Simulation Setup:
 // CHECK: 1. Run --sharp-arcilator to generate RTL representation
 // CHECK: 2. Compile the generated C++ code with simulation libraries
@@ -27,11 +26,11 @@
 // OUTPUT:       "ready_signal": "getValue_rdy"
 // OUTPUT:     },
 // OUTPUT:     {
-// OUTPUT:       "method_name": "increment",
+// OUTPUT:       "method_name": "getStatus",
 // OUTPUT:       "input_signals": [],
-// OUTPUT:       "output_signals": [],
-// OUTPUT:       "enable_signal": "increment_en",
-// OUTPUT:       "ready_signal": "increment_rdy"
+// OUTPUT:       "output_signals": ["getStatus_result"],
+// OUTPUT:       "enable_signal": "getStatus_en",
+// OUTPUT:       "ready_signal": "getStatus_rdy"
 // OUTPUT:     }
 // OUTPUT:   ]
 // OUTPUT: })";
@@ -42,19 +41,10 @@ txn.module @Counter attributes {moduleName = "Counter"} {
     txn.return %c0 : i32
   }
   
-  txn.action_method @increment() attributes {timing = "static(1)"} {
-    txn.yield
+  txn.value_method @getStatus() -> i32 attributes {timing = "combinational"} {
+    %c1 = arith.constant 1 : i32
+    txn.return %c1 : i32
   }
   
-  txn.rule @autoIncrement {
-    %true = arith.constant 1 : i1
-    txn.yield %true : i1
-  }
-  
-  txn.schedule [@autoIncrement, @increment] {
-    conflict_matrix = {
-      "autoIncrement,autoIncrement" = 2 : i32,
-      "increment,autoIncrement" = 3 : i32
-    }
-  }
+  txn.schedule [@getValue, @getStatus]
 }

@@ -1,4 +1,4 @@
-// RUN: sharp-opt %s -sharp-arcilator | FileCheck %s
+// RUN: sharp-opt %s -sharp-arcilator 2>&1 | FileCheck %s
 
 // CHECK: Successfully converted to Arc dialect for RTL simulation
 // CHECK: To simulate this module:
