@@ -1,8 +1,8 @@
 # PySharp signal and value representations
 
 from typing import Optional, Union, Any, List
-from .sharp import ir
-from .sharp.dialects import arith
+from sharp import ir
+# Arith operations will be created using ir.Operation.create
 from .types import Type, IntType
 
 class Signal:

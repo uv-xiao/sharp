@@ -1,7 +1,7 @@
 # PySharp support utilities
 
 from typing import Any, Optional, Union, List
-from .sharp import ir, passmanager
+from sharp import ir, passmanager
 import sys
 import io
 

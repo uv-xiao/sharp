@@ -1,8 +1,8 @@
 # PySharp module builder - constructs MLIR representation
 
 from typing import Dict, List, Optional, Callable, Any, Tuple
-from .sharp import ir
-from .sharp.dialects import txn, arith
+from sharp import ir
+from sharp.dialects import txn
 from .types import Type, IntType
 from .signals import Signal, Const
 from .common import (ConflictRelation, Timing, Port, PortDirection,

@@ -180,3 +180,39 @@ txn.module @Example {
 4. Ensure test is focused on single feature
 5. Include both positive and negative test cases
 6. Document any special requirements
+
+## Python Binding Tests
+
+Python binding tests are located in `test/python/` and test both Sharp and PySharp functionality.
+
+### Running Python Tests
+
+```bash
+# Run all Python tests via lit
+pixi run test-lit test/python/
+
+# Run specific Python test
+pixi run python test/python/basic-import.py
+```
+
+### Python Test Structure
+
+1. **Basic imports** (`basic-import.py`): Tests Sharp binding imports and dialect registration
+2. **PySharp imports** (`pysharp-import.py`): Tests PySharp frontend imports
+3. **Module creation** (`pysharp-module.py`): Tests PySharp module decorators
+
+### Writing Python Tests
+
+Python tests use the lit infrastructure with RUN lines:
+```python
+# RUN: %python %s
+
+import sharp
+from sharp import ir
+
+# Test code here
+```
+
+The test environment automatically sets PYTHONPATH to include:
+- `build/python_packages` (for Sharp bindings)
+- `build/python_packages/pysharp` (for PySharp frontend)

@@ -1,25 +1,20 @@
 #!/usr/bin/env python3
+# RUN: %python %s
 """Test the Sharp Python bindings."""
 
 import sys
 import os
 
-# The paths are set by the pixi run test-construction command
-# No need to manually adjust sys.path
-
 try:
-    # Import MLIR first
-    import mlir
-    import mlir.ir as ir
-    
-    # Import Sharp bindings
+    # Import Sharp bindings (includes MLIR)
     import sharp
+    from sharp import ir
     
     print("✓ Successfully imported Sharp bindings")
     
     # Create a context and register Sharp dialects
     with ir.Context() as ctx:
-        sharp._sharp.register_dialects(ctx)
+        sharp.register_sharp_dialects(ctx)
         print("✓ Registered Sharp dialects")
         
         # Test Txn dialect
@@ -30,6 +25,7 @@ try:
                     %c42_i32 = arith.constant 42 : i32
                     txn.return %c42_i32 : i32
                 }
+                txn.schedule []
             }
         }
         """, ctx)

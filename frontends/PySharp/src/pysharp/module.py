@@ -2,8 +2,8 @@
 
 from typing import Dict, List, Optional, Callable, Any, Type as PyType
 from functools import wraps
-from .sharp import ir
-from .sharp.dialects import txn, arith
+from sharp import ir
+from sharp.dialects import txn
 from .types import Type, IntType
 from .signals import Signal
 from .common import (ConflictRelation, Timing, Combinational, 

@@ -100,28 +100,53 @@ Method calls within actions follow these rules:
 
 ### Multi-Cycle Operations
 
-For modeling complex hardware operations that span multiple cycles:
+Sharp supports multi-cycle operations through two mechanisms:
 
+#### 1. Timing Attributes (Currently Supported)
 ```mlir
-txn.action_method @multiCycleOp(%data: i32) {
-    // Static latency (known at compile time)
-    txn.launch {latency=3} {
-        // This block executes 3 cycles later
-        txn.write @result, %data : !txn.ref<i32>, i32
-    }
+txn.action_method @multiCycleOp(%data: i32) attributes {timing = "static(3)"} {
+    // Static latency operations via timing attributes
+    // The FIRRTL conversion handles the delay
+    %result = txn.instance @result of @Register<i32> : !txn.module<"Register">
+    txn.call @result.write(%data) : (i32) -> ()
+    txn.return
 }
 
-txn.action_method @dynamicOp(%data: i32) {
-    // Dynamic latency (determined at runtime)
+txn.action_method @dynamicOp(%data: i32) attributes {timing = "dynamic"} {
+    // Dynamic operations can use spec primitives
+    %fifo = txn.instance @fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
+    txn.call @fifo.enqueue(%data) : (i32) -> ()
+    txn.return
+}
+```
+
+#### 2. Launch Operations (Future Enhancement)
+```mlir
+txn.action_method @futureMultiCycle(%data: i32) {
+    // Static latency launch (not yet implemented)
+    txn.launch {latency=3} {
+        // This block executes 3 cycles later
+        %result = txn.instance @result of @Register<i32> : !txn.module<"Register">
+        txn.call @result.write(%data) : (i32) -> ()
+    }
+    
+    // Dynamic latency launch (not yet implemented)
     txn.launch until %done {
         %ready = txn.call @isReady() : () -> i1
         txn.if %ready {
-            txn.write @result, %data : !txn.ref<i32>, i32
+            txn.call @process(%data) : (i32) -> ()
         }
         txn.return %ready : i1
     }
 }
 ```
+
+**Simulation Support**:
+- Static timing through `"static(n)"` attributes (current)
+- txn.launch for explicit multi-cycle blocks (planned)
+- Dynamic timing through spec primitives
+- Continuation events for deferred execution
+- Proper dependency tracking across cycles
 
 ## Conflict Resolution
 
@@ -154,35 +179,66 @@ Method calls introduce implicit conflicts:
 
 ### Transaction-Level Simulation
 
-At the transaction level, the execution model is implemented as:
+Sharp implements a complete event-driven simulation infrastructure with the 1RaaT execution model:
 
 ```cpp
 class Simulator {
     void executeCycle() {
-        // Phase 1: Schedule
-        auto schedule = scheduler.computeSchedule(rules, conflicts);
-        
-        // Phase 2: Execute
-        for (auto& rule : schedule) {
-            auto transaction = beginTransaction();
-            rule.execute(transaction);
-            transaction.commit();
+        // Phase 1: Scheduling - Determine which rules can fire
+        std::vector<Event*> scheduledEvents;
+        for (auto& rule : module->rules) {
+            if (rule->guard() && !hasConflict(rule, scheduledEvents)) {
+                scheduledEvents.push_back(createEvent(rule));
+            }
         }
         
-        // Phase 3: Advance
-        advanceClock();
+        // Phase 2: Execution - Execute rules atomically
+        for (auto* event : scheduledEvents) {
+            event->execute();
+            if (event->hasContinuation()) {
+                // Multi-cycle operations create continuation events
+                scheduleEvent(event->getContinuation(), event->getDelay());
+            }
+        }
+        
+        // Phase 3: Commit - Apply all state updates atomically
+        commitTransactions();
+        advanceTime();
     }
 };
 ```
 
+**Key Features**:
+- **Event-driven architecture** with dependency tracking
+- **Performance metrics** collection (cycles, method calls, conflicts)
+- **Breakpoint support** for debugging
+- **Multi-cycle operations** through continuation events
+
 ### RTL Translation
 
-For hardware synthesis, the execution model maps to:
+Sharp provides complete translation to synthesizable hardware through FIRRTL:
 
 1. **Guard Evaluation**: Combinational logic for all guards
-2. **Conflict Resolution**: Priority encoders and arbitration
-3. **Sequential Execution**: Muxing and state machines
-4. **State Updates**: Register writes on clock edge
+2. **Conflict Resolution**: Will-fire signals with conflict matrix checking
+3. **Sequential Execution**: Ready/enable protocol for methods
+4. **State Updates**: Register writes with proper clock/reset
+
+**Translation Pipeline**:
+```bash
+# Generate Verilog through FIRRTL
+sharp-opt input.mlir --txn-export-verilog -o output.v
+
+# Or step-by-step:
+sharp-opt input.mlir --convert-txn-to-firrtl | \
+  circt-opt --lower-firrtl-to-hw | \
+  circt-opt --export-verilog -o output.v
+```
+
+**Key Features**:
+- Automatic conflict matrix inference
+- Parametric primitive instantiation
+- Method interface generation
+- Proper clock/reset handling
 
 ## Examples
 
@@ -190,18 +246,19 @@ For hardware synthesis, the execution model maps to:
 
 ```mlir
 txn.module @Counter {
-    txn.state @count : i32
+    %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
     
     txn.value_method @getValue() -> i32 {
-        %v = txn.read @count : !txn.ref<i32>
+        %v = txn.call @count.read() : () -> i32
         txn.return %v : i32
     }
     
     txn.action_method @increment() {
-        %v = txn.read @count : !txn.ref<i32>
+        %v = txn.call @count.read() : () -> i32
         %one = arith.constant 1 : i32
         %next = arith.addi %v, %one : i32
-        txn.write @count, %next : !txn.ref<i32>, i32
+        txn.call @count.write(%next) : (i32) -> ()
+        txn.return
     }
     
     txn.rule @autoIncrement {
@@ -211,7 +268,10 @@ txn.module @Counter {
         txn.if %cond {
             txn.call @increment() : () -> ()
         }
+        txn.yield
     }
+    
+    txn.schedule [@getValue, @increment, @autoIncrement]  
 }
 ```
 
@@ -219,29 +279,31 @@ txn.module @Counter {
 
 ```mlir
 txn.module @PipelineStage {
-    txn.state @valid : i1
-    txn.state @data : i32
+    %valid = txn.instance @valid of @Register<i1> : !txn.module<"Register">
+    %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
     
     txn.action_method @enqueue(%v: i32) {
-        %false = arith.constant false : i1
-        %is_empty = txn.read @valid : !txn.ref<i1>
-        %not_valid = arith.xori %is_empty, %false : i1
+        %is_empty = txn.call @valid.read() : () -> i1
+        %true = arith.constant true : i1
+        %not_valid = arith.xori %is_empty, %true : i1
         txn.if %not_valid {
-            txn.write @data, %v : !txn.ref<i32>, i32
-            %true = arith.constant true : i1
-            txn.write @valid, %true : !txn.ref<i1>, i1
+            txn.call @data.write(%v) : (i32) -> ()
+            txn.call @valid.write(%true) : (i1) -> ()
         }
+        txn.return
     }
     
     txn.action_method @dequeue() -> i32 {
-        %is_valid = txn.read @valid : !txn.ref<i1>
-        %result = txn.read @data : !txn.ref<i32>
+        %is_valid = txn.call @valid.read() : () -> i1
+        %result = txn.call @data.read() : () -> i32
         txn.if %is_valid {
             %false = arith.constant false : i1
-            txn.write @valid, %false : !txn.ref<i1>, i1
+            txn.call @valid.write(%false) : (i1) -> ()
         }
         txn.return %result : i32
     }
+    
+    txn.schedule [@enqueue, @dequeue]
 }
 ```
 
@@ -263,10 +325,91 @@ txn.module @PipelineStage {
 - Sharp: Similar atomic semantics, simpler conflict model
 - Bluespec: Complex implicit conditions, compiler-driven scheduling
 
+## Advanced Simulation Modes
+
+### Concurrent Simulation (DAM Methodology)
+
+Sharp implements DAM (Discrete-event simulation with Adaptive Multiprocessing) for high-performance multi-module simulation:
+
+```cpp
+// Each module runs in its own context with local time
+class Context {
+    uint64_t localTime;
+    EventQueue localQueue;
+    
+    void run() {
+        while (!done) {
+            auto event = localQueue.pop();
+            localTime = event->time;
+            event->execute();
+        }
+    }
+};
+```
+
+**Key Principles**:
+- **Asynchronous time**: No global synchronization barrier
+- **Time-bridging channels**: Handle inter-module communication
+- **Lazy synchronization**: Only sync when necessary
+- **Thread affinity**: Pin contexts to CPU cores for performance
+
+### RTL Simulation Integration
+
+Sharp integrates with CIRCT's arcilator for cycle-accurate RTL simulation:
+
+```bash
+# Convert to Arc dialect and simulate
+sharp-opt input.mlir --sharp-arcilator -o arc.mlir
+arcilator arc.mlir --trace  # Generates VCD waveforms
+```
+
+### Hybrid TL-RTL Simulation
+
+Mix transaction-level and RTL modules with configurable synchronization:
+
+```mlir
+sim.bridge_config @bridge {
+    sim.tl_module @TLProducer
+    sim.rtl_module @RTLConsumer
+    sim.sync_mode "lockstep"  // or "decoupled", "adaptive"
+}
+```
+
+**Synchronization Modes**:
+- **Lockstep**: TL and RTL advance together
+- **Decoupled**: Allow bounded time divergence
+- **Adaptive**: Dynamically adjust based on activity
+
+### JIT Compilation
+
+Experimental JIT mode for long-running simulations:
+
+```bash
+# Compile and execute directly
+sharp-opt input.mlir --sharp-simulate=mode=jit
+```
+
+## Performance Optimization
+
+### Simulation Statistics
+
+All simulation modes collect comprehensive metrics:
+- Total cycles executed
+- Method call counts and conflicts
+- Rule firing patterns
+- Event queue depths
+- For concurrent: speedup metrics
+
+### Optimization Techniques
+
+1. **Conflict Caching**: Precompute and cache conflict checks
+2. **Event Batching**: Group non-conflicting events
+3. **Parallel Rule Evaluation**: Use SIMD for guard evaluation
+4. **Memory Pooling**: Reuse event objects
+
 ## Future Extensions
 
-1. **Nested Transactions**: Allow sub-transactions within rules
-2. **Priority Schemes**: User-defined rule priorities
-3. **Fairness Guarantees**: Ensure rules get scheduled fairly
-4. **Speculative Execution**: Tentative execution with rollback
-5. **Distributed Scheduling**: Multi-clock domain coordination
+1. **Formal Verification Integration**: Connect to model checkers
+2. **Hardware-in-the-Loop**: Co-simulation with FPGA prototypes
+3. **Distributed Simulation**: Multi-machine simulation for large designs
+4. **Incremental Compilation**: Faster iteration cycles

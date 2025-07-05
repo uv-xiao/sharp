@@ -1,16 +1,14 @@
 # PySharp - Pythonic hardware description for Sharp
 # Following PyCDE pattern of importing from bundled Sharp bindings
 
-# The .sharp module will be provided by the build system
-# It should contain the Sharp/MLIR/CIRCT Python bindings
+# Import from the sibling sharp package (not a subpackage)
 try:
-    from .sharp import ir
-    from . import sharp
-except ImportError:
+    import sharp
+    from sharp import ir
+except ImportError as e:
     # Fallback for development/testing without full build
     import warnings
-    warnings.warn("Sharp bindings not available, using stub implementation")
-    # Would need to provide stubs here for testing
+    warnings.warn(f"Sharp bindings not available: {e}")
     raise
 
 import atexit

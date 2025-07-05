@@ -134,11 +134,17 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Module decorator for class-based hardware description
   - Helper functions: constant, read, write, if_then_else
   
-- **Current Status**
+- **Current Status** ✅ (2025-07-05)
   - PySharp frontend module successfully implemented and tested
   - Standalone functionality verified without MLIR dependency
   - Python bindings can access MLIR/CIRCT dialects (with HW exception)
-  - Native extension has runtime loading issues that need investigation
+  - **Fixed runtime loading issues**:
+    - Implemented proper package prefix (`sharp.`) for MLIR Python bindings
+    - Fixed import structure to use sibling packages instead of nested imports
+    - PySharp now correctly imports from `sharp` package
+    - All dialect files follow PyCDE pattern
+    - Site initialization properly handles MLIR module loading
+  - Python bindings fully functional with pixi Python 3.13
 
 #### Sharp Simulation Framework (2025-07-03 to 2025-07-04)
 - **Event-Driven Simulation Core** ✅
@@ -314,6 +320,18 @@ Sharp is a transaction-based hardware description language with conflict matrix 
     - SpecMemory primitive
     - One Verilog test that actually passes (FileCheck pattern issue)
 
+#### Documentation Updates (2025-07-05)
+- **Fixed Documentation Errors**
+  - Removed all incorrect uses of `txn.read`/`txn.write` operations
+  - Corrected parametric primitive syntax across all examples
+  - Fixed MLIR examples to match actual test file patterns
+  
+- **Enhanced Documentation Quality**
+  - Added comprehensive methodology sections to simulation.md
+  - Restored txn.launch documentation with clear status indicators
+  - Added technical insights and design rationale
+  - Improved usage examples with realistic code patterns
+
 ### 🚧 In Progress
 
 (No items currently in progress - all simulation infrastructure tasks completed!)
@@ -330,7 +348,6 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Implement dead code elimination
 
 ### 🚫 Known Limitations
-- Python bindings native extension has runtime loading issues (ImportError)
 - HW dialect cannot be registered from Sharp due to conflicts with CIRCT's builtin dialect
 - Nonsynthesizable primitives will fail translation
 - txn.state operation not yet implemented (needed for stateful modules)

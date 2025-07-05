@@ -4,7 +4,8 @@
 
 include(AddMLIRPython)
 
-# Don't set package prefix - we'll handle the structure ourselves
+# Set package prefix for Sharp bindings (top-level sharp package)
+add_compile_definitions("MLIR_PYTHON_PACKAGE_PREFIX=sharp.")
 
 ################################################################################
 # Declare Python sources
@@ -72,13 +73,25 @@ declare_mlir_dialect_python_bindings(
 # Build composite binaries - Just build the Sharp extension
 ################################################################################
 
+# Bundle MLIR and Sharp into a common CAPI library
+add_mlir_python_common_capi_library(SharpPythonCAPI
+  INSTALL_COMPONENT SharpBindingsPythonModules
+  INSTALL_DESTINATION python_packages/sharp/_mlir_libs
+  OUTPUT_DIRECTORY "${SHARP_PYTHON_PACKAGES_DIR}/sharp/_mlir_libs"
+  RELATIVE_INSTALL_ROOT "../.."
+  DECLARED_SOURCES
+    MLIRPythonSources.Core
+    SharpBindingsPythonExtension
+)
+
 # Build Sharp Python modules
 add_mlir_python_modules(SharpPythonModules
   ROOT_PREFIX "${SHARP_PYTHON_PACKAGES_DIR}/sharp"
   INSTALL_PREFIX "python_packages/sharp"
   DECLARED_SOURCES
+    MLIRPythonSources.Core
     SharpBindingsPythonSources
-  COMMON_CAPI_LINK_LIBS
     SharpBindingsPythonExtension
-    SharpCAPICore
+  COMMON_CAPI_LINK_LIBS
+    SharpPythonCAPI
 )

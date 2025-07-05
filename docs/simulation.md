@@ -1,412 +1,454 @@
-# Sharp Simulation Framework Design
+# Sharp Simulation Framework
 
 ## Overview
 
-This document outlines the design and implementation of Sharp's multi-level simulation framework, incorporating insights from EQueue (event-driven simulation), DAM (high-performance dataflow simulation), and Sharp's own transaction-based semantics. The framework supports simulation at multiple abstraction levels: transaction-level, RTL, and hybrid modes.
-
-## Motivation and Goals
-
-Sharp's simulation framework aims to:
-
-1. **Enable rapid design exploration** through fast transaction-level simulation
-2. **Support verification** with cycle-accurate RTL simulation via CIRCT's arcilator
-3. **Allow progressive refinement** from high-level specs to detailed implementations
-4. **Provide performance estimation** at various abstraction levels
-5. **Enable mixed-level simulation** where different components run at different abstraction levels
+Sharp provides a comprehensive simulation framework supporting multiple abstraction levels:
+- **Transaction-level (TL)** simulation for rapid design exploration
+- **RTL simulation** via CIRCT's arcilator for cycle-accurate verification
+- **Concurrent simulation** using DAM methodology for high performance
+- **Hybrid TL-RTL** simulation for progressive refinement
+- **JIT compilation** for optimized execution
 
 ## Key Design Principles
 
-### 1. Separation of Concerns
-- **Structure**: Hardware components and their connections
-- **Behavior**: Transaction semantics and scheduling
-- **Timing**: Performance models and cycle-level details
-- **Verification**: Spec vs implementation checking
-
-### 2. Event-Driven Architecture
-Following EQueue's approach, we use discrete-event simulation where:
+### 1. Event-Driven Architecture
+Following EQueue's approach, Sharp uses discrete-event simulation where:
 - Each module maintains an event queue
-- Events are method calls or rule firings
+- Events represent method calls or rule firings
 - Events execute based on dependencies and conflicts
 - Different modules can execute concurrently
 
-### 3. Multi-Cycle Operations
-Inspired by DAM and the requirements for spec primitives:
-- Actions can span multiple cycles
-- Actions can trigger other actions in sequence
-- Proper handling of causality chains
+### 2. One-Rule-at-a-Time (1RaaT) Semantics
+Sharp implements Koika-inspired execution model:
+- Rules execute atomically and sequentially within each cycle
+- Three-phase execution: Scheduling → Execution → Commit
+- Conflict matrix from `txn.schedule` guides scheduling decisions
+- Deterministic behavior with no race conditions
 
-## Architecture
+### 3. Multi-Level Abstraction
+The framework supports simulation at different abstraction levels:
+- **Specification Level**: Using spec primitives (SpecFIFO, SpecMemory)
+- **Transaction Level**: Fast functional simulation with timing annotations
+- **RTL Level**: Cycle-accurate simulation via FIRRTL→Arc conversion
+- **Hybrid**: Mix TL and RTL components with proper synchronization
 
+## Quick Start
+
+### 1. Transaction-Level Simulation
+
+Generate and run C++ simulation from a Txn module:
+
+```bash
+# Generate C++ simulation code
+sharp-opt input.mlir --sharp-simulate -o sim.cpp
+
+# Compile and run
+clang++ -std=c++17 sim.cpp -o sim
+./sim
+
+# Or use JIT mode (experimental)
+sharp-opt input.mlir --sharp-simulate=mode=jit
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Sharp Simulation Framework            │
-├─────────────────────────────────────────────────────────┤
-│                    Simulation Engine API                 │
-├─────────────────────────────────────────────────────────┤
-│   Transaction-Level    │    RTL-Level    │    Hybrid    │
-│      Simulator         │   (Arcilator)   │   Bridge     │
-├─────────────────────────────────────────────────────────┤
-│              Event Queue & Scheduling Core               │
-├─────────────────────────────────────────────────────────┤
-│         Performance Models & Timing Annotations          │
-└─────────────────────────────────────────────────────────┘
+
+### 2. Concurrent Simulation (DAM)
+
+For multi-module designs with parallel execution:
+
+```bash
+# Generate concurrent simulation
+sharp-opt input.mlir --sharp-concurrent-sim -o concurrent_sim.cpp
+
+# Compile with threading support
+clang++ -std=c++17 -pthread concurrent_sim.cpp -o concurrent_sim
+./concurrent_sim
 ```
 
-## Transaction-Level Simulation
+### 3. RTL Simulation via Arcilator
 
-### Event Model
+Convert to RTL and simulate with CIRCT's arcilator:
 
-Each transaction-level event represents:
+```bash
+# Convert Txn to Arc dialect
+sharp-opt input.mlir --sharp-arcilator -o arc.mlir
+
+# Run with arcilator (requires CIRCT tools)
+arcilator arc.mlir --trace  # Generates VCD waveforms
+```
+
+**Key Insight**: The arcilator integration leverages CIRCT's high-performance RTL simulation engine, providing orders of magnitude speedup over traditional RTL simulators while maintaining cycle accuracy.
+
+### 4. Hybrid TL-RTL Simulation
+
+Mix transaction-level and RTL modules:
+
+```bash
+# Generate hybrid simulation
+sharp-opt input.mlir --sharp-hybrid-sim -o hybrid_sim.cpp
+
+# Compile and run
+clang++ -std=c++17 hybrid_sim.cpp -o hybrid_sim
+./hybrid_sim
+```
+
+## Detailed Usage
+
+### Writing Simulatable Modules
+
+```mlir
+// Example: Simple counter module
+txn.module @Counter {
+  // Create instance of Register primitive
+  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  
+  // Value method - read current count
+  txn.value_method @getValue() -> i32 {
+    %val = txn.call @count.read() : () -> i32
+    txn.return %val : i32
+  }
+  
+  // Action method - increment counter
+  txn.action_method @increment() {
+    %old = txn.call @count.read() : () -> i32
+    %one = arith.constant 1 : i32
+    %new = arith.addi %old, %one : i32
+    txn.call @count.write(%new) : (i32) -> ()
+    txn.return
+  }
+  
+  // Automatic rule
+  txn.rule @autoIncrement {
+    %val = txn.call @getValue() : () -> i32
+    %limit = arith.constant 100 : i32
+    %cond = arith.cmpi ult, %val, %limit : i32
+    txn.if %cond {
+      txn.call @increment() : () -> ()
+    }
+    txn.yield
+  }
+  
+  // Schedule with conflict matrix
+  txn.schedule [@autoIncrement, @getValue, @increment] {
+    // No conflicts for this simple example
+  }
+}
+```
+
+### Transaction-Level Simulation Features
+
+The `--sharp-simulate` pass generates C++ code implementing:
+
+1. **Event-driven execution**: Methods and rules execute as discrete events
+2. **Conflict checking**: Respects the conflict matrix from schedule
+3. **1RaaT model**: One-rule-at-a-time execution with three phases:
+   - **Scheduling Phase**: Evaluate guards, check conflicts, select rules
+   - **Execution Phase**: Execute actions, track dependencies
+   - **Commit Phase**: Apply state updates atomically at cycle boundary
+4. **Performance metrics**: Cycle count, method call statistics, conflict resolution
+
+**Event Model**:
 ```cpp
 struct Event {
     uint64_t time;           // Simulation time
     ModuleID module;         // Target module
-    MethodID method;         // Method/rule to execute
+    MethodID method;         // Method/rule to execute  
     vector<Value> args;      // Arguments
     EventID dependencies[];  // Events that must complete first
     EventID triggers[];      // Events triggered by this one
 };
 ```
 
-### Module State
-
-Each simulated module maintains:
+Generated code structure:
 ```cpp
-class SimModule {
-    State state;                    // Module state variables
-    EventQueue pending;             // Pending events
-    ConflictMatrix conflicts;       // From txn.schedule
-    map<MethodID, Function> impls;  // Method implementations
+// Generated simulation includes:
+class Counter : public SimModule {
+  // State variables
+  int32_t count_data;
+  
+  // Methods
+  int32_t getValue();
+  void increment();
+  
+  // Rules  
+  void autoIncrement();
+  
+  // Simulation infrastructure
+  void scheduleEvents();
+  void executeEvents();
 };
 ```
 
-### Execution Model
+### Concurrent Simulation (DAM Methodology)
 
-Sharp follows a **one-rule-at-a-time (1RaaT)** execution model inspired by Koika, where rules execute atomically and sequentially within each clock cycle. See `docs/execution_model.md` for complete details.
+The `--sharp-concurrent-sim` pass implements DAM (Discrete-event simulation with Adaptive Multiprocessing) principles from Zhang et al.:
 
-1. **Cycle Execution Phases**:
-   - **Scheduling Phase**: Evaluate guards, resolve conflicts, determine execution order
-   - **Execution Phase**: Execute scheduled rules atomically in order
-   - **Commit Phase**: Apply all state updates simultaneously
+1. **Independent contexts**: Each module runs in its own thread with local time
+2. **Asynchronous time**: No global synchronization barrier - modules can run arbitrarily far into the future
+3. **Time-bridging channels**: Handle inter-module communication with backpressure
+4. **Adaptive synchronization**: Lazy pairwise sync only when modules interact
 
-2. **Event-Based Implementation**:
-   ```
-   void executeCycle() {
-       // Phase 1: Schedule - determine which rules can execute
-       auto enabled_rules = evaluateGuards();
-       auto schedule = resolveConflicts(enabled_rules, conflict_matrix);
-       
-       // Phase 2: Execute - run rules atomically
-       for (auto& rule : schedule) {
-           Event e = createRuleEvent(rule);
-           e.execute();  // Atomic execution
-           
-           // Handle multi-cycle operations
-           if (e.has_continuation()) {
-               schedule_continuation(e, e.next_cycle());
-           }
-       }
-       
-       // Phase 3: Commit - update state atomically
-       commitStateUpdates();
-       advanceClock();
-   }
-   ```
+**Key Innovation**: DAM achieves near-linear speedup by eliminating the global synchronization bottleneck of traditional parallel discrete-event simulation. Each module maintains its own logical time and only synchronizes when absolutely necessary.
 
-3. **Multi-Cycle Operations**:
-   - Static latency: `txn.launch {latency=N} { ... }`
-   - Dynamic latency: `txn.launch until %cond { ... }`
-   - Continuations scheduled for future cycles
-   - State changes remain atomic at cycle boundaries
+Example multi-module system:
+```mlir
+txn.module @Producer {
+  txn.action_method @send(i32) { ... }
+}
 
-### Spec Primitives
+txn.module @Consumer {  
+  txn.action_method @receive() -> i32 { ... }
+}
 
-Special primitives for modeling and verification:
+// Generated code creates separate contexts
+```
+
+Usage:
+```bash
+# Set thread affinity for performance
+taskset -c 0-3 ./concurrent_sim
+
+# Enable performance statistics
+./concurrent_sim --stats
+```
+
+### RTL Simulation Integration
+
+The `--sharp-arcilator` pass converts to Arc dialect:
+
+1. **Full pipeline**: Txn → FIRRTL → HW → Arc
+2. **Preserves semantics**: Methods become module ports
+3. **Cycle-accurate**: Matches hardware behavior
+4. **VCD support**: Waveform generation for debugging
+
+Example workflow:
+```bash
+# Step 1: Generate Arc
+sharp-opt counter.mlir --sharp-arcilator -o counter_arc.mlir
+
+# Step 2: Run arcilator
+arcilator counter_arc.mlir --trace --trace-format=vcd
+
+# Step 3: View waveforms
+gtkwave counter.vcd
+```
+
+### Hybrid Simulation
+
+Mix transaction-level and RTL modules:
 
 ```mlir
-// Spec FIFO with unbounded capacity
-%fifo = txn.primitive @SpecFIFO<i32> {
-    txn.value_method @canEnq() -> i1 { ... }
-    txn.action_method @enq(%data: i32) { ... }
-    txn.value_method @canDeq() -> i1 { ... }
-    txn.action_method @deq() -> i32 { ... }
-}
-
-// Multi-cycle operations with static latency
-txn.action_method @readMemory(%addr: i32) -> i32 {
-    txn.launch {latency=3} {
-        // This block executes 3 cycles later
-        %data = txn.primitive.call @Memory::read(%addr) : (i32) -> i32
-        txn.return %data : i32
-    }
-}
-
-// Multi-cycle operations with dynamic latency  
-txn.action_method @waitForReady(%data: i32) {
-    %done = txn.launch until %ready {
-        // This block repeats until %ready is true
-        %ready = txn.call @isDeviceReady() : () -> i1
-        txn.if %ready {
-            txn.call @sendData(%data) : (i32) -> ()
-        }
-        txn.return %ready : i1
-    }
+// Configure bridge
+sim.bridge_config @bridge {
+  sim.tl_module @TLProducer
+  sim.rtl_module @RTLConsumer
+  sim.method_map @send -> @receive
+  sim.sync_mode "lockstep"  // or "decoupled", "adaptive"
 }
 ```
 
-## RTL-Level Simulation
+Synchronization modes:
+- **lockstep**: TL and RTL advance together each cycle
+- **decoupled**: Allow bounded time divergence (e.g., 10 cycles)
+- **adaptive**: Dynamically adjust based on activity
 
-For RTL simulation, Sharp leverages CIRCT's arcilator:
+### Spec Primitives for Verification
 
-1. **Conversion Pipeline**:
-   ```
-   Txn → FIRRTL → HW → Arc → Arcilator
-   ```
-
-2. **Integration Points**:
-   - Method interfaces become ports
-   - Will-fire signals for scheduling
-   - Ready/enable handshaking
-
-3. **Cycle-Accurate Execution**:
-   - Each clock cycle evaluates all combinational logic
-   - State updates on clock edges
-   - Precise timing matches hardware
-
-## Hybrid Simulation
-
-The hybrid mode allows mixing transaction-level and RTL simulation:
-
-### Bridge Components
+Sharp provides spec-level primitives for golden models and verification:
 
 ```mlir
-// Bridge between TL and RTL domains
-txn.bridge @TLtoRTL(%tl_module: !txn.module, %rtl_module: !hw.module) {
-    // Map TL method calls to RTL signals
-    txn.bridge.method @getValue() -> i32 {
-        %ready = hw.read %rtl_module.getValue_ready
-        %data = hw.read %rtl_module.getValue_data
-        txn.bridge.wait_until(%ready)
-        txn.return %data
+// Unbounded FIFO for specification
+%fifo = txn.instance @fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
+
+// Memory with configurable latency  
+%mem = txn.instance @mem of @SpecMemory<i32, 1024> : !txn.module<"SpecMemory">
+
+// Multi-cycle spec operations (planned)
+txn.action_method @complexOperation(%n: i32) {
+    // Initiate multi-cycle operation
+    %handle = txn.spec.begin_multi_cycle()
+    
+    // Continue over multiple cycles
+    txn.spec.continue(%handle) {
+        txn.call @otherAction()
     }
+    
+    // Complete operation
+    txn.spec.complete(%handle)
+    txn.return
 }
 ```
 
-### Synchronization
+These primitives:
+- Are non-synthesizable (caught by pre-synthesis check)
+- Support unbounded capacity and non-deterministic timing
+- Enable modeling of complex protocols and algorithms
+- Bridge specification and implementation for verification
 
-1. **Time Alignment**:
-   - TL simulation runs in logical time (cycle-based)
-   - RTL simulation runs in clock cycles (event-based)
-   - Bridge maintains time correspondence
+### Performance Analysis
 
-2. **Event Coordination**:
-   - TL events can trigger RTL actions
-   - RTL signals can generate TL events
-   - Proper handling of timing boundaries
+All simulation modes support performance metrics:
 
-3. **Execution Interface**:
+```cpp
+// In generated main():
+simulator.enableStats(true);
+simulator.run(1000);  // Run 1000 cycles
+simulator.printStats();
+```
+
+Output includes:
+- Total cycles executed
+- Method call counts
+- Rule firing statistics
+- Conflict resolution data
+- For concurrent: speedup metrics
+
+### Advanced Features
+
+#### Custom Scheduling
+
+Override default scheduling:
+```cpp
+simulator.setSchedulingPolicy(SchedulingPolicy::Priority);
+simulator.setPriority("incrementRule", 10);
+```
+
+#### Breakpoints and Debugging
+
+```cpp
+simulator.setBreakpoint("Counter.increment", []() {
+    std::cout << "Increment called\n";
+    return true;  // Continue execution
+});
+```
+
+#### State Inspection
+
+```cpp
+auto* counter = simulator.getModule<Counter>("counter");
+std::cout << "Current count: " << counter->count_data << "\n";
+```
+
+## Command Reference
+
+### sharp-simulate
+
+```bash
+sharp-opt input.mlir --sharp-simulate[=options]
+```
+
+Options:
+- `mode=translate` (default): Generate C++ code
+- `mode=jit`: JIT compile and execute (experimental)
+- `output=<file>`: Output filename (default: stdout)
+
+### sharp-concurrent-sim
+
+```bash
+sharp-opt input.mlir --sharp-concurrent-sim[=options]
+```
+
+Options:
+- `channels=bounded`: Use bounded channels (default: unbounded)
+- `channel-size=N`: Set channel capacity
+- `stats=true`: Enable performance statistics
+
+### sharp-arcilator
+
+```bash
+sharp-opt input.mlir --sharp-arcilator
+```
+
+No options - outputs Arc dialect to stdout.
+
+### sharp-hybrid-sim
+
+```bash
+sharp-opt input.mlir --sharp-hybrid-sim[=options]
+```
+
+Options:
+- `sync=lockstep|decoupled|adaptive`: Synchronization mode
+- `divergence=N`: Max time divergence for decoupled mode
+
+## Examples
+
+Complete examples in `test/Simulation/`:
+- `counter.mlir`: Basic counter with auto-increment
+- `pipeline.mlir`: Multi-stage pipeline
+- `concurrent-system.mlir`: Producer-consumer with channels
+- `hybrid-example.mlir`: Mixed TL-RTL design
+
+## Simulation Methodology
+
+### Choosing the Right Simulation Level
+
+1. **Use Spec-Level Simulation When**:
+   - Exploring algorithms without implementation details
+   - Creating golden models for verification
+   - Modeling complex protocols with unbounded resources
+   
+2. **Use Transaction-Level Simulation When**:
+   - Rapid design space exploration is needed
+   - Functional correctness is the primary concern
+   - Performance estimation (not cycle accuracy) is sufficient
+   
+3. **Use RTL Simulation When**:
+   - Cycle-accurate behavior must be verified
+   - Preparing for synthesis and implementation
+   - Debugging timing-related issues
+
+4. **Use Hybrid Simulation When**:
+   - Some components are still at spec/TL level
+   - Progressive refinement from TL to RTL
+   - Need to verify TL models against RTL implementation
+
+### Performance Optimization Strategies
+
+1. **Event Queue Optimization**:
+   - Use priority queues for efficient event scheduling
+   - Batch non-conflicting events for parallel execution
+   - Cache conflict checking results
+
+2. **Concurrent Simulation Tuning**:
+   - Map modules to cores based on communication patterns
+   - Use bounded channels to prevent runaway modules
+   - Monitor time divergence between contexts
+
+3. **Memory Management**:
+   - Pool event objects to reduce allocation overhead
+   - Use copy-on-write for large state updates
+   - Implement incremental state checkpointing
+
+### Verification Methodology
+
+1. **Reference Model Checking**:
    ```cpp
-   class HybridSimulationInterface {
-       // Synchronize TL and RTL execution
-       void synchronize() {
-           // Wait for both simulators to reach sync point
-           tl_sim.runUntilBarrier();
-           rtl_sim.runUntilBarrier();
-           
-           // Exchange interface signals
-           exchangeMethodCalls();
-           exchangeStateUpdates();
-           
-           // Advance both simulators
-           tl_sim.advanceCycle();
-           rtl_sim.advanceClock();
-       }
-       
-       // Method call translation
-       void bridgeMethodCall(MethodCall& call) {
-           if (call.from_tl) {
-               // TL → RTL: Set RTL input signals
-               rtl_sim.setSignal(call.method + "_en", true);
-               rtl_sim.setSignal(call.method + "_data", call.args);
-               // Wait for RTL ready signal
-               while (!rtl_sim.getSignal(call.method + "_ready"))
-                   rtl_sim.step();
-           } else {
-               // RTL → TL: Create TL event
-               Event e = Event::methodCall(call.module, call.method, call.args);
-               tl_sim.scheduleEvent(e);
-           }
-       }
-   };
+   // Compare TL simulation against spec model
+   auto spec_result = spec_model.execute(input);
+   auto tl_result = tl_model.execute(input);
+   assert(spec_result == tl_result);
    ```
 
-## Performance Modeling
+2. **Assertion-Based Verification**:
+   - Embed assertions in transaction methods
+   - Check invariants at cycle boundaries
+   - Monitor protocol compliance
 
-### Component Models
+3. **Coverage Analysis**:
+   - Track which rules fire and how often
+   - Monitor conflict resolution patterns
+   - Identify unreachable states
 
-Each component type has associated performance characteristics:
+## Limitations
 
-```cpp
-struct PerformanceModel {
-    uint32_t latency;        // Operation latency
-    uint32_t throughput;     // Operations per cycle
-    PowerModel power;        // Power consumption
-    ResourceUsage resources; // Area, memory, etc.
-};
-```
+1. **JIT mode**: Control flow (txn.if) not fully supported
+2. **Hybrid simulation**: Full arcilator C API integration pending
+3. **Spec primitives**: SpecFIFO and SpecMemory implementations pending
+4. **State operations**: txn.state not yet implemented
 
-### Annotations
+## Performance Tips
 
-Performance annotations in the IR:
-
-```mlir
-txn.module @Processor attributes {
-    sharp.performance = {
-        clock_freq = 1000000000 : i64,  // 1 GHz
-        pipeline_depth = 5 : i32
-    }
-} {
-    txn.action_method @execute(%instr: i32) attributes {
-        sharp.latency = 5 : i32,
-        sharp.throughput = 1 : i32
-    } { ... }
-}
-```
-
-### Metrics Collection
-
-The simulation framework collects:
-- Cycle counts per module/method
-- Resource utilization over time
-- Communication bandwidth
-- Power consumption estimates
-- Critical path analysis
-
-## Implementation Plan
-
-### Phase 1: Transaction-Level Core
-1. Basic event queue implementation
-2. Single-module simulation
-3. Simple conflict resolution
-4. Basic performance metrics
-
-### Phase 2: Multi-Module Support
-1. Inter-module communication
-2. Dependency tracking
-3. Concurrent execution
-4. Testbench infrastructure
-
-### Phase 3: Spec Primitives
-1. Spec FIFO implementation
-2. Multi-cycle operation support
-3. Verification primitives
-4. Assertion checking
-
-### Phase 4: RTL Integration
-1. Arcilator integration
-2. TL-to-RTL lowering
-3. Co-simulation support
-4. Timing verification
-
-### Phase 5: Hybrid Simulation
-1. Bridge component design
-2. Time synchronization
-3. Mixed-level debugging
-4. Performance analysis
-
-### Phase 6: Advanced Features
-1. Parallel simulation (DAM-inspired)
-2. Visualization tools
-3. Advanced performance models
-4. Formal verification integration
-
-## Example Usage
-
-### Simple Counter Simulation
-
-```python
-from sharp.simulation import Simulator, SimModule
-
-# Define simulation behavior
-class CounterSim(SimModule):
-    def __init__(self):
-        self.count = 0
-        
-    def getValue(self):
-        return self.count
-        
-    def increment(self):
-        self.count += 1
-        
-    def decrement(self):
-        self.count -= 1
-
-# Create and run simulation
-sim = Simulator()
-counter = sim.add_module("Counter", CounterSim())
-
-# Schedule events
-sim.schedule(0, counter, "increment")
-sim.schedule(1, counter, "increment")
-sim.schedule(2, counter, "getValue", callback=print)
-
-sim.run(max_cycles=10)
-```
-
-### Testbench Example
-
-```mlir
-// Testbench module that generates stimuli
-txn.module @TestBench {
-    %dut = txn.instance @DUT of @ProcessingUnit
-    
-    txn.rule @generateInput {
-        %data = txn.spec.random_int(0, 255)
-        txn.call %dut::@process(%data)
-    }
-    
-    txn.rule @checkOutput {
-        %result = txn.call %dut::@getResult()
-        txn.spec.assert(%result >= 0)
-    }
-}
-```
-
-### Hybrid Simulation Example
-
-```python
-# Mix transaction-level testbench with RTL DUT
-sim = HybridSimulator()
-
-# Transaction-level testbench
-testbench = sim.add_tl_module("TestBench", TestBenchSim())
-
-# RTL design under test
-dut = sim.add_rtl_module("DUT", "generated_dut.v")
-
-# Connect them
-sim.connect(testbench.out_port, dut.in_port)
-
-# Run hybrid simulation
-sim.run(max_cycles=1000000)
-```
-
-## Testing Strategy
-
-1. **Unit Tests**: Each simulation component
-2. **Integration Tests**: Multi-module scenarios
-3. **Regression Tests**: Known designs with expected results
-4. **Performance Tests**: Simulation speed benchmarks
-5. **Correctness Tests**: TL vs RTL equivalence
-
-## Future Enhancements
-
-1. **Distributed Simulation**: Run large designs across multiple machines
-2. **Hardware Acceleration**: Use FPGAs to accelerate simulation
-3. **Machine Learning Integration**: Learn performance models from runs
-4. **Interactive Debugging**: Step through transactions visually
-5. **Formal Integration**: Connect to model checkers and theorem provers
-
-## Conclusion
-
-Sharp's simulation framework provides a flexible, multi-level approach to hardware design verification and performance analysis. By combining insights from EQueue's event-driven model, DAM's high-performance techniques, and Sharp's transaction semantics, we create a powerful tool for hardware designers to explore, verify, and optimize their designs efficiently.
+1. **Use concurrent simulation** for multi-module designs
+2. **Set thread affinity** for concurrent simulation
+3. **Choose appropriate sync mode** for hybrid simulation
+4. **Profile with stats enabled** to identify bottlenecks
+5. **Consider JIT** for long-running simulations (when stable)

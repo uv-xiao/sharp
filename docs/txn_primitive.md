@@ -160,6 +160,124 @@ During txn-to-FIRRTL translation:
    - Action method calls become connections to FIRRTL input ports with enable signals
 4. The conflict matrix guides the generation of scheduling logic
 
+## Usage Examples
+
+### Using Primitives in Txn Modules
+
+```mlir
+// Example: Counter using Register primitive
+txn.module @Counter {
+  // Create instance of Register primitive
+  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  
+  txn.value_method @getValue() -> i32 {
+    %val = txn.call @count.read() : () -> i32
+    txn.return %val : i32
+  }
+  
+  txn.action_method @increment() {
+    %old = txn.call @count.read() : () -> i32
+    %one = arith.constant 1 : i32
+    %new = arith.addi %old, %one : i32
+    txn.call @count.write(%new) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.schedule [@getValue, @increment] {
+    conflict_matrix = {}
+  }
+}
+```
+
+### Parametric Primitive Usage
+
+```mlir
+// Example: Using parametric primitives with different types
+txn.module @DataPath {
+  // 8-bit control register
+  %ctrl = txn.instance @ctrl of @Register<i8> : !txn.module<"Register">
+  
+  // 32-bit data register  
+  %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
+  
+  // 64-bit accumulator
+  %acc = txn.instance @acc of @Register<i64> : !txn.module<"Register">
+  
+  // Wire for combinational logic
+  %temp = txn.instance @temp of @Wire<i32> : !txn.module<"Wire">
+  
+  txn.action_method @process(%input: i32) {
+    // Read control register
+    %ctrl_val = txn.call @ctrl.read() : () -> i8
+    
+    // Combinational logic through wire
+    txn.call @temp.write(%input) : (i32) -> ()
+    %temp_val = txn.call @temp.read() : () -> i32
+    
+    // Update data register based on control
+    %zero = arith.constant 0 : i8
+    %enable = arith.cmpi ne, %ctrl_val, %zero : i8
+    txn.if %enable {
+      txn.call @data.write(%temp_val) : (i32) -> ()
+    }
+    
+    txn.return
+  }
+  
+  txn.schedule [@process] {
+    conflict_matrix = {}
+  }
+}
+```
+
+### Custom Primitive Declaration
+
+```mlir
+// Example: Declaring a custom FIFO primitive
+txn.primitive @FIFO type = "hw" interface = !txn.module<"FIFO"> {
+  // Value methods
+  txn.fir_value_method @isEmpty() 
+    {firrtl.port = "empty"} : () -> i1
+  
+  txn.fir_value_method @isFull() 
+    {firrtl.port = "full"} : () -> i1
+  
+  // Action methods
+  txn.fir_action_method @enqueue(%data: i32) 
+    {firrtl.data_port = "enq_data", 
+     firrtl.enable_port = "enq_valid"} : (i32) -> ()
+  
+  txn.fir_action_method @dequeue() 
+    {firrtl.data_port = "deq_data",
+     firrtl.enable_port = "deq_ready"} : () -> i32
+  
+  // Clocking
+  txn.clock_by @clk
+  txn.reset_by @rst
+  
+  // Conflict matrix
+  txn.schedule [@isEmpty, @isFull, @enqueue, @dequeue] {
+    conflict_matrix = #txn.conflict_dict<{
+      "enqueue_dequeue" = #txn.C,  // Cannot enqueue and dequeue simultaneously
+      "isEmpty_isFull" = #txn.CF,  // Status checks are conflict-free
+    }>
+  }
+} {firrtl.impl = "FIFO_impl"}
+```
+
+### Converting to FIRRTL
+
+```bash
+# Convert a module using primitives to FIRRTL
+sharp-opt --convert-txn-to-firrtl counter.mlir -o counter_firrtl.mlir
+
+# The conversion will:
+# 1. Generate FIRRTL modules for each primitive type used
+# 2. Instantiate primitives as FIRRTL instances
+# 3. Convert method calls to port connections
+# 4. Add scheduling logic based on conflict matrices
+```
+
 ## Future Extensions
 
 The primitive system is designed to be extensible:

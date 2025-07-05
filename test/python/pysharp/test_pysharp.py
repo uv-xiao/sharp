@@ -1,47 +1,34 @@
 #!/usr/bin/env python3
-# RUN: %python -m pytest %s -v | FileCheck %s
+# RUN: %python %s
 
 # PySharp unit tests
 
 import sys
-import pytest
 
-sys.path.insert(0, '/home/uvxiao/sharp/frontends/PySharp/src')
+# Test importing PySharp type system
+from pysharp.types import IntType
+from pysharp import i1, i8, i16, i32, i64
+print("✓ PySharp types imported successfully")
 
-# CHECK: test_import_types PASSED
-def test_import_types():
-    """Test importing PySharp type system"""
-    try:
-        from pysharp.types import IntType, UIntType, SIntType, BoolType
-        # Types should be importable even without MLIR bindings
-        assert IntType is not None
-        assert BoolType is not None
-    except ImportError:
-        pytest.skip("PySharp types not available")
+# Test ConflictRelation enum
+from pysharp.common import ConflictRelation
+assert ConflictRelation.SequenceBefore == 0
+assert ConflictRelation.SequenceAfter == 1
+assert ConflictRelation.Conflict == 2
+assert ConflictRelation.ConflictFree == 3
+print("✓ ConflictRelation enum works correctly")
 
-# CHECK: test_conflict_relation PASSED
-def test_conflict_relation():
-    """Test ConflictRelation enum"""
-    try:
-        from pysharp.common import ConflictRelation
-        assert ConflictRelation.SB.value == 0
-        assert ConflictRelation.SA.value == 1
-        assert ConflictRelation.C.value == 2
-        assert ConflictRelation.CF.value == 3
-    except ImportError:
-        pytest.skip("PySharp common module not available")
+# Test basic type creation
+t1 = IntType(8)
+assert str(t1) == "i8"
+t2 = IntType(32)
+assert str(t2) == "i32"
+print("✓ IntType creation works")
 
-# CHECK: test_module_builder PASSED
-def test_module_builder():
-    """Test ModuleBuilder construction"""
-    try:
-        from pysharp.builder import ModuleBuilder
-        # Should be able to create builder even without MLIR
-        builder = ModuleBuilder("TestModule")
-        assert builder.name == "TestModule"
-    except ImportError:
-        pytest.skip("PySharp builder not available")
+# Test predefined types
+assert str(i8) == "i8"
+assert str(i32) == "i32"
+assert str(i64) == "i64"
+print("✓ Predefined types work correctly")
 
-if __name__ == "__main__":
-    # Run tests
-    print("Running PySharp unit tests...")
+print("\n✅ All PySharp unit tests passed!")

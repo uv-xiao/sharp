@@ -19,18 +19,19 @@ PySharp is included with Sharp's Python bindings:
 # Build Sharp with Python bindings
 pixi run build
 
-# Import from the build output
+# Import PySharp (sibling package to sharp)
 import sys
-sys.path.insert(0, "/path/to/sharp/build/python_packages")
+sys.path.append("/path/to/sharp/build/python_packages")
+sys.path.append("/path/to/sharp/build/python_packages/pysharp")
 
-from sharp import pysharp
+import pysharp
 ```
 
-For development without native bindings:
-```bash
-# Import directly from source
-sys.path.insert(0, "/path/to/sharp/lib/Bindings/Python")
-import pysharp
+PySharp imports from the `sharp` package for MLIR functionality:
+```python
+# PySharp uses sharp bindings internally
+import sharp  # Must be available
+import pysharp  # Frontend
 ```
 
 ## Basic Usage
@@ -40,19 +41,21 @@ import pysharp
 PySharp provides hardware types for both standard integers and FIRRTL types:
 
 ```python
-from sharp import pysharp
+import pysharp
+from pysharp import i8, i32, i64, uint, sint
 
 # Predefined integer types
-print(pysharp.i8)    # i8
-print(pysharp.i32)   # i32
-print(pysharp.i64)   # i64
+print(i8)    # i8
+print(i32)   # i32
+print(i64)   # i64
 
 # FIRRTL types
-print(pysharp.uint(16))  # uint<16>
-print(pysharp.sint(32))  # sint<32>
+print(uint(16))  # uint<16>
+print(sint(32))  # sint<32>
 
 # Custom integer types
-custom = pysharp.IntType(24)  # i24
+from pysharp.types import IntType
+custom = IntType(24)  # i24
 ```
 
 ### Signals and Operations
@@ -60,9 +63,11 @@ custom = pysharp.IntType(24)  # i24
 Signals represent values in the hardware design with support for arithmetic operations:
 
 ```python
+from pysharp import Signal, constant, i32
+
 # Create signals
-a = pysharp.Signal("a", pysharp.i32)
-b = pysharp.Signal("b", pysharp.i32)
+a = Signal("a", i32)
+b = Signal("b", i32)
 
 # Arithmetic operations
 c = a + b  # Signal((a + b): i32)
@@ -73,7 +78,7 @@ e = a & b  # Signal((a & b): i32)
 f = a | 0xFF  # Signal((a | 255): i32)
 
 # Constants
-const = pysharp.constant(42, pysharp.i32)  # Signal(const_42: i32)
+const = constant(42, i32)  # Signal(const_42: i32)
 ```
 
 ### Module Builder
@@ -81,12 +86,14 @@ const = pysharp.constant(42, pysharp.i32)  # Signal(const_42: i32)
 The `ModuleBuilder` provides programmatic module construction:
 
 ```python
+from pysharp import ModuleBuilder, i32, i1
+
 # Create a module builder
-builder = pysharp.ModuleBuilder("Counter")
+builder = ModuleBuilder("Counter")
 
 # Add state variables
-count_state = builder.add_state("count", pysharp.i32)
-valid_state = builder.add_state("valid", pysharp.i1)
+count_state = builder.add_state("count", i32)
+valid_state = builder.add_state("valid", i1)
 
 # Add value method (combinational, no side effects)
 get_value = builder.add_value_method("getValue")
@@ -236,29 +243,57 @@ add_method = builder.add_value_method("add")
 
 ## Testing
 
-PySharp includes comprehensive tests in `integration_test/pysharp/`:
+PySharp tests are integrated with Sharp's lit test infrastructure:
 
 ```bash
-# Run standalone test
-python integration_test/pysharp/test_standalone.py
+# Run all tests including Python tests
+pixi run test
 
-# Individual test examples
-python integration_test/pysharp/test_types.py
-python integration_test/pysharp/test_module_builder.py
-python integration_test/pysharp/test_signal_arithmetic.py
+# Run Python tests specifically
+cd build
+bin/llvm-lit ../test/python/
+
+# Example test output
+python test/python/pysharp/test_counter.py
 ```
 
-## Current Limitations
+### Test Structure
+```
+test/python/
+└── pysharp/
+    ├── test_counter.py      # Counter module example
+    ├── test_types.py        # Type system tests
+    └── test_signals.py      # Signal operation tests
+```
 
-1. **Native binding issues**: The native Sharp extension has runtime loading issues, but PySharp works standalone
-2. **MLIR generation**: Full MLIR generation requires fixing the native bindings
-3. **Method bodies**: Method body construction is not yet implemented
-4. **Type checking**: Type checking is basic - more sophisticated type inference planned
+## Current Status
+
+### Completed Features ✅
+
+1. **Full PyCDE-style Structure**: Complete implementation following CIRCT patterns
+2. **Package Prefix Solution**: Fixed runtime loading with proper `sharp.` prefix
+3. **Sibling Package Import**: PySharp imports from sibling `sharp` package
+4. **Dialect Wrappers**: All dialects wrapped following PyCDE pattern
+5. **Type System**: Complete with IntType, UIntType, SIntType, ClockType, etc.
+6. **Signal Operations**: Full operator overloading for hardware operations
+7. **Module Decorators**: Class-based module definition with decorators
+8. **Conflict Matrix**: Complete ConflictRelation support (SB, SA, C, CF)
+9. **Builder API**: Fine-grained control over MLIR generation
+10. **Native Bindings**: Fully functional with MLIR generation support
+
+### Limitations
+
+1. **Limited Primitive Support**: Only Register/Wire primitives currently
+2. **No Verification**: Limited assertion/verification support
+3. **Type Constraints**: Primarily integer and boolean types
+4. **No Formal Support**: Specification primitives not fully exposed
+5. **State Operations**: `txn.state` not yet implemented
 
 ## Future Enhancements
 
-- **Complete MLIR generation** once native bindings are fixed
-- **Method body DSL** for defining method implementations
-- **Module instantiation** and hierarchical design
-- **Simulation support** for testing designs in Python
-- **Better error messages** with source location tracking
+- **Enhanced Type System**: Support for structs, arrays, and custom types
+- **Verification DSL**: Assertions and formal verification support
+- **Simulation Integration**: Direct Python simulation of PySharp modules
+- **Better Error Messages**: Source location tracking and type inference
+- **Module Instantiation**: Full hierarchical design support
+- **Optimization Hints**: Performance and area optimization directives

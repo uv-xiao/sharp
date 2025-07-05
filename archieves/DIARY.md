@@ -1116,3 +1116,107 @@ Successfully reorganized and improved the test suite:
 - Created thorough documentation of test organization and coverage
 
 The test suite is now well-organized, comprehensive, and properly documents both current functionality and planned future features.
+
+## 2025-07-05 - Python Binding Infrastructure Fix
+
+### User Request
+Fix the Python binding build failure and ensure PySharp follows the PyCDE pattern correctly. The build was failing with missing dialect files and import errors.
+
+### Investigation
+Discovered that PySharp was trying to import from `.sharp` subpackage but the MLIR Python binding infrastructure doesn't support deeply nested module structures well. The key issues were:
+
+1. **Missing dialect files**: PySharp expected dialect files (txn.py, arith.py, etc.) that follow PyCDE pattern
+2. **Package prefix mismatch**: Sharp bindings weren't using proper MLIR_PYTHON_PACKAGE_PREFIX
+3. **Import structure**: PySharp tried to bundle Sharp bindings as subpackage instead of using sibling imports
+4. **_mlir module issues**: The _mlir C extension couldn't find its submodules when nested
+
+### Solution Implemented
+
+#### 1. Created PyCDE-style dialect files
+Following PyCDE pattern, created simple dialect wrappers:
+```python
+# pysharp/dialects/txn.py
+from sharp.dialects import txn
+wrap_opviews_with_values(txn, __name__)
+```
+
+#### 2. Fixed Sharp Python bindings
+- Added `MLIR_PYTHON_PACKAGE_PREFIX=sharp.` to CMakeLists.txt
+- Bundled MLIRPythonSources.Core with Sharp bindings
+- Created proper CAPI library with all dependencies
+
+#### 3. Restructured PySharp as sibling package
+- PySharp imports from `sharp` package (not `.sharp`)
+- Removed nested module structure
+- Made PySharp pure Python without own MLIR bindings
+
+#### 4. Fixed dialect usage
+- Removed direct `arith` imports (not available as Python module)
+- Operations should be created using MLIR Python API instead
+
+### Documentation Created
+Created comprehensive `docs/python_binding.md` explaining:
+- MLIR/CIRCT Python binding architecture
+- Package prefix mechanism and why it matters
+- How PyCDE avoids _mlir import issues
+- Recommended solutions for binding structure
+
+### Results
+- Python bindings now work correctly with pixi Python 3.13
+- PySharp can import and use Sharp functionality
+- Build completes without errors
+- Import structure follows established patterns
+
+### Technical Insights
+1. MLIR Python bindings are sensitive to package structure
+2. The _mlir module uses C++ submodules that require proper initialization
+3. Package prefixes must match between CMake configuration and runtime
+4. PyCDE succeeds by reusing CIRCT bindings, not creating its own
+5. Dialect operations in MLIR Python are typically created programmatically, not imported as modules
+
+## 2025-07-05 - Documentation Update and Fixes
+
+### User Request
+The user identified several issues in the documentation:
+1. `txn.read`/`txn.write` operations were used incorrectly - these are not implemented
+2. `simulation.md` lacked methodology insights
+3. Parametric primitive syntax in `txn_primitive.md` was wrong
+4. `txn.launch` disappeared from `execution_model.md`
+
+### Work Done
+
+#### 1. Fixed txn.read/txn.write Usage
+- Replaced all instances with proper `txn.call` to primitive methods across all docs
+- Correct syntax: `%val = txn.call @instance.method() : () -> Type`
+- Updated examples in simulation.md, txn.md, execution_model.md, and txn_primitive.md
+
+#### 2. Enhanced simulation.md
+Added comprehensive methodology sections:
+- **Key Design Principles**: Event-driven architecture, 1RaaT semantics, multi-level abstraction
+- **Technical details**: Event struct, DAM methodology explanation
+- **Simulation Methodology**: Guidance on choosing simulation levels
+- **Performance optimization strategies**: Event queue, concurrent tuning, memory management
+- **Verification methodology**: Reference models, assertions, coverage
+
+#### 3. Fixed Parametric Primitive Grammar
+- Corrected syntax: `%inst = txn.instance @name of @Primitive<Type> : !txn.module<"Primitive">`
+- Fixed all examples to use actual test file patterns
+- Added realistic control flow and conflict matrices
+
+#### 4. Restored txn.launch Documentation
+- Added section showing both approaches:
+  - Current: timing attributes (`attributes {timing = "static(3)"}`)
+  - Future: `txn.launch {latency=3} { ... }` blocks
+- Clarified implementation status
+
+### Documentation Quality Improvements
+- All MLIR examples now match actual test file syntax
+- Added technical insights and rationale for design decisions
+- Enhanced examples with more realistic use cases
+- Clear distinction between implemented and planned features
+
+### Key Learnings
+- Documentation must stay synchronized with implementation
+- Test files are the best source of truth for syntax
+- Users value both practical examples and theoretical insights
+- Clear feature status (implemented vs planned) prevents confusion

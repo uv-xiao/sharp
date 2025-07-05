@@ -1,6 +1,6 @@
 # PySharp type system following PyCDE patterns
 
-from .sharp import ir
+from sharp import ir
 from typing import Union, List, Optional
 import re
 
