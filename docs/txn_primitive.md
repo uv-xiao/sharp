@@ -278,6 +278,98 @@ sharp-opt --convert-txn-to-firrtl counter.mlir -o counter_firrtl.mlir
 # 4. Add scheduling logic based on conflict matrices
 ```
 
+### FIFO
+
+A first-in-first-out queue with bounded capacity.
+
+**Txn Interface:**
+- `enqueue(value)`: Add element to FIFO
+- `dequeue()`: Remove and return element from FIFO
+- `isEmpty()`: Check if FIFO is empty
+- `isFull()`: Check if FIFO is full
+
+**Conflict Matrix:**
+- enqueue ↔ isFull: SB (check before enqueue)
+- dequeue ↔ isEmpty: SB (check before dequeue)
+- enqueue ↔ dequeue: C (cannot do both simultaneously)
+
+**Software Semantics:**
+```cpp
+std::queue<int64_t> fifo_data;
+const size_t depth = 16;
+```
+
+## Specification Primitives
+
+### Memory
+
+A memory with address-based access for verification and specification.
+
+**Txn Interface:**
+- `read(addr)`: Read data from address
+- `write(addr, data)`: Write data to address
+- `clear()`: Reset all memory to zero
+
+**Conflict Matrix:**
+- read ↔ read: CF (parallel reads allowed)
+- read ↔ write: C (conflict on same address)
+- write ↔ write: C (conflict on same address)
+- clear ↔ all: C (exclusive operation)
+
+**Software Semantics:**
+```cpp
+std::unordered_map<int32_t, int64_t> memory_data;
+static constexpr size_t MEMORY_SIZE = 1024;
+```
+
+### SpecFIFO
+
+An unbounded FIFO for specification and verification.
+
+**Txn Interface:**
+- `enqueue(value)`: Add element (always succeeds)
+- `dequeue()`: Remove and return element
+- `isEmpty()`: Check if empty
+- `size()`: Get current number of elements
+- `peek()`: Look at front element without removing
+
+**Conflict Matrix:**
+- enqueue ↔ enqueue: SB (preserve order)
+- dequeue ↔ dequeue: SB (preserve order)
+- enqueue ↔ dequeue: SB (enqueue before dequeue)
+- Status checks (isEmpty, size, peek): CF with each other
+
+**Software Semantics:**
+```cpp
+std::queue<int64_t> fifo_data; // Unbounded
+```
+
+### SpecMemory
+
+A memory with configurable read latency for modeling real memory systems.
+
+**Txn Interface:**
+- `read(addr)`: Read with configured latency
+- `write(addr, data)`: Write data
+- `setLatency(cycles)`: Configure read latency
+- `getLatency()`: Get current latency
+- `clear()`: Reset memory
+
+**Conflict Matrix:**
+- Similar to Memory
+- setLatency ↔ read: C (changing latency affects reads)
+- getLatency ↔ setLatency: SB (read before write)
+
+**Timing:**
+- read: `dynamic` (depends on configured latency)
+- Other methods: combinational or single-cycle
+
+**Software Semantics:**
+```cpp
+std::unordered_map<int32_t, int64_t> memory_data;
+int32_t read_latency = 1;
+```
+
 ## Future Extensions
 
 The primitive system is designed to be extensible:
@@ -293,3 +385,4 @@ The primitive system is designed to be extensible:
 - FIRRTL modules must be created within a `firrtl.circuit` context
 - Type conversion from MLIR types to FIRRTL types is handled automatically
 - Clock and reset signals are required even for combinational primitives (FIRRTL requirement)
+- Spec primitives are marked with `spec` attribute and include `software_semantics`

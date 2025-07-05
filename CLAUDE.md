@@ -189,19 +189,21 @@ Sharp implements custom MLIR dialects following CIRCT patterns:
 ### Current Development Status
 
 Per `STATUS.md`:
-- **Completed**: Conflict matrix on schedule ops, timing attributes, Txn-to-FIRRTL conversion
-- **In Progress**: Enhanced conversion features (primitive method calls, state management)
-- **Planned**: Verilog export, additional hardware primitives
+- **Completed**: 
+  - Full Txn dialect with all operations and analysis passes
+  - Txn-to-FIRRTL conversion with conflict resolution
+  - Verilog export through CIRCT pipeline
+  - Comprehensive simulation infrastructure (TL, RTL, JIT, Hybrid)
+  - Complete 8-chapter tutorial with examples
+  - All hardware primitives (Register, Wire, FIFO, Memory, SpecFIFO, SpecMemory)
+  - Python frontend following PyCDE pattern
+- **In Progress**: Nothing currently
+- **Future Work**: JIT lowering fixes, enhanced tooling
 
 ### Development Diary
 
 Claude Code should note down the development progress in `archieves/DIARY.md`. It should be updated every claude code session (how the user interacts with the claude code and what the claude code does). The user could provide some guidance files (like PLAN.md, etc.) to the claude code, and when claude code finished using the files and do not need them anymore, the files should be moved to `archieves/` directory with date marked (e.g., `archieves/2025-06-29-PLAN.md`). The `archieves/DIARY.md` entries should refer to the guidance files.
 
-## Known Issues
-
-- Python bindings have a runtime issue under investigation
-- Multi-cycle operations not yet supported in translation
-- Combinational loop detection pending txn.primitive attribute support
 
 ## Key Documentation Files
 
@@ -210,3 +212,42 @@ Claude Code should note down the development progress in `archieves/DIARY.md`. I
 - `docs/txn_to_firrtl.md` - Conversion algorithm documentation
 - `docs/txn_primitive.md` - Primitive infrastructure documentation
 - `docs/firrtl_operations_guide.md` - FIRRTL operations reference
+- `docs/simulation.md` - Comprehensive simulation methodology
+- `docs/test.md` - Testing infrastructure documentation
+- `examples/sharp-tutorial/` - 8-chapter progressive tutorial
+
+## Critical Implementation Insights
+
+### Primitive Implementation Pattern
+When implementing new primitives:
+1. Use correct operation constructors with all optional parameters
+2. Mark spec primitives with `spec` attribute
+3. Include `software_semantics` dictionary attribute for simulation
+4. Follow the pattern in Register.cpp for hardware primitives
+5. Follow the pattern in Memory.cpp for spec primitives
+
+### Common Pitfalls and Solutions
+1. **Operation Build Errors**: Always provide all optional attributes (use StringAttr(), ArrayAttr(), UnitAttr() for empty)
+2. **Primitive Instance Types**: Use parametric syntax `@instance of @Primitive<Type>`
+3. **Method Calls**: Use `::` syntax for instance method calls
+4. **FileCheck Tests**: Use `not` command for tests expecting failure, redirect stderr with `2>&1`
+
+### Testing Best Practices
+- Run `pixi run test` frequently during development
+- Use `-DSHARP_BINDINGS_PYTHON_ENABLED=OFF` if Python bindings cause issues
+- Write both positive and negative tests
+- Follow existing test patterns in `test/Dialect/Txn/`
+
+### Code Generation Insights
+When adding support for new operations in simulation:
+1. Check both `.method` and plain `method` syntax for primitive calls
+2. Handle arithmetic operations in the appropriate visitor method
+3. Update state variable names to match generated code patterns
+4. Test with workspace generation tool to verify end-to-end flow
+
+### Collaboration Patterns
+- User often requests "move forward STATUS.md" - check STATUS.md for next tasks
+- Always update both STATUS.md and DIARY.md after completing work
+- Create comprehensive tests for all new features
+- Document everything in appropriate docs/ files
+- When implementing features, also create tutorial examples

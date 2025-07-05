@@ -53,6 +53,40 @@ circt::firrtl::FModuleOp createRegisterFIRRTLModule(OpBuilder &builder, Location
 circt::firrtl::FModuleOp createWireFIRRTLModule(OpBuilder &builder, Location loc,
                                                 StringRef name, Type dataType);
 
+/// Create a FIFO primitive.
+/// The FIFO provides first-in-first-out queue functionality with enqueue/dequeue operations.
+::sharp::txn::PrimitiveOp createFIFOPrimitive(OpBuilder &builder, Location loc,
+                                              StringRef name, Type dataType,
+                                              unsigned depth = 16);
+
+/// Create a FIRRTL module implementation for FIFO primitive.
+/// This creates the actual hardware implementation with handshaking signals.
+/// Note: This must be created within a firrtl.circuit context.
+circt::firrtl::FModuleOp createFIFOFIRRTLModule(OpBuilder &builder, Location loc,
+                                                StringRef name, Type dataType,
+                                                unsigned depth);
+
+/// Create a Memory primitive.
+/// The memory provides address-based storage with read/write/clear operations.
+/// This is a spec primitive for verification.
+::sharp::txn::PrimitiveOp createMemoryPrimitive(OpBuilder &builder, Location loc,
+                                                StringRef name, Type dataType,
+                                                unsigned addressWidth = 10);
+
+/// Create a SpecFIFO primitive.
+/// SpecFIFO is an unbounded FIFO for specification and verification.
+/// It provides enqueue/dequeue/isEmpty/size/peek operations.
+::sharp::txn::PrimitiveOp createSpecFIFOPrimitive(OpBuilder &builder, Location loc,
+                                                  StringRef name, Type dataType);
+
+/// Create a SpecMemory primitive.
+/// SpecMemory is a memory with configurable read latency for verification.
+/// It provides read/write/clear operations with latency configuration.
+::sharp::txn::PrimitiveOp createSpecMemoryPrimitive(OpBuilder &builder, Location loc,
+                                                    StringRef name, Type dataType,
+                                                    unsigned addressWidth = 16,
+                                                    unsigned defaultLatency = 1);
+
 } // namespace txn
 } // namespace sharp
 } // namespace mlir

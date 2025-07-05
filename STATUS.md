@@ -332,49 +332,88 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Added technical insights and design rationale
   - Improved usage examples with realistic code patterns
 
+#### Simulation Workspace Generation (2025-07-06)
+- **Complete Workspace Generation Tool** ✅
+  - Created `tools/generate-workspace.sh` script that generates standalone C++ projects
+  - Workspace includes: C++ simulation code, CMakeLists.txt, README.md, SimulationBase.h/cpp
+  - No dependencies on LLVM/CIRCT/MLIR - completely standalone
+  - Supports command-line options: --cycles, --verbose, --stats
+  - Successfully tested with multiple examples
+
+#### Code Generation Enhancements (2025-07-06)
+- **Added Arithmetic Operation Support**
+  - XOR operation (`arith.xori`) → C++ `^` operator
+  - Subtraction (`arith.subi`) → C++ `-` operator
+  - Fixed primitive method call handling for `::` syntax
+  - Enhanced state access generation for all primitive types
+
+#### Example Creation (2025-07-06) ✅
+- **Complete Sharp Tutorial** (8/8 chapters completed)
+  - Created comprehensive tutorial structure at `/home/uvxiao/sharp/examples/sharp-tutorial/`
+  - ✅ Chapter 1: Basic Concepts - Toggle module with atomic transactions
+  - ✅ Chapter 2: Modules and Methods - Counter with multiple methods and conflicts
+  - ✅ Chapter 3: Hardware Primitives - Producer-consumer with FIFO
+  - ✅ Chapter 4: Analysis Passes - Loop detection, conflict inference, synthesis checks
+  - ✅ Chapter 5: Translation - FIRRTL and Verilog generation examples
+  - ✅ Chapter 6: Simulation Modes - TL, RTL (Arcilator), JIT comparison
+  - ✅ Chapter 7: Python Frontend - Parameterized hardware generation
+  - ✅ Chapter 8: Advanced Topics - Custom primitives, verification, optimization
+  - Each chapter includes README documentation, example MLIR files, and run scripts
+  - All examples tested and verified to parse correctly
+
+- **FIFO Primitive** ✅
+  - Implemented with software semantics (2025-07-06)
+  - Methods: enqueue, dequeue, isEmpty, isFull
+  - Conflict matrix: proper ordering constraints
+  - Software simulation using std::queue
+  - Wire and Register already have software semantics
+
+#### Additional Primitives (2025-07-06) ✅
+- **Memory Primitive** ✅
+  - Implemented in `lib/Dialect/Txn/primitives/Memory.cpp`
+  - Methods: read(addr), write(addr, data), clear()
+  - Conflict matrix: parallel reads OK, write conflicts
+  - Software semantics using std::unordered_map
+  - Address width: 10 bits (1024 entries)
+  
+- **SpecFIFO Primitive** ✅
+  - Implemented in `lib/Dialect/Txn/primitives/SpecFIFO.cpp`
+  - Unbounded FIFO for specification/verification
+  - Methods: enqueue, dequeue, isEmpty, size, peek
+  - Ordering preserving conflict matrix
+  - Software semantics using std::queue (unbounded)
+  
+- **SpecMemory Primitive** ✅
+  - Implemented in `lib/Dialect/Txn/primitives/SpecMemory.cpp`
+  - Memory with configurable read latency
+  - Methods: read, write, setLatency, getLatency, clear
+  - Dynamic timing for read operations
+  - Software semantics with latency modeling
+  - Address width: 16 bits (64K entries)
+
 ### 🚧 In Progress
 
-(No items currently in progress - all simulation infrastructure tasks completed!)
+- **Nothing currently in progress**
 
 ### 📋 Planned
 
-- **Additional Primitives**
-  - FIFO, Memory, and other common hardware primitives
-  - Spec primitives for formal verification  
-  
-- **Performance Optimizations**
-  - Optimize will-fire logic generation
-  - Reduce redundant conflict checks
-  - Implement dead code elimination
 
-### 🚫 Known Limitations
-- HW dialect cannot be registered from Sharp due to conflicts with CIRCT's builtin dialect
-- Nonsynthesizable primitives will fail translation
-- txn.state operation not yet implemented (needed for stateful modules)
 
 ## Next Steps
-
-1. **Complete Simulation Infrastructure**
-   - Implement txn→func→LLVM lowering for JIT mode
-   - Complete arcilator integration for RTL simulation
-   - Implement hybrid TL-to-RTL bridge synchronization
-   - Add txn.state operation for stateful module simulation
    
-2. **Implement Additional Primitives**
-   - Create FIFO primitive with enqueue/dequeue methods
-   - Add Memory primitive with read/write ports
-   - Design spec primitives for verification
+1. **JIT Lowering**
+  - fix the lowering of `txn.return` and `txn.if`
    
-3. **Enhanced Analysis**
+2. **Enhanced Analysis**
    - Add performance analysis passes
    - Create resource utilization estimates
    - Implement power consumption modeling
    
-4. **Fix Empty When Block Issue**
+3. **Fix Empty When Block Issue**
    - Update TxnToFIRRTL conversion to avoid empty when regions
    - Ensure all action bodies generate valid FIRRTL
    
-5. **Tooling and Integration**
+4. **Tooling and Integration**
    - Fix Python bindings for programmatic access
    - Create VSCode/IDE language support
    - Add debugging and visualization tools
