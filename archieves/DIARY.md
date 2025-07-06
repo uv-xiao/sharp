@@ -491,3 +491,44 @@ This session completed all remaining items in STATUS.md:
 - ✅ All code tested and working
 
 The Sharp framework is now feature-complete per the original plan!
+
+## 2025-07-06 Sunday
+
+### Morning: Execution Model Refinement (In Progress)
+
+**Task**: Working on "Clarifying Execution Semantics and Model across the Whole Project" from STATUS.md
+
+**Work Done**:
+1. **Updated execution_model.md** ✅
+   - Clarified terminology: "action" = "rule" + "action method"
+   - Updated execution phases to match STATUS.md specification
+   - Removed scheduling phase (schedule is pre-specified in MLIR)
+   - Added Value Phase for calculating value method results
+   - Updated multi-cycle execution semantics
+   - Fixed method conflict documentation
+
+2. **Fixed terminology throughout codebase** ✅
+   - Updated txn.md documentation
+   - Fixed schedule documentation to clarify only actions are scheduled
+   - Updated Wire primitive documentation (read is action method, not value method)
+   - Fixed example schedules that incorrectly included value methods
+
+3. **Created Schedule Validation Pass** ✅
+   - Added `--sharp-validate-schedule` analysis pass
+   - Validates schedules only contain actions (rules and action methods)
+   - Emits errors if value methods appear in schedules
+   - Created comprehensive test suite with 6 test cases
+   - Added to build system and pass infrastructure
+
+**Key Semantics Clarified**:
+- No scheduling phase - schedule is already in MLIR file
+- Value methods must be conflict-free with all actions
+- Actions cannot call other actions in same module
+- Value Phase calculates all value method results once per cycle
+- Action method stalls until enabled by parent or all callers abort
+
+**Next Steps**:
+- Add pass to check value methods are conflict-free
+- Add pass to check actions don't call other actions in same module
+- Update txn-to-firrtl conversion for new execution model
+- Fix simulation code to match new semantics

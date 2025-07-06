@@ -1,0 +1,162 @@
+// RUN: sharp-opt %s -sharp-check-value-method-conflicts -split-input-file -verify-diagnostics
+
+// Test 1: Valid value method with no conflicts
+txn.module @ValidValueMethod {
+  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  
+  // This value method has no conflicts specified, so it's valid
+  txn.value_method @getValue() -> i32 {
+    %v = txn.call @reg.read() : () -> i32
+    txn.return %v : i32
+  }
+  
+  txn.action_method @setValue(%v: i32) {
+    txn.call @reg.write(%v) : (i32) -> ()
+    txn.return
+  }
+  
+  // No conflicts specified - all default to CF
+  txn.schedule [@getValue, @setValue]
+}
+
+// -----
+
+// Test 2: Invalid value method with SB conflict
+txn.module @ValueMethodWithSBConflict {
+  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  
+  // expected-error@+1 {{value method 'getValue' has non-CF conflict with action 'setValue' (SB (Sequenced Before))}}
+  txn.value_method @getValue() -> i32 {
+    %v = txn.call @reg.read() : () -> i32
+    txn.return %v : i32
+  }
+  
+  txn.action_method @setValue(%v: i32) {
+    txn.call @reg.write(%v) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.schedule [@getValue, @setValue] {
+    conflict_matrix = #txn.conflict_dict<{
+      "getValue,setValue" = #txn.SB
+    }>
+  }
+}
+
+// -----
+
+// Test 3: Invalid value method with SA conflict
+txn.module @ValueMethodWithSAConflict {
+  %wire = txn.instance @wire of @Wire<i32> : !txn.module<"Wire">
+  
+  // expected-error@+1 {{value method 'readWire' appears in conflict matrix with non-CF relation (SA (Sequenced After))}}
+  txn.value_method @readWire() -> i32 {
+    %v = txn.call @wire.read() : () -> i32
+    txn.return %v : i32
+  }
+  
+  txn.action_method @writeWire(%v: i32) {
+    txn.call @wire.write(%v) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.schedule [@readWire, @writeWire] {
+    conflict_matrix = #txn.conflict_dict<{
+      "writeWire,readWire" = #txn.SA
+    }>
+  }
+}
+
+// -----
+
+// Test 4: Invalid value method with C conflict
+txn.module @ValueMethodWithConflict {
+  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  
+  // expected-error@+1 {{value method 'compute' has non-CF conflict with action 'update' (C (Conflict))}}
+  txn.value_method @compute() -> i32 {
+    %v = txn.call @reg.read() : () -> i32
+    %two = arith.constant 2 : i32
+    %result = arith.muli %v, %two : i32
+    txn.return %result : i32
+  }
+  
+  txn.action_method @update() {
+    %v = txn.call @compute() : () -> i32
+    txn.call @reg.write(%v) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.schedule [@compute, @update] {
+    conflict_matrix = #txn.conflict_dict<{
+      "compute,update" = #txn.C
+    }>
+  }
+}
+
+// -----
+
+// Test 5: Valid module with explicit CF conflicts
+txn.module @ExplicitCFConflicts {
+  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  
+  // This is valid - CF conflicts are allowed for value methods
+  txn.value_method @getValue() -> i32 {
+    %v = txn.call @reg.read() : () -> i32
+    txn.return %v : i32
+  }
+  
+  txn.action_method @setValue(%v: i32) {
+    txn.call @reg.write(%v) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.rule @incrementRule {
+    %v = txn.call @getValue() : () -> i32
+    %one = arith.constant 1 : i32
+    %next = arith.addi %v, %one : i32
+    txn.call @setValue(%next) : (i32) -> ()
+    txn.yield
+  }
+  
+  // Explicit CF relationships are fine
+  txn.schedule [@getValue, @setValue, @incrementRule] {
+    conflict_matrix = #txn.conflict_dict<{
+      "getValue,setValue" = #txn.CF,
+      "getValue,incrementRule" = #txn.CF
+    }>
+  }
+}
+
+// -----
+
+// Test 6: Multiple value methods with conflicts
+txn.module @MultipleValueMethodsWithConflicts {
+  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  
+  // expected-error@+1 {{value method 'getValue1' has non-CF conflict with action 'setValue' (SB (Sequenced Before))}}
+  txn.value_method @getValue1() -> i32 {
+    %v = txn.call @reg.read() : () -> i32
+    txn.return %v : i32
+  }
+  
+  // expected-error@+1 {{value method 'getValue2' appears in conflict matrix with non-CF relation (C (Conflict))}}
+  txn.value_method @getValue2() -> i32 {
+    %v = txn.call @reg.read() : () -> i32
+    %two = arith.constant 2 : i32
+    %result = arith.addi %v, %two : i32
+    txn.return %result : i32
+  }
+  
+  txn.action_method @setValue(%v: i32) {
+    txn.call @reg.write(%v) : (i32) -> ()
+    txn.return
+  }
+  
+  txn.schedule [@getValue1, @getValue2, @setValue] {
+    conflict_matrix = #txn.conflict_dict<{
+      "getValue1,setValue" = #txn.SB,
+      "getValue2,setValue" = #txn.C
+    }>
+  }
+}

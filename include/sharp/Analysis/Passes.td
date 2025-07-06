@@ -190,4 +190,60 @@ def ScheduleValidation : Pass<"sharp-validate-schedule", "mlir::ModuleOp"> {
   let dependentDialects = ["::sharp::txn::TxnDialect"];
 }
 
+def ValueMethodConflictCheck : Pass<"sharp-check-value-method-conflicts", "mlir::ModuleOp"> {
+  let summary = "Check that value methods are conflict-free with all actions";
+  let description = [{
+    This pass validates that value methods follow Sharp's execution model requirement
+    of being conflict-free with all actions. According to the execution model:
+    
+    1. Value methods must be conflict-free (CF) with all actions
+    2. Value methods can only have CF relationships in conflict matrices
+    3. If a method has any non-CF conflict, it cannot be a value method
+    
+    The pass examines each value method and checks:
+    - Its conflict relationships in the module's conflict matrix
+    - Conflicts inherited from primitive methods it calls
+    - Ensures no SA, SB, or C relationships exist
+    
+    This validation is critical because value methods are computed once per cycle
+    in the Value Phase and must not have ordering dependencies with actions.
+    
+    Example violation: Wire's read method cannot be a value method because it has
+    "read SA write" conflict, requiring it to be scheduled before write operations.
+  }];
+  
+  let constructor = "mlir::sharp::createValueMethodConflictCheckPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
+def ActionCallValidation : Pass<"sharp-validate-action-calls", "mlir::ModuleOp"> {
+  let summary = "Validate that actions do not call other actions in the same module";
+  let description = [{
+    This pass validates Sharp's execution model requirement that actions (rules and
+    action methods) cannot call other actions within the same module. According to
+    the execution model:
+    
+    1. Actions cannot call other actions in the same module
+    2. Actions can call value methods in the same module
+    3. Actions can call methods (both value and action) of child module instances
+    
+    The pass examines each action (rule or action method) and checks all method
+    calls within it to ensure they follow these restrictions.
+    
+    This restriction ensures that the schedule fully determines the execution order
+    of actions within a module, preventing hidden dependencies and maintaining the
+    one-rule-at-a-time semantics.
+    
+    Example violations:
+    - A rule calling an action method in the same module
+    - An action method calling another action method in the same module
+    - An action method calling a rule (rules are not callable)
+  }];
+  
+  let constructor = "mlir::sharp::createActionCallValidationPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
 #endif // SHARP_ANALYSIS_PASSES

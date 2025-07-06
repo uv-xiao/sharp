@@ -42,6 +42,12 @@ std::unique_ptr<mlir::Pass> createActionSchedulingPass();
 /// Create a pass to validate that schedules only contain actions.
 std::unique_ptr<mlir::Pass> createScheduleValidationPass();
 
+/// Create a pass to check that value methods are conflict-free with all actions.
+std::unique_ptr<mlir::Pass> createValueMethodConflictCheckPass();
+
+/// Create a pass to validate that actions do not call other actions in the same module.
+std::unique_ptr<mlir::Pass> createActionCallValidationPass();
+
 /// Generate the code for registering analysis passes.
 #define GEN_PASS_REGISTRATION
 #include "sharp/Analysis/Passes.h.inc"
