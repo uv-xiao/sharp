@@ -528,7 +528,33 @@ The Sharp framework is now feature-complete per the original plan!
 - Action method stalls until enabled by parent or all callers abort
 
 **Next Steps**:
-- Add pass to check value methods are conflict-free
-- Add pass to check actions don't call other actions in same module
-- Update txn-to-firrtl conversion for new execution model
-- Fix simulation code to match new semantics
+- Add pass to check value methods are conflict-free ✅
+- Add pass to check actions don't call other actions in same module ✅
+- Update txn-to-firrtl conversion for new execution model ✅
+- Fix simulation code to match new semantics (in progress)
+
+4. **Added Value Method Conflict Check Pass** ✅
+   - Created `--sharp-check-value-method-conflicts` analysis pass
+   - Validates value methods have only CF relationships
+   - Detects SA/SB/C conflicts that violate execution model
+   - Created test suite with 6 test cases
+
+5. **Added Action Call Validation Pass** ✅
+   - Created `--sharp-validate-action-calls` analysis pass
+   - Prevents actions from calling other actions in same module
+   - Allows actions to call value methods and child instance methods
+   - Created test suite with 6 test cases
+
+6. **Updated TxnToFIRRTL Conversion** ✅
+   - Added validation to reject value methods in schedules
+   - Added check to prevent action-to-action calls in same module
+   - Added execution model documentation to ConversionContext
+   - Tracks current Txn module for validation purposes
+
+**Remaining Tasks**:
+- Fix simulation code to implement Value Phase
+- Update Python bindings and frontends
+- Update tests that violate new execution model
+- Update remaining documentation and examples
+- Consider removing timing attributes
+- Implement launch operations

@@ -44,6 +44,12 @@ using namespace ::sharp::txn;
 using namespace ::circt::firrtl;
 
 /// Conversion context to track state during translation
+/// 
+/// Following Sharp's execution model:
+/// - Value methods are computed once per cycle (combinational logic)
+/// - Only actions (rules and action methods) participate in scheduling
+/// - Actions cannot call other actions in the same module
+/// - Schedules must only contain actions, not value methods
 struct ConversionContext {
   /// Track generated FIRRTL values
   DenseMap<Value, Value> txnToFirrtl;
@@ -65,6 +71,9 @@ struct ConversionContext {
   
   /// Current FIRRTL module being built
   FModuleOp currentFIRRTLModule;
+  
+  /// Current Txn module being converted
+  ::sharp::txn::ModuleOp currentTxnModule;
   
   /// Builder positioned inside FIRRTL module
   OpBuilder firrtlBuilder;
@@ -673,6 +682,38 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
         // Local method call (within same module)
         StringRef methodName = callee.getRootReference().getValue();
         
+        // Check if this violates execution model constraints
+        if (ctx.currentTxnModule) {
+          // Check if the caller is an action
+          Operation *caller = callOp->getParentOp();
+          while (caller && !isa<ActionMethodOp>(caller) && !isa<RuleOp>(caller) && 
+                 !isa<ValueMethodOp>(caller)) {
+            caller = caller->getParentOp();
+          }
+          
+          bool isCallerAction = caller && (isa<ActionMethodOp>(caller) || isa<RuleOp>(caller));
+          
+          // Check if the callee is an action
+          bool isCalleeAction = false;
+          ctx.currentTxnModule.walk([&](Operation *op) {
+            if (auto actionMethod = dyn_cast<ActionMethodOp>(op)) {
+              if (actionMethod.getSymName() == methodName) {
+                isCalleeAction = true;
+              }
+            } else if (auto rule = dyn_cast<RuleOp>(op)) {
+              if (rule.getSymName() == methodName) {
+                isCalleeAction = true;
+              }
+            }
+          });
+          
+          if (isCallerAction && isCalleeAction) {
+            return callOp.emitError("Action cannot call another action '") << methodName 
+                   << "' in the same module. Actions can only call value methods in the same module "
+                   << "or methods of child module instances.";
+          }
+        }
+        
         if (callOp.getNumResults() > 0) {
           // Value method call - for local calls in rules, we just use the output
           // The method is always enabled (combinational)
@@ -941,6 +982,9 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
                                  const std::string &willFireMode = "static") {
   MLIRContext *mlirCtx = txnModule->getContext();
   OpBuilder builder(mlirCtx);
+  
+  // Set current module in context
+  ctx.currentTxnModule = txnModule;
   
   // Find schedule to get action ordering and conflict matrix
   ScheduleOp schedule;
@@ -1261,7 +1305,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
         }
       } else if (auto valueMethod = dyn_cast<ValueMethodOp>(op)) {
         if (valueMethod.getSymName() == name) {
-          // Value methods shouldn't be in schedule, but handle gracefully
+          // Value methods must not be in schedule according to execution model
           isValueMethod = true;
           return WalkResult::interrupt();
         }
@@ -1270,8 +1314,9 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     });
     
     if (isValueMethod) {
-      // Skip value methods in schedule - they don't have will-fire logic
-      continue;
+      // Error: value methods should never be in schedules
+      return txnModule.emitError("Value method '") << name 
+             << "' found in schedule. Only actions (rules and action methods) are allowed in schedules.";
     }
     
     if (!action) {
