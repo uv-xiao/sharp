@@ -39,6 +39,9 @@ std::unique_ptr<mlir::Pass> createMethodAttributeValidationPass();
 /// Create a pass to complete partial schedules to minimize conflicts.
 std::unique_ptr<mlir::Pass> createActionSchedulingPass();
 
+/// Create a pass to validate that schedules only contain actions.
+std::unique_ptr<mlir::Pass> createScheduleValidationPass();
+
 /// Generate the code for registering analysis passes.
 #define GEN_PASS_REGISTRATION
 #include "sharp/Analysis/Passes.h.inc"

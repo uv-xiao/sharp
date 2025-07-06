@@ -4,16 +4,23 @@ This document describes the execution model for Sharp, inspired by Koika's one-r
 
 ## Overview
 
-Sharp adopts a **one-rule-at-a-time (1RaaT)** execution model where rules execute atomically and sequentially within each clock cycle. This model provides:
+Sharp adopts a **one-rule-at-a-time (1RaaT)** execution model where actions execute atomically and sequentially within each clock cycle. This model provides:
 
-1. **Sequential Semantics**: Rules appear to execute in program order
-2. **Atomic Execution**: Each rule completes entirely before the next begins
+1. **Sequential Semantics**: Actions appear to execute in program order
+2. **Atomic Execution**: Each action completes entirely before the next begins
 3. **Deterministic Behavior**: No race conditions or timing ambiguities
 4. **Modular Composition**: Methods enable hierarchical design
 
 ## Core Concepts
 
-### Rules and Actions
+### Terminology
+
+- **Action**: Either a rule or an action method. These are the schedulable units that can modify state.
+- **Rule**: A guarded atomic action defined within a module that executes autonomously
+- **Action Method**: A method that can modify state, callable from parent modules
+- **Value Method**: A pure function that reads state without side effects (not schedulable)
+
+### Rules
 
 A **rule** is a guarded atomic action that executes when its guard condition is true:
 
@@ -33,120 +40,175 @@ txn.rule @doSomething {
 Methods extend the basic 1RaaT model with modular interfaces:
 
 1. **Value Methods**: Pure functions that read state without side effects
+   - Must be conflict-free with all other actions
+   - Not included in schedules
+   - Example: Wire's read cannot be a value method since "read SA write" is required
+
 2. **Action Methods**: Procedures that can modify state atomically
+   - Included in schedules alongside rules
+   - Can be called by parent modules
 
 ```mlir
 txn.value_method @getValue() -> i32 {
-    %state = txn.read @register : !txn.ref<i32>
+    %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+    %state = txn.call @reg.read() : () -> i32
     txn.return %state
 }
 
 txn.action_method @setValue(%v: i32) {
-    txn.write @register, %v : !txn.ref<i32>, i32
+    %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+    txn.call @reg.write(%v) : (i32) -> ()
 }
 ```
 
 ### Scheduling
 
-Within each cycle, the scheduler determines rule execution order based on:
+The schedule specifies the execution order of **actions only** (rules and action methods). Value methods are not included in schedules.
+
+Within each cycle, actions execute based on:
 
 1. **Explicit Ordering**: User-specified schedule constraints
 2. **Conflict Relations**: 
-   - **SB (Sequenced Before)**: Rule A must execute before Rule B
-   - **SA (Sequenced After)**: Rule A must execute after Rule B  
-   - **C (Conflict)**: Rules cannot execute in the same cycle
-   - **CF (Conflict-Free)**: Rules can execute in any order
+   - **SB (Sequenced Before)**: Action A must execute before Action B
+   - **SA (Sequenced After)**: Action A must execute after Action B  
+   - **C (Conflict)**: Actions cannot execute in the same cycle
+   - **CF (Conflict-Free)**: Actions can execute in any order
+
+### Method Call Restrictions
+
+1. Actions cannot call other actions in the same module
+2. Actions can call value methods in the same module
+3. Actions can call methods (both value and action) of child module instances
 
 ## Execution Semantics
 
 ### Single Cycle Execution
 
-Each clock cycle follows these phases:
+Each clock cycle follows these phases (note: there is no scheduling phase since the schedule is already specified in the MLIR file):
 
-1. **Scheduling Phase**:
-   ```
-   1. Evaluate all rule guards
-   2. Select enabled rules based on guards and conflicts
-   3. Determine execution order respecting SB/SA constraints
-   ```
+1. **Value Phase**:
+   - Calculate the value of all value methods
+   - The values remain unchanged until the next cycle
 
 2. **Execution Phase**:
    ```
-   for each scheduled rule in order:
-       1. Read all required state atomically
-       2. Execute action body (compute new values)
-       3. Write all state updates atomically
+   for each scheduled action in order:
+       if the action is an action method:
+           stall until this action method is enabled by an action from the parent module 
+           or all actions calling this action method have aborted in the current cycle
+           check guard and conflict matrix
+           execute the action method and record aborting or success (return value)
+       if the action is a rule:
+           check guard and conflict matrix
+           execute the rule and record aborting or success
    ```
 
 3. **Commit Phase**:
-   ```
-   1. Apply all state updates simultaneously
-   2. Advance to next cycle
-   ```
+   - Apply all state updates due to recorded execution success
+   - Advance to next cycle
 
 ### Method Call Semantics
 
 Method calls within actions follow these rules:
 
 1. **Value Methods**:
+   - Must be conflict-free with all other actions
    - Can be called multiple times
-   - Always return consistent values within a cycle
+   - Always return consistent values within a cycle (calculated once in Value Phase)
    - No side effects on state
 
 2. **Action Methods**:
-   - Execute atomically as part of calling rule
+   - Execute atomically as part of calling action
    - Can only be called once per cycle per instance
-   - State changes visible to subsequent operations
+   - State changes visible to subsequent operations within the same action
 
-### Multi-Cycle Operations
+### Multi-Cycle Execution
 
-Sharp supports multi-cycle operations through two mechanisms:
+Multi-cycle operations allow actions to span multiple clock cycles. The execution model extends as follows:
 
-#### 1. Timing Attributes (Currently Supported)
+1. **Value Phase**: Same as single cycle execution
+
+2. **Execution Phase**:
+   ```
+   for each scheduled action in order:
+       if the action is single-cycle:
+           // Same as single cycle execution
+       if the action is multi-cycle:
+           // History updates
+           for every execution that started in the past but not finished:
+               update inner execution status
+               check if a new launch can be triggered in the current cycle
+                   if yes: trigger the launch
+               record panic if a required action fails in the current cycle 
+                   (conflict or guard violation) -- only static launch can cause panic
+               record the execution success in the current cycle
+           
+           // New execution starts
+           if the action is an action method:
+               stall until this action method is enabled by an action from the parent module 
+               or all actions calling this action method have aborted in the current cycle
+               check guard and conflict matrix
+               try execute the "per-cycle actions" in the current cycle
+               start a new execution if no aborting
+           if the action is a rule:
+               check guard and conflict matrix
+               try execute the "per-cycle actions" in the current cycle
+               start a new execution if no aborting
+   ```
+
+3. **Commit Phase**: Same as single cycle execution
+
+### Launch Operations
+
+Multi-cycle actions can contain per-cycle actions and launches. Launch operations allow deferred execution with dependencies:
+
 ```mlir
-txn.action_method @multiCycleOp(%data: i32) attributes {timing = "static(3)"} {
-    // Static latency operations via timing attributes
-    // The FIRRTL conversion handles the delay
-    %result = txn.instance @result of @Register<i32> : !txn.module<"Register">
-    txn.call @result.write(%data) : (i32) -> ()
-    txn.return
-}
+txn.instance @reg of @Register<i32> : !txn.module<"Register">
+txn.instance @fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
 
-txn.action_method @dynamicOp(%data: i32) attributes {timing = "dynamic"} {
-    // Dynamic operations can use spec primitives
-    %fifo = txn.instance @fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
-    txn.call @fifo.enqueue(%data) : (i32) -> ()
-    txn.return
-}
-```
-
-#### 2. Launch Operations (Future Enhancement)
-```mlir
-txn.action_method @futureMultiCycle(%data: i32) {
-    // Static latency launch (not yet implemented)
-    txn.launch {latency=3} {
-        // This block executes 3 cycles later
-        %result = txn.instance @result of @Register<i32> : !txn.module<"Register">
-        txn.call @result.write(%data) : (i32) -> ()
-    }
+txn.action_method @multiCycleAction(%data: i32) {multicycle = true} {
+    // Per-cycle actions execute immediately
+    txn.call @reg.write(%data) : (i32) -> ()
     
-    // Dynamic latency launch (not yet implemented)
-    txn.launch until %done {
-        %ready = txn.call @isReady() : () -> i1
-        txn.if %ready {
-            txn.call @process(%data) : (i32) -> ()
-        }
-        txn.return %ready : i1
+    // Multi-cycle actions are enclosed by txn.future
+    txn.future {
+      // Static latency launch
+      %done1 = txn.launch {latency=3} {
+          // This block executes 3 cycles later
+          // If after 3 cycles, this block fails, a panic will be raised
+          txn.call @reg.write(%data) : (i32) -> ()
+      }
+      
+      // Dynamic latency launch
+      %done2 = txn.launch until %done1 {
+          // This launch only starts when %done1 is true
+          // If the enqueue fails, NO panic will be raised
+          // Instead, the block will be tried again in the next cycle until it succeeds
+          txn.call @fifo.enqueue(%data) : (i32) -> ()
+      }
+
+      // Combined: dependency with static latency
+      %done3 = txn.launch until %done2 {latency=1} {
+        // This launch only starts 1 cycle after %done2 is true
+        // If the launch fails, a panic will be raised (due to the static latency)
+        // ...
+      }
+    }
+}
+
+txn.rule @multiCycleRule {multicycle = true} {
+    // Rules can also be multi-cycle
+    txn.future {
+      // Contains one or multiple launches, similar to action methods
     }
 }
 ```
 
-**Simulation Support**:
-- Static timing through `"static(n)"` attributes (current)
-- txn.launch for explicit multi-cycle blocks (planned)
-- Dynamic timing through spec primitives
-- Continuation events for deferred execution
-- Proper dependency tracking across cycles
+**Key Semantics**:
+- Static launches (`{latency=n}`) must succeed after the specified delay or panic
+- Dynamic launches (`until %cond`) retry until successful
+- Launches can depend on completion of previous launches
+- Per-cycle actions execute before any launches start
 
 ## Conflict Resolution
 
@@ -172,8 +234,8 @@ Where:
 Method calls introduce implicit conflicts:
 
 1. **Action-Action**: Two calls to the same action method conflict
-2. **Action-Value**: Action methods conflict with value methods they affect
-3. **Value-Value**: Value methods never conflict
+2. **Value methods must be conflict-free**: Value methods cannot have conflicts with any actions
+3. **Value-Value**: Value methods never conflict with each other
 
 ## Implementation Strategy
 
@@ -184,25 +246,36 @@ Sharp implements a complete event-driven simulation infrastructure with the 1Raa
 ```cpp
 class Simulator {
     void executeCycle() {
-        // Phase 1: Scheduling - Determine which rules can fire
-        std::vector<Event*> scheduledEvents;
-        for (auto& rule : module->rules) {
-            if (rule->guard() && !hasConflict(rule, scheduledEvents)) {
-                scheduledEvents.push_back(createEvent(rule));
+        // Phase 1: Value Phase - Calculate all value method results
+        for (auto& valueMethod : module->valueMethods) {
+            valueMethodCache[valueMethod->name] = valueMethod->compute();
+        }
+        
+        // Phase 2: Execution Phase - Execute actions in schedule order
+        for (auto& actionName : module->schedule) {
+            auto* action = module->getAction(actionName);
+            
+            if (action->isActionMethod()) {
+                // Wait for parent module enablement
+                if (!action->isEnabled() && !allCallersAborted(action)) {
+                    continue; // Stall
+                }
+            }
+            
+            // Check guard and conflicts
+            if (action->checkGuard() && !hasConflict(action)) {
+                ExecutionResult result = action->execute();
+                recordResult(action, result);
+                
+                // Handle multi-cycle actions
+                if (action->isMultiCycle()) {
+                    handleMultiCycleExecution(action);
+                }
             }
         }
         
-        // Phase 2: Execution - Execute rules atomically
-        for (auto* event : scheduledEvents) {
-            event->execute();
-            if (event->hasContinuation()) {
-                // Multi-cycle operations create continuation events
-                scheduleEvent(event->getContinuation(), event->getDelay());
-            }
-        }
-        
-        // Phase 3: Commit - Apply all state updates atomically
-        commitTransactions();
+        // Phase 3: Commit Phase - Apply successful state updates
+        commitSuccessfulUpdates();
         advanceTime();
     }
 };
@@ -271,7 +344,7 @@ txn.module @Counter {
         txn.yield
     }
     
-    txn.schedule [@getValue, @increment, @autoIncrement]  
+    txn.schedule [@increment, @autoIncrement]  
 }
 ```
 

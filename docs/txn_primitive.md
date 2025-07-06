@@ -95,8 +95,8 @@ firrtl.module @Register_impl(in %clock: !firrtl.clock,
 A combinational connection between components.
 
 **Txn Interface:**
-- `read()`: Returns the current wire value
-- `write(value)`: Updates the wire value combinationally
+- `read()`: Returns the current wire value (action method - NOT a value method due to SA conflict with write)
+- `write(value)`: Updates the wire value combinationally (action method)
 
 **Conflict Matrix:**
 - read ↔ read: CF (Conflict-Free)

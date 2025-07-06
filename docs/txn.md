@@ -14,7 +14,7 @@ Modules are the primary structuring mechanism, containing:
 - **Value Methods**: Pure, read-only methods that observe state
 - **Action Methods**: Methods that may modify state, abort, or return values
 - **Rules**: Spontaneous transitions that execute
-- **Schedule**: Lists the methods/rules that can be executed (terminator)
+- **Schedule**: Lists the actions (rules and action methods) that can be executed (terminator)
 
 ### Transaction Semantics
 
@@ -81,7 +81,8 @@ txn.module @FIFO {
   
   // Methods and rules...
   
-  // Schedule - lists methods/rules with optional conflict matrix
+  // Schedule - lists actions (rules and action methods) with optional conflict matrix
+  // Note: value methods are NOT included in schedules
   txn.schedule [@enqueue, @dequeue, @processRule] {
     // Conflict matrix entries (optional)
     conflict_matrix = #txn.conflict_dict<{
@@ -338,7 +339,7 @@ txn.module @Storage {
     func.return %zero : i32
   }
   
-  txn.schedule [@isEmpty, @isFull, @write, @read]
+  txn.schedule [@write]  // Only action methods in schedule
 }
 ```
 
@@ -348,7 +349,7 @@ txn.module @Storage {
 2. **Auto-generated Assembly**: Most operations use TableGen's assemblyFormat for consistency
 3. **Simple Rules**: Removed guard conditions from rules - use if/abort pattern instead
 4. **Module Instances**: Enables hierarchical composition and reuse
-5. **Explicit Scheduling**: Schedule lists methods/rules that can be executed
+5. **Explicit Scheduling**: Schedule lists actions (rules and action methods) that can be executed
 6. **Flexible Control Flow**: If regions can be empty for more natural patterns
 
 ## Implementation Status

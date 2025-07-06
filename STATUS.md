@@ -393,7 +393,68 @@ Sharp is a transaction-based hardware description language with conflict matrix 
 
 ### 🚧 In Progress
 
-- **Nothing currently in progress**
+- **Clarifying Execution Semantics and Model across the Whole Project**
+  - terminology: "action" = "rule" + "action method".
+  - schedule only specifies the order of actions, any "value method" is not included.
+    - the schedule pass should check this.
+  - "value method" must be conflict-free with other actions. Therefore, "Wire"'s "read" cannot be a "value method", since "read SA write" is required.
+    - analysis pass should check this.
+  - action cannot call other actions in the same module; action can call value methods in the same module.
+    - analysis pass should check this.
+  - The "Execution Semantics" `docs/execution_model.md` is not correct. The correct one is:
+  ```
+  Single Cycle Execution:
+    // there is no scheduling phase, since the schedule is already specified in the MLIR file.
+    1. Value phase:
+      calculate the value of all "value methods", the values remain unchanged until the next cycle.
+    2. Execution phase:
+      for each scheduled action in order:
+        if the action is an "action method":
+          stalls until this action method is enabled by an action from the parent module or all actions calling this action method have aborted in the current cycle;
+          check guard and conflict matrix;
+          execute the action method and record aborting or success(return value);
+        if the action is a "rule":
+          check guard and conflict matrix;
+          execute the rule and record aborting or success;
+    3. Commit phase:
+      apply all state updates due to recorded execution success;
+      advance to next cycle;
+  Multi-Cycle Execution:
+    // The "Timing Attributes" is not correct and should be removed.
+    // The "Launch Operations" is robust and must be supported. I've specified it in `docs/execution_model.md`.
+    // Similar to the single cycle execution, but one action can trigger multiple launches.
+    1. Value phase: the same as single cycle execution.
+    2. Execution phase:
+      for each scheduled action in order:
+        if the action is single-cycle:
+          the same as single cycle execution;
+        if the action is multi-cycle:
+          // history updates
+          for every execution that started in the past but not finished:
+            update inner execution status;
+            check if a new launch can be triggered in the current cycle;
+              if yes: trigger the launch;
+            record panic if a required action fails in the current cycle (conflict or guard violation) -- only static launch can cause panic.
+            record the execution success in the current cycle;
+          
+          // new execution starts
+          if the action is a "action method":
+            stalls until this action method is enabled by an action from the parent module or all actions calling this action method have aborted in the current cycle;
+            check guard and conflict matrix;
+            try execute the "per-cycle actions" in the current cycle;
+            start a new execution if no aborting;
+          if the action is a "rule":
+            check guard and conflict matrix;
+            try execute the "per-cycle actions" in the current cycle;
+            start a new execution if no aborting;
+    3. Commit phase:
+      apply all state updates due to recorded execution success;
+      advance to next cycle;
+  ```
+  - All the involved code (txn-to-firrtl, simulation, bindings, frontends, examples, etc.) should be fixed. Operations should be removed or implemented.
+  - All the involved tests should be fixed or more comprehensive should be added. They must be passed after the above fixes.
+  - All the involved documents and examples should be fixed.
+
 
 ### 📋 Planned
 

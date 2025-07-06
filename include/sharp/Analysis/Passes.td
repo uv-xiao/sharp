@@ -166,4 +166,28 @@ def ActionScheduling : Pass<"sharp-action-scheduling", "mlir::ModuleOp"> {
   let dependentDialects = ["::sharp::txn::TxnDialect"];
 }
 
+def ScheduleValidation : Pass<"sharp-validate-schedule", "mlir::ModuleOp"> {
+  let summary = "Validate that schedules only contain actions (rules and action methods)";
+  let description = [{
+    This pass validates that schedule operations only contain actions, not value methods.
+    According to Sharp's execution model:
+    
+    1. Schedules must only list actions (rules and action methods)
+    2. Value methods are NOT schedulable and must not appear in schedules
+    3. Value methods must be conflict-free with all actions
+    
+    The pass checks each schedule operation and emits errors if:
+    - A value method appears in the schedule
+    - A scheduled item is not found in the module
+    - A scheduled item is neither a rule nor an action method
+    
+    This validation ensures the execution model is correctly followed and prevents
+    invalid hardware generation.
+  }];
+  
+  let constructor = "mlir::sharp::createScheduleValidationPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
 #endif // SHARP_ANALYSIS_PASSES

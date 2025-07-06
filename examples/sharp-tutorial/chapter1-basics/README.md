@@ -4,14 +4,15 @@
 
 Sharp uses a transaction-based model for hardware description. In this model:
 - Hardware is composed of **modules** containing state and behavior
-- Behavior is expressed through **methods** that execute atomically
-- Methods can be **value methods** (read-only) or **action methods** (state-modifying)
-- **Rules** define autonomous behavior that executes when conditions are met
+- Behavior is expressed through **actions** that execute atomically
+- Actions can be:
+  - **value methods** (read-only) or **action methods** (state-modifying)
+  - **rules** define autonomous behavior that executes when conditions are met
 
 ## Key Concepts
 
 ### 1. Atomic Transactions
-Every method execution is atomic - it either completes fully or not at all. This provides:
+Every action execution is atomic - it either completes fully or not at all. This provides:
 - Predictable behavior
 - No partial state updates
 - Clear reasoning about concurrency
@@ -22,9 +23,6 @@ Methods can have four types of conflicts:
 - **SA (1)**: Sequence After - first must execute after second  
 - **C (2)**: Conflict - cannot execute in same cycle
 - **CF (3)**: Conflict Free - can execute in any order
-
-### 3. One-Rule-at-a-Time (1RaaT) Semantics
-Rules execute one at a time, ensuring deterministic behavior even with concurrent hardware.
 
 ## Your First Sharp Module
 
@@ -53,8 +51,8 @@ txn.module @Toggle {
     txn.yield
   }
   
-  // Schedule declares all methods/rules
-  txn.schedule [@read, @toggle]
+  // Schedule declares all state-modifying actions
+  txn.schedule [@toggle]
 }
 ```
 
