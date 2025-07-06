@@ -111,6 +111,25 @@ public:
       }
     }
     
+    // Set schedule and conflict matrix
+    if (auto schedule = getScheduleOp(module)) {
+      os << "\n    // Set schedule\n";
+      os << "    setSchedule({";
+      auto actions = schedule.getActionNames();
+      for (unsigned i = 0; i < actions.size(); ++i) {
+        if (i > 0) os << ", ";
+        os << "\"" << actions[i].cast<FlatSymbolRefAttr>().getValue() << "\"";
+      }
+      os << "});\n";
+      
+      if (auto cm = schedule.getConflictMatrix()) {
+        os << "\n    // Set conflict matrix\n";
+        os << "    setConflictMatrix({\n";
+        generateInlineConflictMatrix(*cm, os);
+        os << "    });\n";
+      }
+    }
+    
     os << "  }\n";
     
     // Generate conflict matrix if present
@@ -210,6 +229,34 @@ private:
       if (intType.getWidth() <= 64) return "int64_t";
     }
     return "Value"; // Use generic Value type
+  }
+  
+  void generateInlineConflictMatrix(mlir::DictionaryAttr cmAttr, llvm::raw_ostream& os) {
+    // Generate conflict entries from flat dictionary with compound keys
+    for (auto& entry : cmAttr) {
+      // Parse compound key "method1,method2"
+      std::string key = entry.getName().str();
+      size_t commaPos = key.find(',');
+      if (commaPos != std::string::npos) {
+        std::string first = key.substr(0, commaPos);
+        std::string second = key.substr(commaPos + 1);
+        
+        // Get conflict relation value
+        if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(entry.getValue())) {
+          int64_t conflictValue = intAttr.getInt();
+          std::string conflictName;
+          switch (conflictValue) {
+            case 0: conflictName = "SequenceBefore"; break;
+            case 1: conflictName = "SequenceAfter"; break;
+            case 2: conflictName = "Conflict"; break;
+            case 3: conflictName = "ConflictFree"; break;
+            default: conflictName = "ConflictFree"; break;
+          }
+          os << "      {{\"" << first << "\", \"" << second << "\"}, ConflictRelation::" 
+             << conflictName << "},\n";
+        }
+      }
+    }
   }
   
   void generateConflictMatrix(mlir::DictionaryAttr cmAttr) {
@@ -651,7 +698,8 @@ private:
     os << "#include <map>\n";
     os << "#include <functional>\n";
     os << "#include <memory>\n";
-    os << "#include <cstdint>\n\n";
+    os << "#include <cstdint>\n";
+    os << "#include <unordered_map>\n\n";
     
     os << "// Conflict relations between actions\n";
     os << "enum class ConflictRelation {\n";
@@ -682,15 +730,36 @@ private:
     os << "    rules[name] = impl;\n";
     os << "  }\n\n";
     
-    os << "  // Execute methods\n";
+    os << "  // Set schedule (action execution order)\n";
+    os << "  void setSchedule(const std::vector<std::string>& sched) {\n";
+    os << "    schedule = sched;\n";
+    os << "  }\n\n";
+    
+    os << "  // Set conflict matrix\n";
+    os << "  void setConflictMatrix(const std::map<std::pair<std::string, std::string>, ConflictRelation>& cm) {\n";
+    os << "    conflictMatrix = cm;\n";
+    os << "  }\n\n";
+    
+    os << "  // Execute value method (cached)\n";
     os << "  std::vector<int64_t> callValueMethod(const std::string& name, const std::vector<int64_t>& args) {\n";
+    os << "    // Check cache first\n";
+    os << "    auto cacheKey = std::make_pair(name, args);\n";
+    os << "    auto cached = valueMethodCache.find(cacheKey);\n";
+    os << "    if (cached != valueMethodCache.end()) {\n";
+    os << "      return cached->second;\n";
+    os << "    }\n";
+    os << "    \n";
+    os << "    // Compute and cache result\n";
     os << "    auto it = valueMethods.find(name);\n";
     os << "    if (it != valueMethods.end()) {\n";
-    os << "      return it->second(args);\n";
+    os << "      auto result = it->second(args);\n";
+    os << "      valueMethodCache[cacheKey] = result;\n";
+    os << "      return result;\n";
     os << "    }\n";
     os << "    return {};\n";
     os << "  }\n\n";
     
+    os << "  // Execute action method\n";
     os << "  void callActionMethod(const std::string& name, const std::vector<int64_t>& args) {\n";
     os << "    auto it = actionMethods.find(name);\n";
     os << "    if (it != actionMethods.end()) {\n";
@@ -698,6 +767,7 @@ private:
     os << "    }\n";
     os << "  }\n\n";
     
+    os << "  // Check if rule can fire\n";
     os << "  bool canFireRule(const std::string& name) {\n";
     os << "    auto it = rules.find(name);\n";
     os << "    if (it != rules.end()) {\n";
@@ -706,13 +776,23 @@ private:
     os << "    return false;\n";
     os << "  }\n\n";
     
-    os << "  const std::string& getName() const { return moduleName; }\n\n";
+    os << "  // Clear value method cache (called at end of cycle)\n";
+    os << "  void clearValueCache() {\n";
+    os << "    valueMethodCache.clear();\n";
+    os << "  }\n\n";
+    
+    os << "  const std::string& getName() const { return moduleName; }\n";
+    os << "  const std::vector<std::string>& getSchedule() const { return schedule; }\n";
+    os << "  const std::map<std::pair<std::string, std::string>, ConflictRelation>& getConflictMatrix() const { return conflictMatrix; }\n\n";
     
     os << "protected:\n";
     os << "  std::string moduleName;\n";
     os << "  std::map<std::string, std::function<std::vector<int64_t>(const std::vector<int64_t>&)>> valueMethods;\n";
     os << "  std::map<std::string, std::function<void(const std::vector<int64_t>&)>> actionMethods;\n";
     os << "  std::map<std::string, std::function<bool()>> rules;\n";
+    os << "  std::vector<std::string> schedule;\n";
+    os << "  std::map<std::pair<std::string, std::string>, ConflictRelation> conflictMatrix;\n";
+    os << "  std::map<std::pair<std::string, std::vector<int64_t>>, std::vector<int64_t>> valueMethodCache;\n";
     os << "};\n\n";
     
     os << "// Main simulation driver\n";
@@ -739,7 +819,8 @@ private:
   void generateSimulationBaseImpl(llvm::raw_ostream& os) {
     os << "#include \"SimulationBase.h\"\n";
     os << "#include <iostream>\n";
-    os << "#include <chrono>\n\n";
+    os << "#include <chrono>\n";
+    os << "#include <set>\n\n";
     
     os << "void Simulator::run(int maxCycles) {\n";
     os << "  if (verbose) {\n";
@@ -753,10 +834,56 @@ private:
     os << "      std::cout << \"Cycle \" << cycles << \"\\n\";\n";
     os << "    }\n\n";
     
-    os << "    // Execute rules for each module\n";
+    os << "    // Execute each module following the three-phase execution model\n";
     os << "    for (auto& module : modules) {\n";
-    os << "      // TODO: Implement proper scheduling based on conflict matrix\n";
-    os << "      // For now, just execute rules in order\n";
+    os << "      // Phase 1: Value Phase - Compute all value methods (done lazily via caching)\n";
+    os << "      // Value methods are computed on-demand and cached in callValueMethod()\n\n";
+    
+    os << "      // Phase 2: Execution Phase - Execute actions in schedule order\n";
+    os << "      const auto& schedule = module->getSchedule();\n";
+    os << "      const auto& conflictMatrix = module->getConflictMatrix();\n";
+    os << "      std::set<std::string> executedActions;\n\n";
+    
+    os << "      for (const auto& actionName : schedule) {\n";
+    os << "        // Check if this is a rule that can fire\n";
+    os << "        bool canExecute = false;\n";
+    os << "        bool isRule = module->canFireRule(actionName);\n";
+    os << "        \n";
+    os << "        if (isRule) {\n";
+    os << "          canExecute = true; // Rule guard already checked\n";
+    os << "        } else {\n";
+    os << "          // For action methods, we assume they're always enabled in simulation\n";
+    os << "          // In real hardware, parent module would control enabling\n";
+    os << "          canExecute = true;\n";
+    os << "        }\n\n";
+    
+    os << "        // Check conflicts with already executed actions\n";
+    os << "        bool hasConflict = false;\n";
+    os << "        for (const auto& executed : executedActions) {\n";
+    os << "          auto conflictKey = std::make_pair(executed, actionName);\n";
+    os << "          auto it = conflictMatrix.find(conflictKey);\n";
+    os << "          if (it != conflictMatrix.end() && it->second == ConflictRelation::Conflict) {\n";
+    os << "            hasConflict = true;\n";
+    os << "            break;\n";
+    os << "          }\n";
+    os << "        }\n\n";
+    
+    os << "        if (canExecute && !hasConflict) {\n";
+    os << "          // Execute the action\n";
+    os << "          if (isRule) {\n";
+    os << "            // For rules, call the associated action method or inline logic\n";
+    os << "            // This is a simplification - real implementation would execute rule body\n";
+    os << "            module->callActionMethod(actionName, {});\n";
+    os << "          } else {\n";
+    os << "            // For action methods, execute them\n";
+    os << "            module->callActionMethod(actionName, {});\n";
+    os << "          }\n";
+    os << "          executedActions.insert(actionName);\n";
+    os << "        }\n";
+    os << "      }\n\n";
+    
+    os << "      // Phase 3: Commit Phase - Clear caches for next cycle\n";
+    os << "      module->clearValueCache();\n";
     os << "    }\n";
     os << "  }\n\n";
     

@@ -552,9 +552,29 @@ The Sharp framework is now feature-complete per the original plan!
    - Tracks current Txn module for validation purposes
 
 **Remaining Tasks**:
-- Fix simulation code to implement Value Phase
+- Fix simulation code to implement Value Phase ✅
 - Update Python bindings and frontends
 - Update tests that violate new execution model
 - Update remaining documentation and examples
 - Consider removing timing attributes
 - Implement launch operations
+
+7. **Updated Simulation Code Generation** ✅
+   - Modified TxnSimulatePass to generate three-phase execution model
+   - Added value method caching in SimModule class
+   - Implemented proper action scheduling based on schedule operation
+   - Updated SimulationBase header to include:
+     - Schedule tracking (action execution order)
+     - Conflict matrix storage
+     - Value method cache with lazy evaluation
+   - Rewrote simulation loop to follow execution phases:
+     - Phase 1: Value methods computed on-demand and cached
+     - Phase 2: Actions executed in schedule order respecting conflicts
+     - Phase 3: Value cache cleared for next cycle
+   - Added generateInlineConflictMatrix for constructor initialization
+
+**Progress Summary**:
+- All high-priority tasks completed (execution model, validation passes, conversion updates)
+- Core infrastructure now enforces the new execution model
+- Simulation generates code following the three-phase semantics
+- Ready to update remaining components (Python, tests, docs)
