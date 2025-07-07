@@ -191,6 +191,8 @@ conflict_inside[a] = OR(conflict(M1, M2) && reach(m1) && reach(m2) for every m1,
 // can be reached from the root of the action (considering all txn.if conditions along the path)
 ```
 
+**NOTE**: The `static` mode uses the conflict matrix of current module to determine "Conflict with earlier actions" and uses the conflict matrices of the called modules to determine "Conflict inside an action".
+
 #### Dynamic Mode (Precise) 
 Dynamic mode uses reachability analysis to determine actual conflicts:
 
@@ -212,6 +214,8 @@ method_called[M] = OR{wf[a] && OR(reach(m, action) for m in M) for every action 
 ```
 conflict_with_earlier(m) = OR(method_called[M'] && conflict(M', M) for every M' in method_called)
 ```
+
+**NOTE**: The `dynamic` mode uses the conflict matrix of the called modules to determine "Conflict with earlier actions", which unifies all the conflict scenarios for the current action ("inside an action" and "with earlier actions" in `static` mode). The conflict matrix of the current module is not used for the current module's will-fire logic.
 
 **Trade-offs**:
 - Static mode: Simpler hardware, conservative conflict resolution, may block valid concurrent executions

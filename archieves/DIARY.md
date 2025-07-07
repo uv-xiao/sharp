@@ -808,3 +808,50 @@ The Sharp framework is now feature-complete per the original plan!
 - MLIR nested symbol references use @module::@method syntax with two @ symbols
 - Symbol reference parsing requires careful handling of root vs leaf references
 - Multi-cycle infrastructure requires careful separation of immediate vs deferred execution
+
+## July 7, 2025
+
+**User Request**: "Move forward STATUS.md: 1. **JIT Lowering**, 2. **Fix Empty When Block Issue**, 3. **Guard evaluation**, and 4. **Will-Fire Logic Enhancement**"
+
+**Task**: Fix JIT lowering of txn.return and txn.if operations
+
+**Work Completed**:
+
+1. **JIT Lowering Analysis** ✅
+   - Identified txn.if and txn.return operations not being lowered properly
+   - Discovered missing conversion patterns in TxnToFuncPass
+   - Found issues with region handling in if conversion
+
+2. **Fixed Conversion Patterns** ✅
+   - Implemented IfToSCFIfPattern to convert txn.if to scf.if
+   - Fixed ActionMethodToFuncPattern to handle return types correctly
+   - Updated abort pattern to handle scf.if context properly
+   - Fixed region handling to create single-block regions for scf.if
+
+3. **Infrastructure Fixes** ✅
+   - Added SCF dialect to dependent dialects in Passes.td
+   - Added X86 target libraries to sharp-opt CMakeLists.txt:
+     - LLVMX86CodeGen, LLVMX86AsmParser, LLVMX86Desc, LLVMX86Info
+   - Fixed linker errors for JIT execution
+
+4. **Testing** ✅
+   - Created test/Simulation/jit-lowering.mlir
+   - Verified conversion produces correct func/scf operations
+   - Confirmed JIT pipeline works for control flow operations
+
+**Technical Achievements**:
+- Complete txn→func→scf→llvm lowering pipeline
+- Proper handling of nested operations in conversion patterns
+- Fixed LLVM target initialization for JIT execution
+
+**Key Learning**:
+- SCF dialect must be explicitly added to dependent dialects
+- Region conversion requires careful handling of block structure
+- LLVM target libraries must be linked for JIT execution
+- Conversion patterns must handle parent context (e.g., abort inside scf.if)
+
+**MLIR Development Lessons Documented**:
+- Created comprehensive MLIR development guide in CLAUDE.md
+- Documented TableGen patterns and namespace resolution
+- Listed common errors and their solutions
+- Provided build system integration guidance

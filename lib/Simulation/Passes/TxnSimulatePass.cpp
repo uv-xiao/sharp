@@ -14,6 +14,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/ExecutionEngine/ExecutionEngine.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -24,6 +25,9 @@
 #include "mlir/Transforms/Passes.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
+#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
+#include "mlir/Target/LLVMIR/Dialect/All.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Path.h"
@@ -1381,15 +1385,17 @@ public:
   JitExecutionContext(mlir::ModuleOp module) : module(module) {}
   
   mlir::LogicalResult initialize() {
-    // Create execution engine
+    // Create execution engine options
     mlir::ExecutionEngineOptions options;
-    // Note: transformer is a function_ref, so the lambda must outlive this scope
-    // For now, we'll just not set a transformer
+    // We don't need a transformer since translation interfaces are registered globally
     
     auto maybeEngine = mlir::ExecutionEngine::create(module, options);
     if (!maybeEngine) {
-      // Consume the error to avoid the assertion
-      llvm::consumeError(maybeEngine.takeError());
+      // Log the error before consuming it
+      auto err = maybeEngine.takeError();
+      llvm::handleAllErrors(std::move(err), [&](const llvm::ErrorInfoBase &E) {
+        llvm::errs() << "ExecutionEngine creation failed: " << E.message() << "\n";
+      });
       return mlir::failure();
     }
     
@@ -1508,6 +1514,12 @@ struct TxnSimulatePass : public impl::TxnSimulatePassBase<TxnSimulatePass> {
       // Add lowering passes
       pm.addPass(mlir::sharp::createConvertTxnToFuncPass());
       pm.addPass(mlir::createCanonicalizerPass());
+      
+      // Convert SCF to control flow
+      pm.addPass(mlir::createSCFToControlFlowPass());
+      
+      // Convert arith to LLVM
+      pm.addPass(mlir::createArithToLLVMConversionPass());
       
       // Convert func to LLVM dialect
       pm.addPass(mlir::createConvertFuncToLLVMPass());

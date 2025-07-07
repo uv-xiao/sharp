@@ -85,7 +85,8 @@ def ConvertTxnToFuncPass : Pass<"convert-txn-to-func", "mlir::ModuleOp"> {
   let dependentDialects = [
     "::sharp::txn::TxnDialect",
     "::mlir::func::FuncDialect",
-    "::mlir::arith::ArithDialect"
+    "::mlir::arith::ArithDialect",
+    "::mlir::scf::SCFDialect"
   ];
 }
 

@@ -42,6 +42,10 @@ target_link_libraries(sharp-opt PRIVATE
   CIRCTArc
   CIRCTArcToLLVM
   CIRCTSupport
+  LLVMX86CodeGen
+  LLVMX86AsmParser
+  LLVMX86Desc
+  LLVMX86Info
 )
 
 # Make it part of the default build

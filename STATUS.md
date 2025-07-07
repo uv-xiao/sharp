@@ -241,15 +241,21 @@ Sharp is a transaction-based hardware description language with conflict matrix 
     - Support for bounded/unbounded channels
     - Thread scheduling optimization (SCHED_FIFO support)
   
-- **JIT Compilation Mode** ✅ (2025-07-04)
+- **JIT Compilation Mode** ✅ (2025-07-04, Updated 2025-07-07)
   - Created TxnToFunc conversion pass infrastructure
   - Implemented conversion patterns for all txn operations
   - Set up JIT lowering pipeline: txn → func → LLVM → JIT
   - Integrated ExecutionEngine support in TxnSimulatePass
   - Fixed dependency issues (added UB dialect support)
   - Pass infrastructure complete with proper TableGen integration
-  - Basic JIT compilation working for simple modules
-  - Current limitations: Control flow operations (txn.if) need proper lowering
+  - **Fixed control flow lowering (2025-07-07)**:
+    - Implemented IfToSCFIfPattern for txn.if → scf.if conversion
+    - Fixed region handling to create single-block regions
+    - Added proper txn.yield → scf.yield conversion
+    - Fixed txn.abort handling inside scf.if blocks
+    - Added X86 target libraries (LLVMX86CodeGen, etc.) to sharp-opt
+    - Added SCF dialect to dependent dialects
+  - JIT compilation now working for modules with control flow
   
 - **RTL Simulation Integration** ✅ (2025-07-04)
   - Implemented complete ArcilatorIntegrationPass (`--sharp-arcilator`)
@@ -485,25 +491,11 @@ Sharp is a transaction-based hardware description language with conflict matrix 
 
 ## Next Steps
    
-1. **JIT Lowering**
-  - fix the lowering of `txn.return` and `txn.if`
-   
-2. **Enhanced Analysis**
-   - Add performance analysis passes
-   - Create resource utilization estimates
-   - Implement power consumption modeling
-   
-3. **Fix Empty When Block Issue**
+1. **Fix Empty When Block Issue**
    - Update TxnToFIRRTL conversion to avoid empty when regions
    - Ensure all action bodies generate valid FIRRTL
-   
-4. **Tooling and Integration**
-   - Fix Python bindings for programmatic access
-   - Create VSCode/IDE language support
-   - Add debugging and visualization tools
-   - Implement VCD trace generation for waveform viewing
 
-5. **Guard evaluation**
+2. **Guard evaluation**
    - A guard of an action is evaluated to check if the action can be fired for both `txn-to-firrtl` and simulation.
    - I'm not sure if the action guard contains the call to another action, how this is handled.
    - The correct way is: 
@@ -513,6 +505,19 @@ Sharp is a transaction-based hardware description language with conflict matrix 
      - This is consistent with the Will-Fire Logic in `docs/txn_to_firrtl.md` and the execution model in `docs/execution_model.md`, the only difference is that the in-guard actions need to be tried.
    - Check if current implementation is consistent with the above. Fix if not.
 
-6. **Most Dynamic Mode**
+3. **Will-Fire Logic Enhancement**
+   - I've added more clarification in `docs/txn_to_firrtl.md` for the difference between `static` and `dynamic` mode. Check the code and the documentation to guarentee the correctness of the implementation.
    - In addition to `static` and `dynamic` mode, the `txn-to-firrtl` can also have a `most-dynamic` mode.
-   - The action tracking must be conducted on the **primitive action** level, not the **instance action** level.
+    - The difference between `most-dynamic` and `dynamic` is that the `most-dynamic` tracks action execution on the **primitive action** level, not the **instance action** level: for example, when a previous action calls an instance method `@i::m0`, the method call tracking (`method_called` in `docs/txn_to_firrtl.md`) should not only track the instance method `@i::m0`, but also all the primitive actions that are called by `@i::m0` (e.g., `@i::@r::read`, `@i::@r::write`, etc.). Then for will-fire logic, current action `a`'s conflict with earlier actions should be checked not only by querying whether `a` has conflict with any of the tracked actions, but also by checking whether `a`'s primitive actions have conflict with any of the tracked actions.
+    - This may require a new analysis pass to collect the primitive actions called by any action, rather than infering the conflict matrix (which is a conservative approach).
+
+4. **Tooling and Integration**
+   - Fix Python bindings for programmatic access
+   - Create VSCode/IDE language support
+   - Add debugging and visualization tools
+   - Implement VCD trace generation for waveform viewing
+
+5. **Enhanced Analysis**
+   - Add performance analysis passes
+   - Create resource utilization estimates
+   - Implement power consumption modeling

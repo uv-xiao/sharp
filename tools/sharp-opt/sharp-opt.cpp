@@ -37,6 +37,8 @@
 #include "sharp/Analysis/Passes.h"
 #include "sharp/Conversion/Passes.h"
 #include "sharp/Simulation/Passes.h"
+#include "mlir/Target/LLVMIR/Dialect/All.h"
+#include "llvm/Support/TargetSelect.h"
 
 namespace {
 
@@ -78,6 +80,11 @@ void registerSharpPipelines() {
 } // namespace
 
 int main(int argc, char **argv) {
+  // Initialize LLVM targets for JIT execution
+  llvm::InitializeNativeTarget();
+  llvm::InitializeNativeTargetAsmPrinter();
+  llvm::InitializeNativeTargetAsmParser();
+  
   // Register all passes and dialects
   mlir::registerAllPasses();
   mlir::sharp::registerPasses();
@@ -99,6 +106,9 @@ int main(int argc, char **argv) {
   ::sharp::registerAllDialects(registry);
   circt::registerAllDialects(registry);
   mlir::registerAllDialects(registry);
+  
+  // Register LLVM translation interfaces for JIT execution
+  mlir::registerAllToLLVMIRTranslations(registry);
 
   return mlir::asMainReturnCode(
       mlir::MlirOptMain(argc, argv, "Sharp optimizer driver\n", registry));
