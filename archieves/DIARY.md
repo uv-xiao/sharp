@@ -1,5 +1,117 @@
 # Sharp Development Diary
 
+## 2025-07-06 (Session 2) - Multi-cycle Execution Implementation
+
+### User Request
+Continue with: "Move on: - Consider removing timing attributes... - Implement launch operations..."
+
+### Work Completed
+
+**Morning/Afternoon: Multi-cycle Execution**
+1. **Removed Timing Attributes**:
+   - Confirmed timing attributes (combinational/static/dynamic) were not used
+   - Removed from ValueMethodOp, ActionMethodOp, and RuleOp in TxnOps.td
+   - Cleaned up all test files removing timing attribute references
+   - PreSynthesisCheck.cpp already handled gracefully
+
+2. **Implemented Launch Operations**:
+   - Added FutureOp: Region container for multi-cycle actions
+   - Added LaunchOp: Deferred execution with dependencies and latency
+   - Final syntax: `txn.launch until %cond after N { ... }`
+   - Implemented LaunchOp::verify() for validation
+   - Updated execution_model.md with launch semantics
+
+3. **Technical Challenges**:
+   - Assembly format conflicts between `{latency=N}` and region syntax
+   - Tried multiple approaches: `@N`, `(latency = N)`, settled on `after N`
+   - Complex header file include issues with generated code
+   - TableGen assembly format limitations
+
+4. **Build Issues Encountered**:
+   - TableGen-generated code has namespace resolution problems
+   - Generated methods like `getODSOperands()` calling `getOperation()` incorrectly
+   - `getBody()` method generating `(*this)->getRegion(0)` with incorrect syntax
+   - Namespace issue: types being resolved as `sharp::txn::mlir::` instead of `::mlir::`
+   - Fixed extraClassDeclaration to provide required interface methods
+   - Changed AnyRegion to SizedRegion<1> for proper generation
+
+**Files Modified**:
+- include/sharp/Dialect/Txn/TxnOps.td
+- lib/Dialect/Txn/TxnOps.cpp
+- docs/execution_model.md
+- test/Dialect/Txn/multi-cycle.mlir
+- test/Dialect/Txn/launch-simple.mlir
+- include/sharp/Dialect/Txn/TxnOps.h
+- Various test files (timing removal)
+
+**Status**: Launch operations defined but build is blocked by TableGen namespace issues. Need to resolve build errors before proceeding with conversion/simulation support.
+
+## 2025-07-06 - Execution Model Refinement
+
+### User Request
+Continuing from STATUS.md's in-progress task: "Clarifying Execution Semantics and Model across the Whole Project"
+
+### Work Completed
+
+**Morning/Afternoon: Execution Model Clarification**
+1. **Updated `docs/execution_model.md`**:
+   - Clarified three-phase execution: Value Phase → Execution Phase → Commit Phase
+   - Removed scheduling phase (schedules are fixed in MLIR, not dynamic)
+   - Clarified terminology: "action" = "rule" + "action method"
+   - Documented that value methods are NOT schedulable
+
+2. **Created Three New Analysis Passes**:
+   - `ScheduleValidation`: Ensures schedules only contain actions, not value methods
+   - `ValueMethodConflictCheck`: Verifies value methods are conflict-free (CF) with all actions
+   - `ActionCallValidation`: Prevents actions from calling other actions in same module
+
+3. **Updated TxnToFIRRTL Conversion**:
+   - Now rejects value methods in schedules with error (not skip)
+   - Validates action-to-action calls are prohibited
+   - Added comprehensive error messages
+
+4. **Updated Simulation Code Generation**:
+   - Implemented three-phase execution model in TxnSimulatePass
+   - Added value method caching (computed once per cycle)
+   - Proper scheduling based on fixed schedule operation
+
+5. **Fixed Python Bindings**:
+   - Removed deprecated SB (SequenceBefore) and SA (SequenceAfter) relations
+   - Updated ConflictRelation enum to only have C and CF
+   - Updated PySharp common.py to match
+
+6. **Updated All Tests**:
+   - Fixed ~20 test files to remove value methods from schedules
+   - Updated conflict matrices to use only C/CF relations
+   - Fixed primitive method calls to use :: syntax
+   - Created new test files for validation passes
+
+7. **Updated Documentation**:
+   - Fixed txn.md to remove SB/SA documentation
+   - Updated txn_to_firrtl.md to reflect fixed scheduling
+   - Updated examples to match new execution model
+
+### Technical Insights
+- The move from dynamic scheduling to fixed scheduling simplifies the execution model
+- Value methods being non-schedulable ensures they're truly side-effect free
+- The three-phase model matches standard synchronous hardware semantics
+- Removing SB/SA relations reduces complexity while maintaining expressiveness
+
+### Next Steps
+- Consider removing timing attributes (combinational/static/dynamic) as they're no longer used
+- Implement launch operations for multi-cycle execution as specified in execution_model.md
+
+### Key Clarifications from User
+- SA/SB relations are ESSENTIAL and must be kept for:
+  - Partial schedule constraints (when schedule is not fully determined)
+  - Propagating constraints from instance actions to parent module
+  - ActionScheduling pass to complete partial schedules
+  - Computing conflict function for instance method calls
+- Value methods must be always ready:
+  - Cannot be in schedules (only actions are schedulable)
+  - Must have CF (Conflict-Free) relations with ALL other methods
+  - Cannot have SA/SB/C relations as they could lead to conflicts
+
 ## 2025-06-29 - Initial Directory and Extension Addition
 
 ### User Request
@@ -578,3 +690,121 @@ The Sharp framework is now feature-complete per the original plan!
 - Core infrastructure now enforces the new execution model
 - Simulation generates code following the three-phase semantics
 - Ready to update remaining components (Python, tests, docs)
+
+### Evening Session 1: Launch Operations Implementation
+
+**User Request**: Fix namespace issue and proceed with conversion/simulation support for launch operations
+
+**Task**: Implement launch operations for multi-cycle execution per STATUS.md
+
+**Work Completed**:
+
+1. **Removed Timing Attributes** ✅
+   - Confirmed timing attributes (combinational/static/dynamic) were not used anywhere
+   - Removed from ValueMethodOp, ActionMethodOp, and RuleOp in TxnOps.td
+   - Updated all test files to remove timing attribute references
+   - Cleaned up documentation
+
+2. **Implemented Launch Operations** ✅
+   - Added FutureOp to TxnOps.td: Encloses multi-cycle actions with launches
+   - Added LaunchOp to TxnOps.td: Deferred execution with dependencies/latency
+   - Syntax supports:
+     - Static latency: `txn.launch after N { ... }`
+     - Dynamic dependency: `txn.launch until %cond { ... }`
+     - Combined: `txn.launch until %cond after N { ... }`
+   - Implemented LaunchOp verifier:
+     - Ensures body region is not empty
+     - Requires txn.yield terminator
+     - Must have either condition or latency
+
+3. **Fixed Build Issues** ✅
+   - Initial problem: TableGen-generated code had namespace resolution issues
+   - Root cause: Generated operations were in `sharp::txn` namespace but couldn't find MLIR types
+   - Solution:
+     - Added BytecodeOpInterface include to TxnOps.h
+     - Fixed all extraClassDeclaration blocks to use fully-qualified types (::mlir::)
+     - Fixed OpBuilder declarations to use ::mlir:: namespace
+     - Removed inner namespace approach that was causing confusion
+   - Build now succeeds with all operations properly generated
+
+4. **Added Conversion and Simulation Support** ✅
+   - TxnToFIRRTL conversion:
+     - Added handling for FutureOp and LaunchOp
+     - Currently emits error: "not yet supported in FIRRTL conversion"
+     - Created test file to verify error handling
+   - Simulation support:
+     - Added handling in TxnSimulatePass for both operations
+     - Generates TODO comments for multi-cycle execution
+     - LaunchOp generates completion signal (always 1 for now)
+     - Fixed latency attribute access (using optional correctly)
+
+5. **Testing** ✅
+   - Created `test/Dialect/Txn/launch-simple.mlir` to verify parsing
+   - Created `test/Dialect/Txn/launch-conversion-error.mlir` for FIRRTL error
+   - All tests pass correctly
+   - Launch operations parse and build successfully
+
+**Technical Details**:
+- FutureOp uses SingleBlock and NoTerminator traits
+- LaunchOp returns an i1 "done" signal for completion tracking
+- Assembly format supports clean syntax without extra braces
+- Operations are documented in execution_model.md (already existed)
+
+**Status**: Launch operations are fully implemented at the syntax/parsing level. Full synthesis support requires additional multi-cycle infrastructure in the conversion and simulation backends.
+
+**Key Learning**: TableGen namespace issues can be tricky. The solution is to either include generated code outside namespaces (like CIRCT does) or use fully-qualified types in all TableGen definitions.
+
+### Evening Session 2: Multi-Cycle Simulation Implementation
+
+**User Request**: Implement and test the multi-cycle simulation infrastructure according to docs/execution_model.md
+
+**Work Completed**:
+
+1. **Multi-Cycle Execution Infrastructure** ✅
+   - Added LaunchState struct to track launch execution state (Pending → Running → Completed)
+   - Added MultiCycleExecution struct to track multi-cycle action state
+   - Created MultiCycleSimModule class extending SimModule with multi-cycle support
+   - Implemented updateMultiCycleExecutions method to process launches each cycle
+   - Modified simulator loop to call updateMultiCycleExecutions for multi-cycle modules
+
+2. **Code Generation Updates** ✅
+   - Modified TxnSimulatePass to detect modules with multi-cycle actions
+   - Generate MultiCycleSimModule base class for modules containing FutureOp
+   - Added generateMultiCycleActionMethod for multi-cycle action code generation
+   - Added generateMultiCycleRule for multi-cycle rule code generation
+   - Generate per-cycle actions that execute immediately
+   - Generate launch bodies with full operation support
+
+3. **Launch Operation Support** ✅
+   - Static latency tracking with targetCycle calculation
+   - Dynamic dependency tracking via conditionName lookup
+   - Launch body generation with arithmetic operations and primitive calls
+   - Proper state machine for launch execution
+
+4. **Bug Fixes** ✅
+   - Fixed primitive state access bug (count.read_data → count_data)
+   - Fixed symbol reference parsing for nested calls (@count::@read syntax)
+   - Fixed build errors with proper namespace resolution
+   - Fixed unused variable warnings
+
+5. **Comprehensive Testing** ✅
+   - Created multi-cycle-simulation.mlir with all launch types
+   - Created multi-cycle-static-launch.mlir for static latency testing
+   - Created multi-cycle-dynamic-launch.mlir for dependency testing
+   - Created multi-cycle-rule.mlir for multi-cycle rule testing
+   - Created multi-cycle-combined.mlir for combined launch testing
+   - Created multi-cycle-firrtl-error.mlir to verify FIRRTL error handling
+   - All tests pass and generate correct C++ code
+
+**Technical Achievements**:
+- Complete multi-cycle execution tracking with proper state management
+- Launch dependency resolution using string-based naming
+- Panic behavior for failed static launches
+- Retry behavior for dynamic launches
+- Per-cycle actions execute before any launches start
+- Full operation support in launch bodies (arithmetic, primitive calls)
+
+**Key Learning**: 
+- MLIR nested symbol references use @module::@method syntax with two @ symbols
+- Symbol reference parsing requires careful handling of root vs leaf references
+- Multi-cycle infrastructure requires careful separation of immediate vs deferred execution

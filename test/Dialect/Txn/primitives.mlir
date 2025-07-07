@@ -18,17 +18,11 @@ txn.primitive @RegisterPrimitive type = "hw" interface = !txn.module<"RegisterPr
   // CHECK: txn.reset_by @rst
   txn.reset_by @rst
   
-  // CHECK: txn.schedule [@read, @write] {
-  // CHECK-DAG: "read,read" = 3 : i32
-  // CHECK-DAG: "read,write" = 3 : i32
-  // CHECK-DAG: "write,read" = 3 : i32
+  // CHECK: txn.schedule [@write] {
   // CHECK-DAG: "write,write" = 2 : i32
   // CHECK: }
-  txn.schedule [@read, @write] {
+  txn.schedule [@write] {
     conflict_matrix = {
-      "read,read" = 3 : i32,    // CF
-      "read,write" = 3 : i32,   // CF
-      "write,read" = 3 : i32,   // CF
       "write,write" = 2 : i32   // C
     }
   }
@@ -50,17 +44,11 @@ txn.primitive @WirePrimitive type = "hw" interface = !txn.module<"WirePrimitive"
   // CHECK: txn.reset_by @rst
   txn.reset_by @rst
   
-  // CHECK: txn.schedule [@read, @write] {
-  // CHECK-DAG: "read,read" = 3 : i32
-  // CHECK-DAG: "read,write" = 0 : i32
-  // CHECK-DAG: "write,read" = 1 : i32
+  // CHECK: txn.schedule [@write] {
   // CHECK-DAG: "write,write" = 2 : i32
   // CHECK: }
-  txn.schedule [@read, @write] {
+  txn.schedule [@write] {
     conflict_matrix = {
-      "read,read" = 3 : i32,    // CF
-      "read,write" = 0 : i32,   // SB (read before write)
-      "write,read" = 1 : i32,   // SA
       "write,write" = 2 : i32   // C
     }
   }
@@ -82,8 +70,8 @@ txn.primitive @SpecPrimitive type = "spec" interface = !txn.module<"SpecPrimitiv
     txn.return
   }
   
-  // CHECK: txn.schedule [@getValue, @setValue]
-  txn.schedule [@getValue, @setValue]
+  // CHECK: txn.schedule [@setValue]
+  txn.schedule [@setValue]
 }
 
 // Test module using primitives

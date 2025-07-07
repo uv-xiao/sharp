@@ -32,7 +32,7 @@ def __exit_ctxt():
 
 # Core imports
 from .common import (Clock, Reset, Input, Output, ConflictRelation,
-                     SequenceBefore, SequenceAfter, Conflict, ConflictFree)
+                     Conflict, ConflictFree, C, CF)
 from .module import (Module, module, value_method, action_method, rule)
 from .types import (types, i1, i8, i16, i32, i64, i128, uint, sint)
 from .signals import (Signal, Const, Wire, Reg)

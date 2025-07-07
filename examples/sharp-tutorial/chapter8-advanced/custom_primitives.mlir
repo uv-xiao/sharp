@@ -42,9 +42,9 @@ txn.primitive @Arbiter<clients: i32> {
   }
   
   txn.conflict_matrix {
-    "request,grant" = 0 : i32,     // SB
-    "grant,release" = 0 : i32,     // SB
-    "request,release" = 1 : i32    // SA
+    "request,grant" = 2 : i32,     // C
+    "grant,release" = 2 : i32,     // C
+    "request,release" = 2 : i32    // C
   }
 }
 

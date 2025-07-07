@@ -34,9 +34,9 @@ def create_counter(width=32):
             if count.read() < (2**width - 1):
                 m.call("increment")
         
-        # Define schedule with conflicts
+        # Define schedule with conflicts (only actions, not value methods)
         m.schedule(
-            methods=["read", "increment", "reset", "auto_increment"],
+            methods=["increment", "reset", "auto_increment"],
             conflicts={
                 ("increment", "reset"): ConflictType.C,
                 ("increment", "auto_increment"): ConflictType.C,

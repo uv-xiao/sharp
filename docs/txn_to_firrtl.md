@@ -531,8 +531,8 @@ bool checkConflict(StringRef a1, StringRef a2, ConversionContext &ctx) {
     case ConflictRelation::SB: // a1 before a2
       return ctx.willFireSignals[a1] != nullptr;
       
-    case ConflictRelation::SA: // a1 after a2 (shouldn't happen)
-      assert(false && "Invalid schedule order");
+    case ConflictRelation::SA: // a1 after a2 (shouldn't happen in well-ordered schedule)
+      assert(false && "Invalid schedule order - SA constraint violated");
       
     case ConflictRelation::CF: // Conflict-free
       break;

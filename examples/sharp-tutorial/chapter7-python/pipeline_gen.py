@@ -62,9 +62,9 @@ def create_pipeline(stages=3, width=32, operations=None):
             """Auto-advance pipeline"""
             m.call("advance")
         
-        # Schedule with proper conflicts
+        # Schedule with proper conflicts (only actions, not value methods)
         m.schedule(
-            methods=["input", "advance", "output", "clock"],
+            methods=["input", "advance", "clock"],
             conflicts={
                 ("input", "advance"): ConflictType.C,
                 ("advance", "clock"): ConflictType.CF

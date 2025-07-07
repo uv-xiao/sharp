@@ -218,6 +218,214 @@ Claude Code should note down the development progress in `archieves/DIARY.md`. I
 
 ## Critical Implementation Insights
 
+### MLIR Development Guide - Hard-Earned Lessons
+
+#### 1. **TableGen Operation Definitions**
+
+**Common Pitfalls and Solutions:**
+
+1. **Namespace Resolution Issues**
+   - **Problem**: TableGen-generated code in `sharp::txn` namespace can't find MLIR types
+   - **Solution**: Use fully-qualified types in TableGen:
+   ```tablegen
+   let extraClassDeclaration = [{
+     ::mlir::Value getCondition() { return getOperation()->getOperand(0); }
+     ::mlir::Block& getBody() { return getRegion().front(); }
+     static ::mlir::OpBuilder::InsertPoint createBuilder(::mlir::OpBuilder &builder);
+   }];
+   ```
+
+2. **Operation Constructor Issues**
+   - **Problem**: Missing optional attributes cause build errors
+   - **Solution**: Always provide all attributes, use empty constructors for optional:
+   ```cpp
+   // Wrong
+   auto op = builder.create<FutureOp>(loc);
+   
+   // Correct
+   auto op = builder.create<FutureOp>(loc, 
+     /*attributes=*/builder.getDictionaryAttr({}),
+     /*properties=*/nullptr);
+   ```
+
+3. **Region and Block Handling**
+   - Use `SizedRegion<1>` instead of `AnyRegion` for better code generation
+   - Add proper traits: `SingleBlock`, `NoTerminator`, or `SingleBlockImplicitTerminator`
+   - For operations with regions, define builders in C++:
+   ```cpp
+   void FutureOp::build(OpBuilder &builder, OperationState &result) {
+     Region *region = result.addRegion();
+     Block *block = builder.createBlock(region);
+     builder.setInsertionPointToStart(block);
+   }
+   ```
+
+#### 2. **Pass Implementation Patterns**
+
+**Structure:**
+```cpp
+// In Passes.td
+def MyPass : Pass<"sharp-my-pass", "mlir::ModuleOp"> {
+  let summary = "...";
+  let constructor = "mlir::sharp::createMyPass()";
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
+// In MyPass.cpp
+#define GEN_PASS_DEF_MYPASS
+#include "sharp/Analysis/Passes.h.inc"
+
+namespace {
+class MyPass : public impl::MyPassBase<MyPass> {
+  void runOnOperation() override {
+    // Implementation
+  }
+};
+}
+
+std::unique_ptr<mlir::Pass> mlir::sharp::createMyPass() {
+  return std::make_unique<MyPass>();
+}
+```
+
+**Common Issues:**
+- Forgetting `#define GEN_PASS_DEF_*` before include
+- Not implementing the constructor function
+- Missing dependent dialects causing undefined references
+
+#### 3. **CMakeLists.txt Patterns**
+
+**Correct dependency management:**
+```cmake
+add_mlir_dialect_library(SharpTxn
+  TxnDialect.cpp
+  TxnOps.cpp
+  
+  ADDITIONAL_HEADER_DIRS
+  ${SHARP_MAIN_INCLUDE_DIR}/sharp/Dialect/Txn
+  
+  DEPENDS
+  MLIRTxnIncGen  # TableGen targets
+  
+  LINK_LIBS PUBLIC
+  MLIRIR
+  MLIRFuncDialect
+  # List ALL dependencies explicitly
+)
+```
+
+**Common Build Errors:**
+- **Undefined references**: Missing LINK_LIBS entries
+- **Include errors**: Wrong ADDITIONAL_HEADER_DIRS
+- **TableGen errors**: Missing DEPENDS on *IncGen targets
+
+#### 4. **Symbol References and Method Calls**
+
+**MLIR Symbol Reference Syntax:**
+```mlir
+// Nested symbol reference (instance method call)
+%result = txn.call @instance::@method(%arg) : (i32) -> i32
+
+// Direct symbol reference (module-level method)
+%result = txn.call @method(%arg) : (i32) -> i32
+```
+
+**In C++ handling:**
+```cpp
+auto callee = callOp.getCallee();
+StringRef rootRef = callee.getRootReference().getValue();  // "instance"
+StringRef leafRef = callee.getLeafReference().getValue();  // "method"
+```
+
+#### 5. **Python Bindings**
+
+**Key Learning**: Extend existing bindings, don't create parallel structures
+```cmake
+# Correct approach
+mlir_configure_python_dev_packages()
+declare_mlir_python_extension(SharpPythonExtension
+  MODULE_NAME _sharp
+  ADD_TO_PARENT circt.dialects  # Extend CIRCT
+  SOURCES
+    SharpModule.cpp
+)
+```
+
+#### 6. **Testing Patterns**
+
+**FileCheck best practices:**
+```mlir
+// RUN: sharp-opt %s --my-pass | FileCheck %s
+// RUN: not sharp-opt %s --verify-diagnostics 2>&1 | FileCheck %s --check-prefix=ERROR
+
+// CHECK-LABEL: txn.module @MyModule
+// CHECK-NEXT: %[[REG:.*]] = txn.instance
+// CHECK: txn.call @[[REG]]::@read()
+
+// ERROR: error: expected failure message
+```
+
+#### 7. **Common MLIR Patterns to Follow**
+
+1. **Include Order**: Project headers → MLIR headers → LLVM headers → Standard headers
+2. **Namespace Usage**: 
+   ```cpp
+   using namespace mlir;
+   using namespace sharp;
+   using namespace sharp::txn;  // After includes
+   ```
+3. **Pass Registration**: Use anonymous namespace for pass class
+4. **Error Handling**: Use `emitError()` on operations, not `llvm::errs()`
+5. **Type Handling**: Prefer `cast<>` over `dyn_cast<>` when type is known
+
+#### 8. **Debugging Build Issues**
+
+**When you get cryptic build errors:**
+
+1. **"unknown type name" in generated code**
+   - Check if you need `::mlir::` prefix in TableGen
+   - Verify all necessary includes in the .h file
+   - Example fix: `Region&` → `::mlir::Region&`
+
+2. **"undefined reference to vtable"**
+   - Missing method implementation
+   - Forgot to include generated .cpp.inc file
+   - Check if operation needs custom parser/printer
+
+3. **"no member named 'getODSOperands'"**
+   - TableGen generation issue
+   - Check operation traits and base class
+   - Verify `arguments` and `results` definitions
+
+4. **Iterator/accessor errors**
+   - Wrong accessor pattern for regions/blocks
+   - Use `getBody().front()` not `getBody()[0]`
+   - Check iterator vs direct access
+
+#### 9. **Operation Definition Checklist**
+
+When adding a new operation:
+- [ ] Define in Ops.td with proper traits
+- [ ] Add to CMakeLists.txt DEPENDS
+- [ ] Implement verifier if `hasVerifier = 1`
+- [ ] Implement builders if has regions
+- [ ] Add parser/printer if `hasCustomAssemblyFormat = 1`
+- [ ] Create test file in test/Dialect/
+- [ ] Update Python bindings if user-facing
+- [ ] Document in relevant .md files
+
+#### 10. **Real Examples from Sharp Development**
+
+**LaunchOp Implementation Journey:**
+1. Started with simple TableGen definition
+2. Hit namespace issues → added `::mlir::` prefixes
+3. Region accessor problems → changed to `SizedRegion<1>`
+4. Builder issues → implemented custom build() method
+5. Assembly format conflicts → simplified syntax
+6. Optional attribute handling → used `OptionalAttr<I32Attr>`
+
+**Key lesson**: Start simple, build incrementally, test at each step
+
 ### Primitive Implementation Pattern
 When implementing new primitives:
 1. Use correct operation constructors with all optional parameters
@@ -231,6 +439,8 @@ When implementing new primitives:
 2. **Primitive Instance Types**: Use parametric syntax `@instance of @Primitive<Type>`
 3. **Method Calls**: Use `::` syntax for instance method calls
 4. **FileCheck Tests**: Use `not` command for tests expecting failure, redirect stderr with `2>&1`
+5. **Optional Handling**: Use `.value_or()` or check `.has_value()` before `.value()`
+6. **Builder Context**: Always set insertion point when creating blocks
 
 ### Testing Best Practices
 - Run `pixi run test` frequently during development

@@ -209,6 +209,40 @@ txn.abort
 ```
 Causes the current transaction to fail and rollback.
 
+### Multi-Cycle Operations
+
+```mlir
+// Future block encloses multi-cycle operations
+txn.future {
+  // Launch operations go here
+}
+
+// Launch with static latency
+%done1 = txn.launch after 3 {
+  // Actions to execute after 3 cycles
+  txn.yield
+}
+
+// Launch with dynamic dependency
+%done2 = txn.launch until %done1 {
+  // Actions to execute after %done1 completes
+  txn.yield  
+}
+
+// Combined: dependency + latency
+%done3 = txn.launch until %done2 after 1 {
+  // Execute 1 cycle after %done2 completes
+  txn.yield
+}
+```
+
+**Multi-cycle semantics**:
+- Actions before `txn.future` execute immediately (per-cycle)
+- Launch operations define deferred execution
+- Static launches (`after N`) must succeed or panic
+- Dynamic launches (`until %cond`) retry until successful
+- Launch results (`%done`) track completion for dependencies
+
 ## Additional Operations
 
 ### FIRRTL Bridge Operations

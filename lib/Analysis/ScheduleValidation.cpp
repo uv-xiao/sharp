@@ -16,6 +16,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/ADT/SmallVector.h"
 
 #define DEBUG_TYPE "sharp-schedule-validation"
 
@@ -63,34 +64,63 @@ LogicalResult ScheduleValidationPass::validateModule(txn::ModuleOp module) {
              << module.getSymName() << "\n");
   
   // Find the schedule operation
-  auto scheduleOp = module.getSchedule();
-  if (!scheduleOp) {
+  SmallVector<txn::ScheduleOp> schedules;
+  module.walk([&](txn::ScheduleOp schedule) {
+    schedules.push_back(schedule);
+  });
+  
+  if (schedules.empty()) {
     // No schedule is valid (module has no actions)
     return success();
   }
   
-  return validateSchedule(scheduleOp, module);
+  // Validate each schedule
+  for (auto schedule : schedules) {
+    if (failed(validateSchedule(schedule, module)))
+      return failure();
+  }
+  
+  return success();
 }
 
 LogicalResult ScheduleValidationPass::validateSchedule(txn::ScheduleOp schedule,
                                                        txn::ModuleOp module) {
-  auto actionNames = schedule.getActionNames();
+  auto actions = schedule.getActions();
   bool hasErrors = false;
   
-  for (const auto& actionRef : actionNames) {
-    auto actionName = actionRef.cast<FlatSymbolRefAttr>().getValue();
+  for (const auto& actionRef : actions) {
+    auto actionName = cast<FlatSymbolRefAttr>(actionRef).getValue();
     
     // Find the operation with this name
     Operation *op = nullptr;
-    module.walk([&](Operation *candidate) {
-      if (auto symbolOp = dyn_cast<SymbolOpInterface>(candidate)) {
-        if (symbolOp.getNameAttr() == actionName) {
-          op = candidate;
-          return WalkResult::interrupt();
+    
+    // Check rules
+    for (auto rule : module.getOps<RuleOp>()) {
+      if (rule.getSymName() == actionName) {
+        op = rule;
+        break;
+      }
+    }
+    
+    // Check action methods
+    if (!op) {
+      for (auto method : module.getOps<ActionMethodOp>()) {
+        if (method.getSymName() == actionName) {
+          op = method;
+          break;
         }
       }
-      return WalkResult::advance();
-    });
+    }
+    
+    // Check value methods
+    if (!op) {
+      for (auto method : module.getOps<ValueMethodOp>()) {
+        if (method.getSymName() == actionName) {
+          op = method;
+          break;
+        }
+      }
+    }
     
     if (!op) {
       schedule.emitError() << "scheduled action '" << actionName 

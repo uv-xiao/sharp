@@ -205,9 +205,9 @@ class ModuleBuilder:
     
     def _build_schedule(self):
         """Build the schedule operation."""
-        # Collect all schedulable names
+        # Collect all schedulable names (only actions: action methods and rules)
+        # According to Sharp's execution model, value methods are not scheduled
         schedulable_names = []
-        schedulable_names.extend(m['name'] for m in self.value_methods)
         schedulable_names.extend(m['name'] for m in self.action_methods)
         schedulable_names.extend(r['name'] for r in self.rules)
         

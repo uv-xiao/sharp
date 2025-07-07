@@ -179,31 +179,16 @@ private:
   
   void generateMethodExecution(mlir::Operation* method) {
     std::string methodName;
-    mlir::StringAttr timingAttr;
     
     if (auto vm = mlir::dyn_cast<txn::ValueMethodOp>(method)) {
       methodName = vm.getName().str();
-      timingAttr = vm.getTimingAttr();
     } else if (auto am = mlir::dyn_cast<txn::ActionMethodOp>(method)) {
       methodName = am.getName().str();
-      timingAttr = am.getTimingAttr();
     }
     
     os << "  ExecutionResult execute_" << methodName 
        << "(ArrayRef<Value> args) {\n";
     os << "    ExecutionResult result;\n";
-    
-    // Handle timing attributes for multi-cycle operations
-    if (timingAttr) {
-      std::string timing = timingAttr.str();
-      if (timing.find("static(") == 0) {
-        // Extract latency
-        auto latencyStr = timing.substr(7, timing.size() - 8);
-        os << "    // Multi-cycle operation: " << latencyStr << " cycles\n";
-        os << "    result.isContinuation = true;\n";
-        os << "    result.nextCycle = getCurrentTime() + " << latencyStr << ";\n";
-      }
-    }
     
     os << "    // TODO: Execute method body\n";
     os << "    return result;\n";

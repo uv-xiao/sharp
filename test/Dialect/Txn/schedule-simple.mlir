@@ -13,8 +13,8 @@ txn.module @Simple {
     txn.return
   }
   
-  // CHECK: txn.schedule [@getValue, @setValue]
-  txn.schedule [@getValue, @setValue]
+  // CHECK: txn.schedule [@setValue]
+  txn.schedule [@setValue]
 }
 
 // CHECK-LABEL: txn.module @WithRule
@@ -39,7 +39,7 @@ txn.module @EmptySchedule {
 
 // CHECK-LABEL: txn.module @SingleMethod
 txn.module @SingleMethod {
-  txn.value_method @onlyMethod() -> i1 {
+  txn.action_method @onlyMethod() -> i1 {
     %true = arith.constant true
     txn.return %true : i1
   }

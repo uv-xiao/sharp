@@ -5,9 +5,13 @@ from typing import Optional, Union, List, Dict, Any
 from .types import Type, IntType, ClockType, ResetType
 
 class ConflictRelation(IntEnum):
-    """Conflict relations between actions in Sharp."""
-    SequenceBefore = 0  # SB - first must execute before second
-    SequenceAfter = 1   # SA - first must execute after second  
+    """Conflict relations between actions in Sharp.
+    
+    According to Sharp's execution model, schedules are predetermined,
+    so only Conflict and ConflictFree relations are meaningful.
+    """
+    SequenceBefore = 0  # SB - first action must execute before second
+    SequenceAfter = 1   # SA - first action must execute after second
     Conflict = 2        # C - actions conflict and cannot execute together
     ConflictFree = 3    # CF - actions can execute in any order
 
@@ -109,8 +113,8 @@ class AlwaysEnabled(MethodAttribute):
     pass
 
 __all__ = [
-    'ConflictRelation', 'SequenceBefore', 'SequenceAfter', 'Conflict', 'ConflictFree',
-    'SB', 'SA', 'C', 'CF',
+    'ConflictRelation', 'Conflict', 'ConflictFree',
+    'C', 'CF',
     'PortDirection', 'Port', 'Input', 'Output', 'Clock', 'Reset',
     'Timing', 'Combinational', 'Dynamic', 'Static',
     'MethodAttribute', 'AlwaysReady', 'AlwaysEnabled'

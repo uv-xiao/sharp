@@ -16,6 +16,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/Support/Debug.h"
+#include <optional>
 
 #define DEBUG_TYPE "sharp-action-call-validation"
 
@@ -51,7 +52,7 @@ private:
   bool isLocalActionCall(CallOp call, txn::ModuleOp module);
   
   /// Get the target method name from a call (handling both direct and instance calls)
-  Optional<StringRef> getCallTargetName(CallOp call);
+  std::optional<StringRef> getCallTargetName(CallOp call);
 };
 
 void ActionCallValidationPass::runOnOperation() {
@@ -100,10 +101,10 @@ LogicalResult ActionCallValidationPass::validateAction(Operation *action,
     if (isLocalActionCall(call, module)) {
       auto targetName = getCallTargetName(call);
       call.emitError() << "action '" << actionName 
-                      << "' cannot call action '" << targetName.value()
+                      << "' cannot call action '" << targetName.value_or("<unknown>")
                       << "' in the same module";
-      call.emitNote() << "actions can only call value methods in the same module "
-                      << "or methods of child module instances";
+      mlir::emitRemark(call.getLoc()) << "actions can only call value methods in the same module "
+                                       << "or methods of child module instances";
       hasErrors = true;
     }
   });
@@ -117,7 +118,7 @@ bool ActionCallValidationPass::isLocalActionCall(CallOp call,
   auto callee = call.getCalleeAttr();
   
   // Check if it's a nested reference (instance method call)
-  if (auto nestedRef = callee.dyn_cast<SymbolRefAttr>()) {
+  if (auto nestedRef = dyn_cast<SymbolRefAttr>(callee)) {
     if (!nestedRef.getNestedReferences().empty()) {
       // This is an instance method call (e.g., @instance::@method)
       // These are allowed
@@ -126,7 +127,7 @@ bool ActionCallValidationPass::isLocalActionCall(CallOp call,
   }
   
   // It's a direct call - check if the target is an action in this module
-  auto targetName = callee.cast<FlatSymbolRefAttr>().getValue();
+  auto targetName = cast<FlatSymbolRefAttr>(callee).getValue();
   
   // Find the operation with this name in the module
   Operation *targetOp = nullptr;
@@ -149,22 +150,22 @@ bool ActionCallValidationPass::isLocalActionCall(CallOp call,
   return isa<RuleOp>(targetOp) || isa<ActionMethodOp>(targetOp);
 }
 
-Optional<StringRef> ActionCallValidationPass::getCallTargetName(CallOp call) {
+std::optional<StringRef> ActionCallValidationPass::getCallTargetName(CallOp call) {
   auto callee = call.getCalleeAttr();
   
-  if (auto flatRef = callee.dyn_cast<FlatSymbolRefAttr>()) {
+  if (auto flatRef = dyn_cast<FlatSymbolRefAttr>(callee)) {
     return flatRef.getValue();
   }
   
-  if (auto nestedRef = callee.dyn_cast<SymbolRefAttr>()) {
+  if (auto nestedRef = dyn_cast<SymbolRefAttr>(callee)) {
     if (!nestedRef.getNestedReferences().empty()) {
       // For instance calls, return the method name
-      return nestedRef.getNestedReferences().back().cast<FlatSymbolRefAttr>().getValue();
+      return cast<FlatSymbolRefAttr>(nestedRef.getNestedReferences().back()).getValue();
     }
     return nestedRef.getRootReference().getValue();
   }
   
-  return None;
+  return std::nullopt;
 }
 
 } // namespace

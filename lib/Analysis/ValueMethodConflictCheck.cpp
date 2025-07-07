@@ -73,13 +73,18 @@ LogicalResult ValueMethodConflictCheckPass::checkModule(txn::ModuleOp module) {
              << module.getSymName() << "\n");
   
   // Get the schedule and conflict matrix
-  auto scheduleOp = module.getSchedule();
-  if (!scheduleOp) {
+  SmallVector<txn::ScheduleOp> schedules;
+  module.walk([&](txn::ScheduleOp schedule) {
+    schedules.push_back(schedule);
+  });
+  
+  if (schedules.empty()) {
     // No schedule means no conflicts to check
     return success();
   }
   
-  auto conflictMatrix = parseConflictMatrix(scheduleOp);
+  // Use the first schedule's conflict matrix
+  auto conflictMatrix = parseConflictMatrix(schedules[0]);
   
   // Check each value method
   bool hasErrors = false;
@@ -118,13 +123,13 @@ LogicalResult ValueMethodConflictCheckPass::checkValueMethod(
     auto checkConflict = [&](StringRef first, StringRef second) {
       auto key = (first + "," + second).str();
       auto it = conflictMatrix.find(key);
-      if (it != conflictMatrix.end() && it->second != ConflictRelation::CF) {
+      if (it != conflictMatrix.end() && it->second != txn::ConflictRelation::ConflictFree) {
         valueMethod.emitError() 
             << "value method '" << methodName 
             << "' has non-CF conflict with action '" << action
             << "' (" << conflictToString(it->second) << ")";
-        valueMethod.emitNote() 
-            << "value methods must be conflict-free (CF) with all actions";
+        mlir::emitRemark(valueMethod.getLoc()) 
+            << "value methods must be conflict-free (CF) with all actions and other value methods";
         hasConflict = true;
         return true;
       }
@@ -138,9 +143,9 @@ LogicalResult ValueMethodConflictCheckPass::checkValueMethod(
     }
   }
   
-  // Also check if this value method appears in any conflict that isn't CF
+  // Also check if this value method appears in any non-CF relation
   for (const auto &entry : conflictMatrix) {
-    if (entry.second() != ConflictRelation::CF) {
+    if (entry.second != txn::ConflictRelation::ConflictFree) {
       // Split the key to get the two method names
       auto key = entry.first();
       auto comma = key.find(',');
@@ -154,8 +159,8 @@ LogicalResult ValueMethodConflictCheckPass::checkValueMethod(
             valueMethod.emitError()
                 << "value method '" << methodName 
                 << "' appears in conflict matrix with non-CF relation ("
-                << conflictToString(entry.second()) << ")";
-            valueMethod.emitNote()
+                << conflictToString(entry.second) << ")";
+            mlir::emitRemark(valueMethod.getLoc())
                 << "value methods must only have conflict-free (CF) relationships";
             hasConflict = true;
           }
@@ -176,11 +181,11 @@ ValueMethodConflictCheckPass::parseConflictMatrix(ScheduleOp schedule) {
     return result;
   }
   
-  auto dict = cmAttr.cast<DictionaryAttr>();
+  auto dict = cast<DictionaryAttr>(cmAttr);
   for (auto entry : dict) {
     auto key = entry.getName().str();
-    if (auto conflictAttr = entry.getValue().dyn_cast<txn::ConflictRelationAttr>()) {
-      result[key] = conflictAttr.getValue();
+    if (auto conflictAttr = dyn_cast<IntegerAttr>(entry.getValue())) {
+      result[key] = static_cast<txn::ConflictRelation>(conflictAttr.getInt());
     }
   }
   
@@ -189,12 +194,12 @@ ValueMethodConflictCheckPass::parseConflictMatrix(ScheduleOp schedule) {
 
 StringRef ValueMethodConflictCheckPass::conflictToString(ConflictRelation rel) {
   switch (rel) {
-    case ConflictRelation::SB: return "SB (Sequenced Before)";
-    case ConflictRelation::SA: return "SA (Sequenced After)";
-    case ConflictRelation::C: return "C (Conflict)";
-    case ConflictRelation::CF: return "CF (Conflict-Free)";
+    case txn::ConflictRelation::SequenceBefore: return "SB (Sequence Before)";
+    case txn::ConflictRelation::SequenceAfter: return "SA (Sequence After)";
+    case txn::ConflictRelation::Conflict: return "C (Conflict)";
+    case txn::ConflictRelation::ConflictFree: return "CF (Conflict-Free)";
+    default: return "Unknown";
   }
-  return "Unknown";
 }
 
 } // namespace

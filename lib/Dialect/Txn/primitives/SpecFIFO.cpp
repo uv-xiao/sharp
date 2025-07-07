@@ -47,31 +47,31 @@ namespace txn {
   builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("enqueue"), TypeAttr::get(enqueueType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/StringAttr(), /*ready=*/StringAttr(), /*enable=*/StringAttr(),
+      /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
   
   builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("dequeue"), TypeAttr::get(dequeueType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/StringAttr(), /*ready=*/StringAttr(), /*enable=*/StringAttr(),
+      /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
   
   builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("isEmpty"), TypeAttr::get(isEmptyType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/builder.getStringAttr("combinational"), /*result=*/StringAttr(), /*prefix=*/StringAttr());
+      /*result=*/StringAttr(), /*prefix=*/StringAttr());
   
   builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("size"), TypeAttr::get(sizeType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/builder.getStringAttr("combinational"), /*result=*/StringAttr(), /*prefix=*/StringAttr());
+      /*result=*/StringAttr(), /*prefix=*/StringAttr());
   
   builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("peek"), TypeAttr::get(peekType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/builder.getStringAttr("combinational"), /*result=*/StringAttr(), /*prefix=*/StringAttr());
+      /*result=*/StringAttr(), /*prefix=*/StringAttr());
   
   // Create schedule with conflict matrix
   auto conflictMatrix = builder.getDictionaryAttr({

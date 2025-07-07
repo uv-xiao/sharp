@@ -24,6 +24,9 @@ public:
       [this](const std::vector<int64_t>& args) {
         toggle();
       });
+
+    // Set schedule
+    setSchedule({"read", "toggle"});
   }
 
   // Value method: read

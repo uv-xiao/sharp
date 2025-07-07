@@ -104,10 +104,11 @@ def create_parameterized_fifo(depth, width, name="ParamFIFO"):
             """Get number of elements"""
             return count.read()
         
+        # Schedule only includes actions (not value methods)
         m.schedule(
-            ["enqueue", "dequeue", "is_empty", "is_full", "occupancy"],
+            ["enqueue", "dequeue"],
             conflicts={
-                ("enqueue", "dequeue"): ConflictType.SB
+                ("enqueue", "dequeue"): ConflictType.C
             }
         )
     

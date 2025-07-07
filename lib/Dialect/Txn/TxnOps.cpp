@@ -509,6 +509,30 @@ LogicalResult CallOp::verify() {
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// LaunchOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult LaunchOp::verify() {
+  // Verify that the body has a terminator
+  if (getBody().empty())
+    return emitOpError("body region cannot be empty");
+    
+  // Check that the body is terminated properly
+  Operation *terminator = getBody().back().getTerminator();
+  if (!terminator || !isa<YieldOp>(terminator))
+    return emitOpError("body must be terminated with 'txn.yield'");
+  
+  // If both condition and latency are provided, this is valid
+  // If only condition is provided, this is a dynamic launch
+  // If only latency is provided, this is a static launch
+  // If neither is provided, it's an error
+  if (!getCondition() && !getLatency())
+    return emitOpError("launch must have either a condition or latency");
+  
+  return success();
+}
+
 
 //===----------------------------------------------------------------------===//
 // Operation definitions

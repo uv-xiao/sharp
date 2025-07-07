@@ -968,6 +968,15 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
         auto result = ctx.firrtlBuilder.create<XorPrimOp>(xorOp.getLoc(), lhs, rhs);
         ctx.txnToFirrtl[xorOp.getResult()] = result;
       }
+    } else if (auto futureOp = dyn_cast<FutureOp>(&op)) {
+      // Future operations are not directly synthesizable
+      // For now, we'll emit an error until we have proper multi-cycle support
+      return futureOp.emitError("future operations are not yet supported in FIRRTL conversion. "
+                               "Multi-cycle execution requires additional synthesis infrastructure.");
+    } else if (auto launchOp = dyn_cast<LaunchOp>(&op)) {
+      // Launch operations are not directly synthesizable
+      return launchOp.emitError("launch operations are not yet supported in FIRRTL conversion. "
+                               "Multi-cycle execution requires additional synthesis infrastructure.");
     }
     // Add more operation conversions as needed
   }

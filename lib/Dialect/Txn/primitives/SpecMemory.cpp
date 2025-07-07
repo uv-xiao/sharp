@@ -50,13 +50,13 @@ namespace txn {
   builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("read"), TypeAttr::get(readType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/builder.getStringAttr("dynamic"), /*result=*/StringAttr(), /*prefix=*/StringAttr());
+      /*result=*/StringAttr(), /*prefix=*/StringAttr());
   
   // Create write method (action method)
   builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("write"), TypeAttr::get(writeType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/StringAttr(), /*ready=*/StringAttr(), /*enable=*/StringAttr(),
+      /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
   
@@ -64,7 +64,7 @@ namespace txn {
   builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("setLatency"), TypeAttr::get(setLatencyType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/StringAttr(), /*ready=*/StringAttr(), /*enable=*/StringAttr(),
+      /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
   
@@ -72,13 +72,13 @@ namespace txn {
   builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("getLatency"), TypeAttr::get(getLatencyType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/builder.getStringAttr("combinational"), /*result=*/StringAttr(), /*prefix=*/StringAttr());
+      /*result=*/StringAttr(), /*prefix=*/StringAttr());
   
   // Create clear method (action method)
   builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("clear"), TypeAttr::get(clearType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
-      /*timing=*/StringAttr(), /*ready=*/StringAttr(), /*enable=*/StringAttr(),
+      /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
   

@@ -50,7 +50,7 @@ print(builder)
 # CHECK: === Test 5: Set Conflicts ===
 print("\n=== Test 5: Set Conflicts ===")
 builder.set_conflict("increment", "decrement", pysharp.ConflictRelation.C)
-builder.set_conflict("autoIncrement", "increment", pysharp.ConflictRelation.SB)
+builder.set_conflict("autoIncrement", "increment", pysharp.ConflictRelation.C)
 # CHECK: Conflicts set successfully
 print("Conflicts set successfully")
 

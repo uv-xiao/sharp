@@ -48,21 +48,8 @@ txn.module @Counter {
   }
   
   // Schedule with conflict information
-  txn.schedule [@getValue, @getStep, @increment, @decrement, @setStep, @reset] {
+  txn.schedule [@increment, @decrement, @setStep, @reset] {
     conflict_matrix = {
-      // Value methods don't conflict with each other
-      "getValue,getStep" = 3 : i32,    // CF
-      
-      // Value methods can run with any action
-      "getValue,increment" = 3 : i32,   // CF
-      "getValue,decrement" = 3 : i32,   // CF
-      "getValue,setStep" = 3 : i32,     // CF
-      "getValue,reset" = 3 : i32,       // CF
-      "getStep,increment" = 3 : i32,    // CF
-      "getStep,decrement" = 3 : i32,    // CF
-      "getStep,setStep" = 3 : i32,      // CF
-      "getStep,reset" = 3 : i32,        // CF
-      
       // Actions conflict with each other
       "increment,decrement" = 2 : i32,  // C
       "increment,setStep" = 2 : i32,    // C

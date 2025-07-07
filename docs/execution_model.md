@@ -69,10 +69,18 @@ Within each cycle, actions execute based on:
 
 1. **Explicit Ordering**: User-specified schedule constraints
 2. **Conflict Relations**: 
-   - **SB (Sequenced Before)**: Action A must execute before Action B
-   - **SA (Sequenced After)**: Action A must execute after Action B  
+   - **SB (Sequenced Before)**: Action A must execute before Action B in the same cycle
+   - **SA (Sequenced After)**: Action A must execute after Action B in the same cycle
    - **C (Conflict)**: Actions cannot execute in the same cycle
-   - **CF (Conflict-Free)**: Actions can execute in any order
+   - **CF (Conflict-Free)**: Actions can execute in any order within the same cycle
+   
+   Important constraints:
+   - **Value methods** can only have CF relations with all other methods (actions and values)
+   - **Actions** can have any relation (SB, SA, C, CF) with other actions
+   - SA/SB constraints are essential for:
+     - Specifying partial ordering constraints when the schedule is not fully determined
+     - Propagating ordering constraints from child instances to parent modules
+     - The ActionScheduling pass uses SA/SB to complete partial schedules
 
 ### Method Call Restrictions
 
@@ -173,10 +181,11 @@ txn.action_method @multiCycleAction(%data: i32) {multicycle = true} {
     // Multi-cycle actions are enclosed by txn.future
     txn.future {
       // Static latency launch
-      %done1 = txn.launch {latency=3} {
+      %done1 = txn.launch after 3 {
           // This block executes 3 cycles later
           // If after 3 cycles, this block fails, a panic will be raised
           txn.call @reg.write(%data) : (i32) -> ()
+          txn.yield
       }
       
       // Dynamic latency launch
@@ -185,13 +194,15 @@ txn.action_method @multiCycleAction(%data: i32) {multicycle = true} {
           // If the enqueue fails, NO panic will be raised
           // Instead, the block will be tried again in the next cycle until it succeeds
           txn.call @fifo.enqueue(%data) : (i32) -> ()
+          txn.yield
       }
 
       // Combined: dependency with static latency
-      %done3 = txn.launch until %done2 {latency=1} {
+      %done3 = txn.launch until %done2 after 1 {
         // This launch only starts 1 cycle after %done2 is true
         // If the launch fails, a panic will be raised (due to the static latency)
         // ...
+        txn.yield
       }
     }
 }

@@ -177,6 +177,51 @@ class Counter : public SimModule {
 };
 ```
 
+### Multi-Cycle Operations
+
+Sharp supports multi-cycle operations through `txn.future` and `txn.launch` constructs:
+
+```mlir
+txn.action_method @multiCycleOp(%data: i32) attributes {multicycle = true} {
+  // Per-cycle actions execute immediately
+  %current = txn.call @reg::@read() : () -> i32
+  txn.call @reg::@write(%data) : (i32) -> ()
+  
+  txn.future {
+    // Static launch - executes after fixed delay
+    %done1 = txn.launch after 3 {
+      %val = arith.constant 100 : i32
+      txn.call @reg::@write(%val) : (i32) -> ()
+      txn.yield
+    }
+    
+    // Dynamic launch - waits for condition
+    %done2 = txn.launch until %done1 {
+      txn.call @fifo::@enqueue(%data) : (i32) -> ()
+      txn.yield
+    }
+    
+    // Combined - condition + delay
+    %done3 = txn.launch until %done2 after 1 {
+      txn.call @status::@write(%true) : (i1) -> ()
+      txn.yield
+    }
+  }
+  txn.return
+}
+```
+
+**Simulation Infrastructure**:
+- `LaunchState`: Tracks individual launch execution (Pending → Running → Completed)
+- `MultiCycleExecution`: Manages all launches for a multi-cycle action
+- `MultiCycleSimModule`: Extended base class with `updateMultiCycleExecutions()`
+
+**Key Semantics**:
+- Per-cycle actions execute immediately before any launches
+- Static launches (`after N`) must succeed or panic
+- Dynamic launches (`until %cond`) retry until successful
+- Launch dependencies create execution chains
+
 ### Concurrent Simulation (DAM Methodology)
 
 The `--sharp-concurrent-sim` pass implements DAM (Discrete-event simulation with Adaptive Multiprocessing) principles from Zhang et al.:

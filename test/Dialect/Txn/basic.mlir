@@ -18,8 +18,8 @@ txn.module @BasicModule {
     txn.return %val : i32
   }
   
-  // CHECK: txn.schedule [@getValue, @setValue]
-  txn.schedule [@getValue, @setValue]
+  // CHECK: txn.schedule [@setValue]
+  txn.schedule [@setValue]
 }
 
 // CHECK-LABEL: txn.module @ModuleWithPrimitive
@@ -64,5 +64,5 @@ txn.module @Helper {
     txn.return %c0 : i32
   }
   
-  txn.schedule [@help]
+  txn.schedule []
 }

@@ -5,12 +5,12 @@ txn.module @ValidSchedule {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   
   txn.value_method @getValue() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
   txn.action_method @setValue(%v: i32) {
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   
@@ -33,12 +33,12 @@ txn.module @InvalidScheduleWithValueMethod {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   
   txn.value_method @getValue() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
   txn.action_method @setValue(%v: i32) {
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   
@@ -53,7 +53,7 @@ txn.module @ScheduleWithNonExistentAction {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   
   txn.action_method @setValue(%v: i32) {
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   
@@ -68,7 +68,7 @@ txn.module @EmptySchedule {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   
   txn.value_method @getValue() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
@@ -78,16 +78,17 @@ txn.module @EmptySchedule {
 
 // -----
 
-// Test 5: Module with no schedule is valid
-txn.module @NoSchedule {
+// Test 5: Module with empty schedule is valid
+txn.module @EmptySchedule2 {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   
   txn.value_method @getValue() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
-  // No schedule operation - this is valid
+  // No schedule operation - modules must have a schedule
+  txn.schedule []
 }
 
 // -----
@@ -97,19 +98,19 @@ txn.module @MultipleValueMethodsInSchedule {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   
   txn.value_method @getValue1() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
   txn.value_method @getValue2() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     %two = arith.constant 2 : i32
     %result = arith.muli %v, %two : i32
     txn.return %result : i32
   }
   
   txn.action_method @setValue(%v: i32) {
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   

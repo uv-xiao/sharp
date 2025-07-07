@@ -47,7 +47,7 @@ def PreSynthesisCheck : Pass<"sharp-pre-synthesis-check", "mlir::ModuleOp"> {
     that would prevent successful translation to FIRRTL/Verilog. The pass checks for:
 
     1. Non-synthesizable (spec) primitives
-    2. Multi-cycle rules/methods (timing != "combinational")
+    2. Multi-cycle operations (currently none since timing attributes removed)
     3. Modules that instantiate non-synthesizable submodules or primitives
     4. Operations from non-synthesizable dialects (only txn, firrtl, and builtin allowed)
 

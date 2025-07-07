@@ -165,47 +165,12 @@ bool PreSynthesisCheckPass::checkForMultiCycle(::sharp::txn::ModuleOp module) {
 }
 
 bool PreSynthesisCheckPass::checkRuleForMultiCycle(::sharp::txn::RuleOp rule) {
-  auto timingAttr = rule.getTiming();
-  if (!timingAttr) {
-    // No timing attribute means combinational (default)
-    return false;
-  }
-  
-  StringRef timing = timingAttr.value();
-  if (timing != "combinational") {
-    LLVM_DEBUG(llvm::dbgs() << "Rule " << rule.getSymName() 
-                            << " has multi-cycle timing: " << timing << "\n");
-    return true;
-  }
-  
+  // Timing attributes have been removed - all operations are single-cycle
   return false;
 }
 
 bool PreSynthesisCheckPass::checkMethodForMultiCycle(Operation *method) {
-  auto timingAttr = method->getAttrOfType<StringAttr>("timing");
-  if (!timingAttr) {
-    // No timing attribute means combinational (default)
-    return false;
-  }
-  
-  StringRef timing = timingAttr.getValue();
-  if (timing != "combinational") {
-    StringAttr nameAttr;
-    if (auto valueMeth = dyn_cast<::sharp::txn::ValueMethodOp>(method)) {
-      nameAttr = valueMeth.getSymNameAttr();
-    } else if (auto actionMeth = dyn_cast<::sharp::txn::ActionMethodOp>(method)) {
-      nameAttr = actionMeth.getSymNameAttr();
-    } else if (auto firValueMeth = dyn_cast<::sharp::txn::FirValueMethodOp>(method)) {
-      nameAttr = firValueMeth.getSymNameAttr();
-    } else if (auto firActionMeth = dyn_cast<::sharp::txn::FirActionMethodOp>(method)) {
-      nameAttr = firActionMeth.getSymNameAttr();
-    }
-    
-    LLVM_DEBUG(llvm::dbgs() << "Method " << (nameAttr ? nameAttr.getValue() : "unknown")
-                            << " has multi-cycle timing: " << timing << "\n");
-    return true;
-  }
-  
+  // Timing attributes have been removed - all operations are single-cycle
   return false;
 }
 

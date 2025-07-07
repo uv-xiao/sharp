@@ -91,8 +91,8 @@ txn.module @ControlFlowInMethods {
   txn.action_method @guardedAction(%guard: i1) {
     // CHECK: txn.if %{{.*}} {
     txn.if %guard {
-      // CHECK: txn.call @doWork
-      txn.call @doWork() : () -> ()
+      // CHECK: txn.call @getValue
+      %val = txn.call @getValue() : () -> i32
       txn.return
     } else {
       // CHECK: txn.abort
@@ -102,10 +102,11 @@ txn.module @ControlFlowInMethods {
     txn.return
   }
   
-  txn.action_method @doWork() {
-    txn.return
+  txn.value_method @getValue() -> i32 {
+    %c42 = arith.constant 42 : i32
+    txn.return %c42 : i32
   }
   
-  // CHECK: txn.schedule [@conditionalValue, @guardedAction, @doWork]
-  txn.schedule [@conditionalValue, @guardedAction, @doWork]
+  // CHECK: txn.schedule [@conditionalValue, @guardedAction]
+  txn.schedule [@conditionalValue, @guardedAction]
 }

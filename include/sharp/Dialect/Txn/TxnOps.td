@@ -31,7 +31,7 @@ def ModuleOp : TxnOp<"module", [
 
   let extraClassDeclaration = [{
     /// Returns the entry block of the module.
-    Block *getBodyBlock() { return &getBody().front(); }
+    ::mlir::Block *getBodyBlock() { return &getBody().front(); }
   }];
 
   let assemblyFormat = [{
@@ -103,22 +103,21 @@ def ValueMethodOp : TxnOp<"value_method", [
     OptionalAttr<StrAttr>:$sym_visibility,
     OptionalAttr<DictArrayAttr>:$arg_attrs,
     OptionalAttr<DictArrayAttr>:$res_attrs,
-    OptionalAttr<StrAttr>:$timing,
     OptionalAttr<StrAttr>:$result,          // Result signal postfix (default="OUT")
     OptionalAttr<StrAttr>:$prefix           // Method name prefix for translation
   );
-  let regions = (region AnyRegion:$body);
+  let regions = (region SizedRegion<1>:$body);
 
 
   let extraClassDeclaration = [{
     /// Returns the argument types of this method.
-    ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
+    ::mlir::ArrayRef<::mlir::Type> getArgumentTypes() { return getFunctionType().getInputs(); }
 
     /// Returns the result types of this method.
-    ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
+    ::mlir::ArrayRef<::mlir::Type> getResultTypes() { return getFunctionType().getResults(); }
 
     /// Returns the region that is callable.
-    Region *getCallableRegion() { return &getBody(); }
+    ::mlir::Region *getCallableRegion() { return &getBody(); }
   }];
 
   let hasCustomAssemblyFormat = 1;
@@ -138,7 +137,6 @@ def ActionMethodOp : TxnOp<"action_method", [
     OptionalAttr<StrAttr>:$sym_visibility,
     OptionalAttr<DictArrayAttr>:$arg_attrs,
     OptionalAttr<DictArrayAttr>:$res_attrs,
-    OptionalAttr<StrAttr>:$timing,
     OptionalAttr<StrAttr>:$ready,          // Ready signal postfix (default="RDY")
     OptionalAttr<StrAttr>:$enable,         // Enable signal postfix (default="EN")
     OptionalAttr<StrAttr>:$result,         // Result signal postfix (default="OUT")
@@ -146,18 +144,18 @@ def ActionMethodOp : TxnOp<"action_method", [
     OptionalAttr<UnitAttr>:$always_ready,  // Method is always ready (removes ready signal)
     OptionalAttr<UnitAttr>:$always_enable  // Method is always enabled (removes enable signal)
   );
-  let regions = (region AnyRegion:$body);
+  let regions = (region SizedRegion<1>:$body);
 
 
   let extraClassDeclaration = [{
     /// Returns the argument types of this method.
-    ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
+    ::mlir::ArrayRef<::mlir::Type> getArgumentTypes() { return getFunctionType().getInputs(); }
 
     /// Returns the result types of this method.
-    ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
+    ::mlir::ArrayRef<::mlir::Type> getResultTypes() { return getFunctionType().getResults(); }
 
     /// Returns the region that is callable.
-    Region *getCallableRegion() { return &getBody(); }
+    ::mlir::Region *getCallableRegion() { return &getBody(); }
   }];
 
   let hasCustomAssemblyFormat = 1;
@@ -173,7 +171,6 @@ def RuleOp : TxnOp<"rule", [
 
   let arguments = (ins
     SymbolNameAttr:$sym_name,
-    OptionalAttr<StrAttr>:$timing,
     OptionalAttr<StrAttr>:$prefix
   );
   let regions = (region SizedRegion<1>:$body);
@@ -301,24 +298,24 @@ def CallOp : TxnOp<"call", [AttrSizedOperandSegments]> {
   let hasVerifier = 1;
   
   let builders = [
-    OpBuilder<(ins "SymbolRefAttr":$callee, "ValueRange":$args, 
-                   "TypeRange":$results), [{
-      build($_builder, $_state, results, callee, Value(), args);
+    OpBuilder<(ins "::mlir::SymbolRefAttr":$callee, "::mlir::ValueRange":$args, 
+                   "::mlir::TypeRange":$results), [{
+      build($_builder, $_state, results, callee, ::mlir::Value(), args);
     }]>,
-    OpBuilder<(ins "SymbolRefAttr":$callee, "Value":$condition,
-                   "ValueRange":$args, "TypeRange":$results), [{
+    OpBuilder<(ins "::mlir::SymbolRefAttr":$callee, "::mlir::Value":$condition,
+                   "::mlir::ValueRange":$args, "::mlir::TypeRange":$results), [{
       build($_builder, $_state, results, callee, condition, args);
     }]>
   ];
   
   let extraClassDeclaration = [{
     /// Get the operands to the called method (alias for args)
-    OperandRange getOperands() {
+    ::mlir::OperandRange getOperands() {
       return getArgs();
     }
     
     /// Get the types of the operands to the called method
-    TypeRange getOperandTypes() {
+    ::mlir::TypeRange getOperandTypes() {
       return getArgs().getTypes();
     }
   }];
@@ -408,6 +405,86 @@ def ResetByOp : TxnOp<"reset_by", [
   let assemblyFormat = [{
     $reset attr-dict
   }];
+}
+
+//===----------------------------------------------------------------------===//
+// Multi-cycle Operations  
+//===----------------------------------------------------------------------===//
+
+def FutureOp : TxnOp<"future", [
+    SingleBlock, NoTerminator
+  ]> {
+  let summary = "Encloses multi-cycle actions with launches";
+  let description = [{
+    The future operation marks a region containing launch operations for
+    multi-cycle execution. All operations within a future block are deferred
+    and executed according to their launch constraints.
+    
+    Example:
+    ```mlir
+    txn.future {
+      %done1 = txn.launch {latency=3} {
+        // Executes 3 cycles later
+      }
+      %done2 = txn.launch until %done1 {
+        // Executes when %done1 completes
+      }
+    }
+    ```
+  }];
+  
+  let regions = (region SizedRegion<1>:$body);
+  
+  let assemblyFormat = [{
+    $body attr-dict
+  }];
+}
+
+def LaunchOp : TxnOp<"launch", [
+    SingleBlock
+  ]> {
+  let summary = "Deferred execution with optional dependencies and latency";
+  let description = [{
+    Launch operations enable deferred execution within multi-cycle actions.
+    They can have:
+    - Static latency: {latency=n} - Must succeed after n cycles or panic
+    - Dynamic dependency: until %cond - Retries until condition is true
+    - Both: until %cond {latency=n} - Waits for condition then n more cycles
+    
+    The operation returns an i1 value indicating completion.
+    
+    Example:
+    ```mlir
+    // Static latency
+    %done1 = txn.launch {latency=3} {
+      txn.call @reg.write(%data) : (i32) -> ()
+      txn.yield
+    }
+    
+    // Dynamic dependency
+    %done2 = txn.launch until %done1 {
+      txn.call @fifo.enqueue(%data) : (i32) -> ()
+      txn.yield
+    }
+    ```
+  }];
+  
+  let arguments = (ins
+    Optional<I1>:$condition,      // Optional dependency condition
+    OptionalAttr<I32Attr>:$latency  // Optional static latency
+  );
+  
+  let results = (outs I1:$done);  // Completion signal
+  
+  let regions = (region SizedRegion<1>:$body);
+  
+  let assemblyFormat = [{
+    (`until` $condition^)? 
+    (`after` $latency^)?
+    $body attr-dict
+  }];
+  
+  let hasVerifier = 1;
 }
 
 

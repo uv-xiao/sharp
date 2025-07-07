@@ -61,12 +61,36 @@ public:
     os << "#include <chrono>\n";
     os << "#include <queue>\n\n";
     
+    // Check if module has multi-cycle actions
+    bool hasMultiCycle = false;
+    for (auto& op : module.getBodyBlock()->getOperations()) {
+      if (auto method = mlir::dyn_cast<txn::ActionMethodOp>(op)) {
+        // Check if method contains a future block
+        for (auto& innerOp : method.getBody().front()) {
+          if (mlir::isa<txn::FutureOp>(innerOp)) {
+            hasMultiCycle = true;
+            break;
+          }
+        }
+      } else if (auto rule = mlir::dyn_cast<txn::RuleOp>(op)) {
+        // Check if rule contains a future block
+        for (auto& innerOp : rule.getBody().front()) {
+          if (mlir::isa<txn::FutureOp>(innerOp)) {
+            hasMultiCycle = true;
+            break;
+          }
+        }
+      }
+      if (hasMultiCycle) break;
+    }
+    
     // Generate module class
-    os << "class " << module.getName() << "Module : public SimModule {\n";
+    std::string baseClass = hasMultiCycle ? "MultiCycleSimModule" : "SimModule";
+    os << "class " << module.getName() << "Module : public " << baseClass << " {\n";
     os << "public:\n";
     
     // Constructor
-    os << "  " << module.getName() << "Module() : SimModule(\"" 
+    os << "  " << module.getName() << "Module() : " << baseClass << "(\"" 
        << module.getName() << "\") {\n";
     
     os << "    // Register methods\n";
@@ -84,30 +108,65 @@ public:
         os << ");\n";
         os << "      });\n";
       } else if (auto method = mlir::dyn_cast<txn::ActionMethodOp>(op)) {
-        os << "    registerActionMethod(\"" << method.getName() << "\", \n";
-        os << "      [this](const std::vector<int64_t>& args) {\n";
-        os << "        " << method.getName() << "(";
-        // Generate argument list
-        auto funcType = method.getFunctionType();
-        for (unsigned i = 0; i < funcType.getNumInputs(); ++i) {
-          if (i > 0) os << ", ";
-          os << "args[" << i << "]";
+        // Check if this is a multi-cycle action
+        bool isMultiCycle = false;
+        for (auto& innerOp : method.getBody().front()) {
+          if (mlir::isa<txn::FutureOp>(innerOp)) {
+            isMultiCycle = true;
+            break;
+          }
         }
-        os << ");\n";
-        os << "      });\n";
+        
+        if (isMultiCycle) {
+          os << "    registerMultiCycleAction(\"" << method.getName() << "\", \n";
+          os << "      [this](const std::vector<int64_t>& args) {\n";
+          os << "        return " << method.getName() << "_multicycle(";
+          // Generate argument list
+          auto funcType = method.getFunctionType();
+          for (unsigned i = 0; i < funcType.getNumInputs(); ++i) {
+            if (i > 0) os << ", ";
+            os << "args[" << i << "]";
+          }
+          os << ");\n";
+          os << "      });\n";
+        } else {
+          os << "    registerActionMethod(\"" << method.getName() << "\", \n";
+          os << "      [this](const std::vector<int64_t>& args) {\n";
+          os << "        " << method.getName() << "(";
+          // Generate argument list
+          auto funcType = method.getFunctionType();
+          for (unsigned i = 0; i < funcType.getNumInputs(); ++i) {
+            if (i > 0) os << ", ";
+            os << "args[" << i << "]";
+          }
+          os << ");\n";
+          os << "      });\n";
+        }
       }
     }
     
     // Register rules
     for (auto& op : module.getBodyBlock()->getOperations()) {
       if (auto rule = mlir::dyn_cast<txn::RuleOp>(op)) {
-        os << "    // Rule: " << rule.getSymName();
-        if (auto timing = rule.getTiming()) {
-          os << " (timing: " << timing << ")";
+        // Check if this is a multi-cycle rule
+        bool isMultiCycle = false;
+        for (auto& innerOp : rule.getBody().front()) {
+          if (mlir::isa<txn::FutureOp>(innerOp)) {
+            isMultiCycle = true;
+            break;
+          }
         }
-        os << "\n";
+        
+        os << "    // Rule: " << rule.getSymName() << "\n";
         os << "    registerRule(\"" << rule.getSymName() << "\", "
            << "[this]() -> bool { return canFire_" << rule.getSymName() << "(); });\n";
+        
+        if (isMultiCycle) {
+          os << "    registerMultiCycleAction(\"" << rule.getSymName() << "\", \n";
+          os << "      [this](const std::vector<int64_t>& args) {\n";
+          os << "        return " << rule.getSymName() << "_multicycle();\n";
+          os << "      });\n";
+        }
       }
     }
     
@@ -115,10 +174,10 @@ public:
     if (auto schedule = getScheduleOp(module)) {
       os << "\n    // Set schedule\n";
       os << "    setSchedule({";
-      auto actions = schedule.getActionNames();
+      auto actions = schedule.getActions();
       for (unsigned i = 0; i < actions.size(); ++i) {
         if (i > 0) os << ", ";
-        os << "\"" << actions[i].cast<FlatSymbolRefAttr>().getValue() << "\"";
+        os << "\"" << mlir::cast<mlir::FlatSymbolRefAttr>(actions[i]).getValue() << "\"";
       }
       os << "});\n";
       
@@ -144,14 +203,40 @@ public:
       if (auto method = mlir::dyn_cast<txn::ValueMethodOp>(op)) {
         generateSimpleValueMethod(method);
       } else if (auto method = mlir::dyn_cast<txn::ActionMethodOp>(op)) {
-        generateSimpleActionMethod(method);
+        // Check if this is a multi-cycle action
+        bool isMultiCycle = false;
+        for (auto& innerOp : method.getBody().front()) {
+          if (mlir::isa<txn::FutureOp>(innerOp)) {
+            isMultiCycle = true;
+            break;
+          }
+        }
+        
+        if (isMultiCycle) {
+          generateMultiCycleActionMethod(method);
+        } else {
+          generateSimpleActionMethod(method);
+        }
       }
     }
     
     // Generate rules
     for (auto& op : module.getBodyBlock()->getOperations()) {
       if (auto rule = mlir::dyn_cast<txn::RuleOp>(op)) {
-        generateRule(rule);
+        // Check if this is a multi-cycle rule
+        bool isMultiCycle = false;
+        for (auto& innerOp : rule.getBody().front()) {
+          if (mlir::isa<txn::FutureOp>(innerOp)) {
+            isMultiCycle = true;
+            break;
+          }
+        }
+        
+        if (isMultiCycle) {
+          generateMultiCycleRule(rule);
+        } else {
+          generateRule(rule);
+        }
       }
     }
     
@@ -323,6 +408,170 @@ private:
     os << "  };\n";
   }
   
+  void generateMultiCycleActionMethod(txn::ActionMethodOp method) {
+    os << "\n  // Multi-cycle action method: " << method.getName() << "\n";
+    os << "  std::unique_ptr<MultiCycleExecution> " << method.getName() << "_multicycle(";
+    
+    // Generate parameter list
+    auto funcType = method.getFunctionType();
+    for (unsigned i = 0; i < funcType.getNumInputs(); ++i) {
+      if (i > 0) os << ", ";
+      os << "int64_t arg" << i;
+    }
+    
+    os << ") {\n";
+    os << "    auto exec = std::make_unique<MultiCycleExecution>();\n";
+    os << "    exec->actionName = \"" << method.getName() << "\";\n";
+    
+    // Generate per-cycle actions first
+    if (!method.getBody().empty()) {
+      auto& block = method.getBody().front();
+      int varCount = 0;
+      llvm::DenseMap<mlir::Value, std::string> valueNames;
+      
+      // Map block arguments to names
+      for (unsigned i = 0; i < block.getNumArguments(); ++i) {
+        valueNames[block.getArgument(i)] = "arg" + std::to_string(i);
+      }
+      
+      os << "\n    // Per-cycle actions execute immediately\n";
+      
+      // First pass: generate per-cycle actions (before future block)
+      for (auto& op : block.getOperations()) {
+        if (mlir::isa<txn::FutureOp>(op)) {
+          break; // Stop at future block
+        }
+        
+        // Generate the per-cycle action code similar to simple action method
+        if (auto constOp = mlir::dyn_cast<mlir::arith::ConstantOp>(op)) {
+          std::string varName = "_" + std::to_string(varCount++);
+          valueNames[constOp.getResult()] = varName;
+          if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue())) {
+            os << "    int64_t " << varName << " = " << intAttr.getInt() << ";\n";
+          }
+        } else if (auto addOp = mlir::dyn_cast<mlir::arith::AddIOp>(op)) {
+          std::string varName = "_" + std::to_string(varCount++);
+          valueNames[addOp.getResult()] = varName;
+          os << "    int64_t " << varName << " = ";
+          os << valueNames[addOp.getLhs()] << " + " << valueNames[addOp.getRhs()] << ";\n";
+        } else if (auto callOp = mlir::dyn_cast<txn::CallOp>(op)) {
+          // Handle calls to primitive methods
+          auto callee = callOp.getCallee();
+          auto leafRef = callee.getLeafReference().getValue();
+          if (leafRef == "read") {
+            // Reading from a primitive
+            std::string instanceName = callee.getRootReference().getValue().str();
+            std::string varName = "_" + std::to_string(varCount++);
+            valueNames[callOp.getResult(0)] = varName;
+            os << "    int64_t " << varName << " = " << instanceName << "_data;\n";
+          } else if (leafRef == "write") {
+            // Writing to a primitive
+            std::string instanceName = callee.getRootReference().getValue().str();
+            os << "    " << instanceName << "_data = " << valueNames[callOp.getOperand(0)] << ";\n";
+          }
+        }
+      }
+      
+      os << "\n    // Future block launches\n";
+      // Second pass: process future block
+      for (auto& op : block.getOperations()) {
+        if (auto futureOp = mlir::dyn_cast<txn::FutureOp>(op)) {
+          // Process launches within the future block
+          for (auto& innerOp : futureOp.getBody().front()) {
+            if (auto launchOp = mlir::dyn_cast<txn::LaunchOp>(innerOp)) {
+              os << "\n    // Launch\n";
+              os << "    {\n";
+              os << "      auto launch = std::make_unique<LaunchState>();\n";
+              
+              if (launchOp.getLatency()) {
+                os << "      launch->hasStaticLatency = true;\n";
+                os << "      launch->latency = " << *launchOp.getLatency() << ";\n";
+              }
+              
+              if (launchOp.getCondition()) {
+                // Track dependency based on launch results
+                // For now, we'll use a simple naming scheme
+                int depIndex = 0;
+                for (auto& innerOp2 : futureOp.getBody().front()) {
+                  if (auto prevLaunch = mlir::dyn_cast<txn::LaunchOp>(innerOp2)) {
+                    if (prevLaunch.getResult() == launchOp.getCondition()) {
+                      os << "      launch->conditionName = \"" << method.getName() << "_launch_" << depIndex << "\";\n";
+                      break;
+                    }
+                    depIndex++;
+                  }
+                }
+              }
+              
+              os << "      launch->body = [=]() {\n";
+              // Generate launch body
+              generateLaunchBody(launchOp.getBody(), "        ");
+              os << "      };\n";
+              
+              os << "      exec->launches.push_back(std::move(launch));\n";
+              os << "    }\n";
+            }
+          }
+        }
+      }
+    }
+    
+    os << "    return exec;\n";
+    os << "  }\n";
+  }
+  
+  void generateLaunchBody(mlir::Region& region, const std::string& indent) {
+    if (!region.empty()) {
+      auto& block = region.front();
+      int varCount = 0;
+      llvm::DenseMap<mlir::Value, std::string> valueNames;
+      
+      for (auto& op : block.getOperations()) {
+        if (auto constOp = mlir::dyn_cast<mlir::arith::ConstantOp>(op)) {
+          std::string varName = "_launch_" + std::to_string(varCount++);
+          valueNames[constOp.getResult()] = varName;
+          if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue())) {
+            os << indent << "int64_t " << varName << " = " << intAttr.getInt() << ";\n";
+          }
+        } else if (auto addOp = mlir::dyn_cast<mlir::arith::AddIOp>(op)) {
+          std::string varName = "_launch_" + std::to_string(varCount++);
+          valueNames[addOp.getResult()] = varName;
+          os << indent << "int64_t " << varName << " = ";
+          os << valueNames[addOp.getLhs()] << " + " << valueNames[addOp.getRhs()] << ";\n";
+        } else if (auto callOp = mlir::dyn_cast<txn::CallOp>(op)) {
+          auto callee = callOp.getCallee();
+          auto leafRef = callee.getLeafReference().getValue();
+          
+          if (leafRef == "read") {
+            // Reading from a primitive
+            std::string instanceName = callee.getRootReference().getValue().str();
+            std::string varName = "_launch_" + std::to_string(varCount++);
+            valueNames[callOp.getResult(0)] = varName;
+            os << indent << "int64_t " << varName << " = " << instanceName << "_data;\n";
+          } else if (leafRef == "write") {
+            // Writing to a primitive
+            std::string instanceName = callee.getRootReference().getValue().str();
+            if (callOp.getNumOperands() > 0) {
+              os << indent << instanceName << "_data = " << valueNames[callOp.getOperand(0)] << ";\n";
+            }
+          } else if (leafRef == "enqueue") {
+            // Enqueue to FIFO
+            std::string instanceName = callee.getRootReference().getValue().str();
+            if (callOp.getNumOperands() > 0) {
+              os << indent << "if (" << instanceName << "_queue.size() >= " << instanceName << "_depth) {\n";
+              os << indent << "  throw std::runtime_error(\"FIFO full\");\n";
+              os << indent << "}\n";
+              os << indent << instanceName << "_queue.push(" << valueNames[callOp.getOperand(0)] << ");\n";
+            }
+          }
+        } else if (mlir::isa<txn::YieldOp>(op)) {
+          // Yield marks the end of the launch body
+          break;
+        }
+      }
+    }
+  }
+
   void generateSimpleActionMethod(txn::ActionMethodOp method) {
     os << "\n  // Action method: " << method.getName() << "\n";
     os << "  void " << method.getName() << "(";
@@ -417,6 +666,22 @@ private:
             os << "    int64_t " << varName << " = (" << instanceName << "_queue.size() >= " 
                << instanceName << "_depth) ? 1 : 0;\n";
           }
+        } else if (auto futureOp = mlir::dyn_cast<txn::FutureOp>(op)) {
+          // Future operations encapsulate multi-cycle execution
+          os << "    // Future block - multi-cycle execution not yet supported in simulation\n";
+          os << "    // TODO: Implement multi-cycle simulation support\n";
+        } else if (auto launchOp = mlir::dyn_cast<txn::LaunchOp>(op)) {
+          // Launch operations represent deferred execution
+          std::string varName = "_done_" + std::to_string(varCount++);
+          valueNames[launchOp.getDone()] = varName;
+          os << "    // Launch operation - deferred execution not yet supported\n";
+          os << "    int64_t " << varName << " = 1; // Assume immediate completion\n";
+          if (launchOp.getLatency()) {
+            os << "    // Would wait " << *launchOp.getLatency() << " cycles\n";
+          }
+          if (launchOp.getCondition()) {
+            os << "    // Would wait for condition " << valueNames[launchOp.getCondition()] << "\n";
+          }
         }
       }
     } else {
@@ -510,6 +775,69 @@ private:
     os << "  bool canFire_" << rule.getSymName() << "() {\n";
     os << "    // TODO: Implement rule guard logic\n";
     os << "    return true;\n";
+    os << "  }\n";
+  }
+  
+  void generateMultiCycleRule(txn::RuleOp rule) {
+    os << "\n  // Multi-cycle Rule: " << rule.getSymName() << "\n";
+    os << "  bool canFire_" << rule.getSymName() << "() {\n";
+    os << "    // TODO: Implement rule guard logic\n";
+    os << "    return true;\n";
+    os << "  }\n";
+    
+    os << "\n  std::unique_ptr<MultiCycleExecution> " << rule.getSymName() << "_multicycle() {\n";
+    os << "    auto exec = std::make_unique<MultiCycleExecution>();\n";
+    os << "    exec->actionName = \"" << rule.getSymName() << "\";\n";
+    os << "    exec->startCycle = currentCycle;\n";
+    
+    // Generate per-cycle actions and launches
+    os << "    // Per-cycle actions execute immediately\n";
+    os << "    // TODO: Add per-cycle action logic\n";
+    
+    // Look for FutureOp and generate launches
+    for (auto& op : rule.getBody().front()) {
+      if (auto futureOp = mlir::dyn_cast<txn::FutureOp>(op)) {
+        os << "    // Future block launches\n";
+        for (auto& innerOp : futureOp.getBody().front()) {
+          if (auto launchOp = mlir::dyn_cast<txn::LaunchOp>(innerOp)) {
+            os << "    {\n";
+            os << "      auto launch = std::make_unique<LaunchState>();\n";
+            
+            // Handle latency
+            if (launchOp.getLatency().has_value()) {
+              os << "      launch->hasStaticLatency = true;\n";
+              os << "      launch->latency = " << launchOp.getLatency().value() << ";\n";
+              os << "      launch->targetCycle = currentCycle + " << launchOp.getLatency().value() << ";\n";
+            }
+            
+            // Handle condition dependency
+            if (launchOp.getCondition()) {
+              // Track dependency based on launch results
+              int depIndex = 0;
+              for (auto& innerOp2 : futureOp.getBody().front()) {
+                if (auto prevLaunch = mlir::dyn_cast<txn::LaunchOp>(innerOp2)) {
+                  if (prevLaunch.getResult() == launchOp.getCondition()) {
+                    os << "      launch->conditionName = \"" << rule.getSymName() << "_launch_" << depIndex << "\";\n";
+                    break;
+                  }
+                  depIndex++;
+                }
+              }
+            }
+            
+            os << "      launch->body = [=]() {\n";
+            // Generate launch body
+            generateLaunchBody(launchOp.getBody(), "        ");
+            os << "      };\n";
+            
+            os << "      exec->launches.push_back(std::move(launch));\n";
+            os << "    }\n";
+          }
+        }
+      }
+    }
+    
+    os << "    return exec;\n";
     os << "  }\n";
   }
   
@@ -795,6 +1123,132 @@ private:
     os << "  std::map<std::pair<std::string, std::vector<int64_t>>, std::vector<int64_t>> valueMethodCache;\n";
     os << "};\n\n";
     
+    os << "// Launch execution state\n";
+    os << "struct LaunchState {\n";
+    os << "  enum Status { Pending, Running, Completed };\n";
+    os << "  Status status = Pending;\n";
+    os << "  uint64_t startCycle = 0;\n";
+    os << "  uint64_t targetCycle = 0;  // For static latency\n";
+    os << "  std::string conditionName; // For dynamic dependency\n";
+    os << "  std::function<void()> body;\n";
+    os << "  bool hasStaticLatency = false;\n";
+    os << "  uint32_t latency = 0;\n";
+    os << "};\n\n";
+    
+    os << "// Multi-cycle execution state for an action\n";
+    os << "struct MultiCycleExecution {\n";
+    os << "  std::string actionName;\n";
+    os << "  uint64_t startCycle;\n";
+    os << "  std::vector<std::unique_ptr<LaunchState>> launches;\n";
+    os << "  std::map<std::string, bool> launchCompletions; // launch ID -> completion status\n";
+    os << "  bool completed = false;\n";
+    os << "};\n\n";
+    
+    os << "// Extended module class with multi-cycle support\n";
+    os << "class MultiCycleSimModule : public SimModule {\n";
+    os << "public:\n";
+    os << "  MultiCycleSimModule(const std::string& name) : SimModule(name) {}\n\n";
+    
+    os << "  // Track active multi-cycle executions\n";
+    os << "  std::vector<std::unique_ptr<MultiCycleExecution>> activeExecutions;\n\n";
+    
+    os << "  // Register multi-cycle action method\n";
+    os << "  void registerMultiCycleAction(const std::string& name,\n";
+    os << "                               std::function<std::unique_ptr<MultiCycleExecution>(const std::vector<int64_t>&)> impl) {\n";
+    os << "    multiCycleActions[name] = impl;\n";
+    os << "  }\n\n";
+    
+    os << "  // Execute multi-cycle action\n";
+    os << "  void startMultiCycleAction(const std::string& name, const std::vector<int64_t>& args, uint64_t currentCycle) {\n";
+    os << "    auto it = multiCycleActions.find(name);\n";
+    os << "    if (it != multiCycleActions.end()) {\n";
+    os << "      auto execution = it->second(args);\n";
+    os << "      execution->startCycle = currentCycle;\n";
+    os << "      activeExecutions.push_back(std::move(execution));\n";
+    os << "    }\n";
+    os << "  }\n\n";
+    
+    os << "  // Update multi-cycle executions\n";
+    os << "  void updateMultiCycleExecutions(uint64_t currentCycle) {\n";
+    os << "    std::vector<std::unique_ptr<MultiCycleExecution>> stillActive;\n";
+    os << "    \n";
+    os << "    for (auto& exec : activeExecutions) {\n";
+    os << "      if (exec->completed) continue;\n";
+    os << "      \n";
+    os << "      bool allLaunchesComplete = true;\n";
+    os << "      \n";
+    os << "      // Update each launch\n";
+    os << "      for (size_t i = 0; i < exec->launches.size(); ++i) {\n";
+    os << "        auto& launch = exec->launches[i];\n";
+    os << "        std::string launchId = exec->actionName + \"_launch_\" + std::to_string(i);\n";
+    os << "        \n";
+    os << "        if (launch->status == LaunchState::Completed) {\n";
+    os << "          exec->launchCompletions[launchId] = true;\n";
+    os << "          continue;\n";
+    os << "        }\n";
+    os << "        \n";
+    os << "        allLaunchesComplete = false;\n";
+    os << "        \n";
+    os << "        // Check if launch can start\n";
+    os << "        if (launch->status == LaunchState::Pending) {\n";
+    os << "          bool canStart = true;\n";
+    os << "          \n";
+    os << "          // Check dynamic dependency\n";
+    os << "          if (!launch->conditionName.empty()) {\n";
+    os << "            canStart = exec->launchCompletions[launch->conditionName];\n";
+    os << "          }\n";
+    os << "          \n";
+    os << "          if (canStart) {\n";
+    os << "            launch->status = LaunchState::Running;\n";
+    os << "            launch->startCycle = currentCycle;\n";
+    os << "            if (launch->hasStaticLatency) {\n";
+    os << "              launch->targetCycle = currentCycle + launch->latency;\n";
+    os << "            }\n";
+    os << "          }\n";
+    os << "        }\n";
+    os << "        \n";
+    os << "        // Check if launch can complete\n";
+    os << "        if (launch->status == LaunchState::Running) {\n";
+    os << "          bool canComplete = true;\n";
+    os << "          \n";
+    os << "          if (launch->hasStaticLatency && currentCycle < launch->targetCycle) {\n";
+    os << "            canComplete = false;\n";
+    os << "          }\n";
+    os << "          \n";
+    os << "          if (canComplete) {\n";
+    os << "            // Try to execute the launch body\n";
+    os << "            try {\n";
+    os << "              launch->body();\n";
+    os << "              launch->status = LaunchState::Completed;\n";
+    os << "              exec->launchCompletions[launchId] = true;\n";
+    os << "            } catch (...) {\n";
+    os << "              // For dynamic launches, retry next cycle\n";
+    os << "              if (!launch->hasStaticLatency) {\n";
+    os << "                // Keep trying\n";
+    os << "              } else {\n";
+    os << "                // Static launch failed - this would be a panic\n";
+    os << "                std::cerr << \"PANIC: Static launch failed after \" << launch->latency << \" cycles\\n\";\n";
+    os << "                throw;\n";
+    os << "              }\n";
+    os << "            }\n";
+    os << "          }\n";
+    os << "        }\n";
+    os << "      }\n";
+    os << "      \n";
+    os << "      exec->completed = allLaunchesComplete;\n";
+    os << "      if (!exec->completed) {\n";
+    os << "        stillActive.push_back(std::move(exec));\n";
+    os << "      }\n";
+    os << "    }\n";
+    os << "    \n";
+    os << "    activeExecutions = std::move(stillActive);\n";
+    os << "  }\n\n";
+    
+    os << "private:\n";
+    os << "  std::map<std::string, std::function<std::unique_ptr<MultiCycleExecution>(const std::vector<int64_t>&)>> multiCycleActions;\n";
+    
+    os << "};\n\n";
+    
     os << "// Main simulation driver\n";
     os << "class Simulator {\n";
     os << "public:\n";
@@ -810,7 +1264,7 @@ private:
     
     os << "private:\n";
     os << "  std::vector<std::unique_ptr<SimModule>> modules;\n";
-    os << "  int cycles;\n";
+    os << "  uint64_t cycles;\n";
     os << "  bool verbose;\n";
     os << "  bool dumpStats;\n";
     os << "};\n";
@@ -836,8 +1290,16 @@ private:
     
     os << "    // Execute each module following the three-phase execution model\n";
     os << "    for (auto& module : modules) {\n";
+    os << "      // Check if this is a multi-cycle module\n";
+    os << "      auto* mcModule = dynamic_cast<MultiCycleSimModule*>(module.get());\n";
+    os << "      \n";
     os << "      // Phase 1: Value Phase - Compute all value methods (done lazily via caching)\n";
     os << "      // Value methods are computed on-demand and cached in callValueMethod()\n\n";
+    
+    os << "      // Update multi-cycle executions if this is a multi-cycle module\n";
+    os << "      if (mcModule) {\n";
+    os << "        mcModule->updateMultiCycleExecutions(cycles);\n";
+    os << "      }\n\n";
     
     os << "      // Phase 2: Execution Phase - Execute actions in schedule order\n";
     os << "      const auto& schedule = module->getSchedule();\n";
@@ -869,14 +1331,27 @@ private:
     os << "        }\n\n";
     
     os << "        if (canExecute && !hasConflict) {\n";
-    os << "          // Execute the action\n";
-    os << "          if (isRule) {\n";
-    os << "            // For rules, call the associated action method or inline logic\n";
-    os << "            // This is a simplification - real implementation would execute rule body\n";
-    os << "            module->callActionMethod(actionName, {});\n";
-    os << "          } else {\n";
-    os << "            // For action methods, execute them\n";
-    os << "            module->callActionMethod(actionName, {});\n";
+    os << "          // Check if this is a multi-cycle action\n";
+    os << "          bool isMultiCycle = false;\n";
+    os << "          if (mcModule) {\n";
+    os << "            // Check if action has active multi-cycle execution\n";
+    os << "            for (const auto& exec : mcModule->activeExecutions) {\n";
+    os << "              if (exec->actionName == actionName && !exec->completed) {\n";
+    os << "                isMultiCycle = true;\n";
+    os << "                break;\n";
+    os << "              }\n";
+    os << "            }\n";
+    os << "          }\n";
+    os << "          \n";
+    os << "          if (!isMultiCycle) {\n";
+    os << "            // Execute the action\n";
+    os << "            if (isRule) {\n";
+    os << "              // For rules, call the associated action method or inline logic\n";
+    os << "              module->callActionMethod(actionName, {});\n";
+    os << "            } else {\n";
+    os << "              // For action methods, execute them\n";
+    os << "              module->callActionMethod(actionName, {});\n";
+    os << "            }\n";
     os << "          }\n";
     os << "          executedActions.insert(actionName);\n";
     os << "        }\n";
