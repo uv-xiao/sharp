@@ -88,21 +88,91 @@ pixi run clean             # Clean build artifacts
 ```
 
 ### Testing Commands
+
+#### Standard Test Commands
 ```bash
-pixi run test              # Run all tests
-pixi run test-lit          # Run lit tests only
-pixi run test-unit         # Run unit tests only
-pixi run test-python       # Test Python bindings
+# Run all tests (lit + unit tests if available)
+pixi run test              # Runs: cmake --build build --target check-sharp
 
-# Run a single test file
-./build/bin/llvm-lit test/Dialect/Txn/basic.mlir -v
+# Run lit tests only (most commonly used)
+pixi run test-lit          # Runs: cmake --build build --target check-sharp-lit
 
-# Alternative: use the full path to llvm-lit from the unified build
-/home/uvxiao/sharp/.install/unified-build/bin/llvm-lit test/Dialect/Txn/basic.mlir -v
-
-# Debug a test by running sharp-opt directly
-./build/bin/sharp-opt test/Dialect/Txn/basic.mlir
+# Run unit tests only (requires gtest support in LLVM build)
+pixi run test-unit         # Runs check-sharp-unit target if available
 ```
+
+#### Running Individual Tests
+
+**From the Sharp root directory:**
+```bash
+# Using lit.py directly (most reliable method)
+cd build && ../circt/llvm/llvm/utils/lit/lit.py test/Dialect/Txn/basic.mlir -v
+
+# Using pixi environment lit
+cd build && /home/uvxiao/sharp/.pixi/envs/default/bin/lit test/Dialect/Txn/basic.mlir -v
+
+# Run all tests in a directory
+cd build && ../circt/llvm/llvm/utils/lit/lit.py test/Dialect/Txn/ -v
+
+# Run tests matching a pattern
+cd build && ../circt/llvm/llvm/utils/lit/lit.py test/ -v --filter "conflict"
+```
+
+**Debug a test by running sharp-opt directly:**
+```bash
+# From Sharp root directory
+./build/bin/sharp-opt test/Dialect/Txn/basic.mlir
+
+# With specific passes
+./build/bin/sharp-opt test/Dialect/Txn/basic.mlir --sharp-infer-conflict-matrix
+
+# Allow unregistered dialects (for tests with mock operations)
+./build/bin/sharp-opt test/Dialect/Txn/basic.mlir -allow-unregistered-dialect
+```
+
+#### Test Infrastructure Details
+
+- **Test Runner**: Uses LLVM's lit (LLVM Integrated Tester)
+- **Test Location**: All tests are in `test/` directory
+- **Test Format**: `.mlir` files with RUN lines at the top
+- **FileCheck**: Located at `.install/unified/bin/FileCheck`
+- **Working Directory**: Tests should be run from `build/` directory
+
+#### Common Test Patterns
+
+```mlir
+// Basic test
+// RUN: sharp-opt %s | FileCheck %s
+
+// Test with specific pass
+// RUN: sharp-opt %s --sharp-infer-conflict-matrix | FileCheck %s
+
+// Test expecting failure
+// RUN: not sharp-opt %s --verify-diagnostics 2>&1 | FileCheck %s
+
+// Test with multiple check prefixes
+// RUN: sharp-opt %s | FileCheck %s --check-prefix=CHECK
+// RUN: sharp-opt %s --convert-txn-to-firrtl | FileCheck %s --check-prefix=FIRRTL
+```
+
+#### Python Test Execution
+
+```bash
+# Python tests are integrated into lit test suite
+# Run from build directory:
+cd build && ../circt/llvm/llvm/utils/lit/lit.py test/python/ -v
+
+# Or run Python test directly (from Sharp root)
+PYTHONPATH=build/python_packages:build/python_packages/pysharp python test/python/pysharp/test_pysharp.py
+```
+
+#### Troubleshooting Tests
+
+1. **"unregistered dialect" error**: Add `-allow-unregistered-dialect` flag
+2. **FileCheck not found**: Use full path `.install/unified/bin/FileCheck`
+3. **lit not found**: Use `../circt/llvm/llvm/utils/lit/lit.py` from build directory
+4. **Tests not discovered**: Ensure you're in the `build/` directory
+5. **Python import errors**: Set PYTHONPATH to include build/python_packages
 
 ### Development Commands
 ```bash
