@@ -15,7 +15,7 @@ Sharp is a transaction-based hardware description language with conflict matrix 
 - Sharp Txn dialect with modules, methods, rules, and scheduling
 - MLIR infrastructure setup with CIRCT integration
 - Build system with Pixi package manager
-- Testing infrastructure with lit/FileCheck (89/91 tests passing, 97.8% success rate)
+- Testing infrastructure with lit/FileCheck (90/93 tests passing, 96.77% success rate)
 
 #### Txn Dialect Features (2025-06-29)
 - **Conflict Matrix (CM) on schedule operations**
@@ -531,17 +531,24 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Test Status: 5/6 tests passing (83.33%)
   - Known Issue: if-lowering test marked XFAIL - complex control flow with txn.return/abort inside if branches needs refinement
 
+#### Value Methods with Arguments (2025-07-08) ✅
+- **Full Implementation**:
+  - Added txn.func and txn.func_call operations to TxnOps.td
+  - Implemented FunctionOpInterface and CallableOpInterface for FuncOp
+  - Created complete InlineFunctions pass for function inlining
+  - Integrated into all conversion pipelines (TxnToFIRRTL, TxnToFunc, TxnSimulate)
+  - Added comprehensive test suite (test/Analysis/inline-functions.mlir)
+  - Functions are syntax sugar - inlined before any lowering
+- **Status**: Fully implemented and tested
+- **Usage**: Replace value methods with arguments using txn.func for combinational logic
+
 ## Next Steps
 
-1. **Value Methods with Arguments**
-   - since value methods' results should be constant during one cycle, according to `docs/execution_model.md`, we should not allow value methods with arguments.
-   - instead of using `i.read_add(a)` as a function, which equals to `i.read() + a`, we should let `read_add` to be a function (`txn.func`) inside `i`'s module.
-   - Such `txn.func` should be inlined before `TxnToFIRRTL` and `TxnToFunc`. It's just a syntax sugar for `i.read() + a`.
-
-2. **Complex Conditionals in Action Method**
+1. **Complex Conditionals in Action Method**
    - `TxnToFunc` should have the same will-fire logic as `TxnToFIRRTL`, for example, the `dynamic` mode should be supported to handle complex conditionals with `abort`s.
    - Check how `abort`s are handled in `TxnToFIRRTL`, fix it if needed.
    - Implement the consistent will-fire logic in `TxnToFunc`.
+   - Add tests and update examples to cover the required features.
 
 4. **Tooling and Integration**
    - Fix Python bindings for programmatic access

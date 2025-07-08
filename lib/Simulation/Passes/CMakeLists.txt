@@ -33,6 +33,7 @@ add_mlir_library(SharpSimulationPasses
   SharpTxn
   SharpTxnToFunc
   SharpConversionPasses
+  SharpAnalysis
   SharpSimulationDialect
   SharpSimulationCore
   SharpSimulationTL

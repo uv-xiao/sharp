@@ -277,4 +277,55 @@ def SharpAnalysisCollectPrimitiveActionsPass : Pass<"sharp-collect-primitive-act
   let dependentDialects = ["::sharp::txn::TxnDialect"];
 }
 
+def InlineFunctions : Pass<"sharp-inline-functions", "mlir::ModuleOp"> {
+  let summary = "Inline txn.func calls within txn modules";
+  let description = [{
+    This pass inlines all txn.func_call operations by replacing them with the
+    body of the called function. Functions (txn.func) are syntax sugar for
+    combinational logic that can take arguments, and they must be inlined
+    before lowering to FIRRTL or Func dialects.
+    
+    The inlining process:
+    1. Finds all txn.func_call operations
+    2. Looks up the called function within the same module
+    3. Creates a mapping from function arguments to call operands
+    4. Clones the function body, replacing arguments with operands
+    5. Replaces txn.return with the returned values
+    6. Replaces the call with the inlined body
+    7. Removes unused txn.func operations after inlining
+    
+    Example:
+    ```mlir
+    txn.func @add(%a: i32, %b: i32) -> i32 {
+      %sum = arith.addi %a, %b : i32
+      txn.return %sum : i32
+    }
+    
+    txn.value_method @compute() -> i32 {
+      %c5 = arith.constant 5 : i32
+      %c3 = arith.constant 3 : i32
+      %result = txn.func_call @add(%c5, %c3) : (i32, i32) -> i32
+      txn.return %result : i32
+    }
+    ```
+    
+    After inlining:
+    ```mlir
+    txn.value_method @compute() -> i32 {
+      %c5 = arith.constant 5 : i32
+      %c3 = arith.constant 3 : i32
+      %sum = arith.addi %c5, %c3 : i32
+      txn.return %sum : i32
+    }
+    ```
+    
+    This pass must run before TxnToFIRRTL and TxnToFunc conversions since
+    those passes do not handle txn.func operations.
+  }];
+  
+  let constructor = "mlir::sharp::createInlineFunctionsPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
 #endif // SHARP_ANALYSIS_PASSES

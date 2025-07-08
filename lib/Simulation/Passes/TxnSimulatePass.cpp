@@ -8,6 +8,7 @@
 #include "sharp/Dialect/Txn/TxnOps.h"
 #include "sharp/Dialect/Txn/TxnAttrs.h"
 #include "sharp/Simulation/Simulator.h"
+#include "sharp/Analysis/Passes.h"
 #include "sharp/Conversion/Passes.h"
 #include "circt/Support/LLVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -1512,6 +1513,7 @@ struct TxnSimulatePass : public impl::TxnSimulatePassBase<TxnSimulatePass> {
       pm.enableVerifier(true);
       
       // Add lowering passes
+      pm.addPass(mlir::sharp::createInlineFunctionsPass());
       pm.addPass(mlir::sharp::createConvertTxnToFuncPass());
       pm.addPass(mlir::createCanonicalizerPass());
       

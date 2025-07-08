@@ -489,4 +489,91 @@ def LaunchOp : TxnOp<"launch", [
 
 
 
+//===----------------------------------------------------------------------===//
+// Function Operations
+//===----------------------------------------------------------------------===//
+
+def FuncOp : TxnOp<"func",
+    [Symbol, FunctionOpInterface, IsolatedFromAbove]> {
+  let summary = "Function within a txn module";
+  let description = [{
+    Represents a pure function within a transaction module. Unlike value methods,
+    functions are syntax sugar that get inlined before lowering. They can take
+    arguments and are used for combinational logic that depends on inputs.
+    
+    Functions are inlined before TxnToFIRRTL and TxnToFunc passes, so they don't
+    appear in the final hardware. They're purely for code organization and reuse.
+    
+    Example:
+    ```mlir
+    txn.module @ALU {
+      // Instead of: txn.value_method @add(%a: i32, %b: i32) -> i32
+      txn.func @add(%a: i32, %b: i32) -> i32 {
+        %sum = arith.addi %a, %b : i32
+        txn.return %sum : i32
+      }
+      
+      // Value method that uses the function
+      txn.value_method @compute() -> i32 {
+        %a = arith.constant 5 : i32
+        %b = arith.constant 3 : i32
+        %result = txn.func_call @add(%a, %b) : (i32, i32) -> i32
+        txn.return %result : i32
+      }
+    }
+    ```
+  }];
+  
+  let arguments = (ins 
+    SymbolNameAttr:$sym_name,
+    TypeAttrOf<FunctionType>:$function_type,
+    OptionalAttr<DictArrayAttr>:$arg_attrs,
+    OptionalAttr<DictArrayAttr>:$res_attrs
+  );
+  
+  let regions = (region AnyRegion:$body);
+  
+  let extraClassDeclaration = [{
+    /// Returns the argument types of this function.
+    ::llvm::ArrayRef<::mlir::Type> getArgumentTypes() { 
+      return getFunctionType().getInputs(); 
+    }
+
+    /// Returns the result types of this function.  
+    ::llvm::ArrayRef<::mlir::Type> getResultTypes() { 
+      return getFunctionType().getResults(); 
+    }
+    
+    // CallableOpInterface methods
+    ::mlir::Region *getCallableRegion();
+    ::llvm::ArrayRef<::mlir::Type> getCallableResults();
+  }];
+  
+  let hasCustomAssemblyFormat = 1;
+}
+
+def FuncCallOp : TxnOp<"func_call"> {
+  let summary = "Call a txn.func";
+  let description = [{
+    Calls a function defined with txn.func. This operation will be inlined
+    during the function inlining pass before any lowering.
+    
+    Example:
+    ```mlir
+    %result = txn.func_call @add(%a, %b) : (i32, i32) -> i32
+    ```
+  }];
+  
+  let arguments = (ins 
+    FlatSymbolRefAttr:$callee,
+    Variadic<AnyType>:$operands
+  );
+  
+  let results = (outs Variadic<AnyType>:$results);
+  
+  let assemblyFormat = [{
+    $callee `(` $operands `)` `:` functional-type($operands, $results) attr-dict
+  }];
+}
+
 #endif // SHARP_DIALECT_TXN_OPS_TD

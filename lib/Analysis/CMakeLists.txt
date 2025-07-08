@@ -9,6 +9,7 @@ add_mlir_dialect_library(SharpAnalysis
   ValueMethodConflictCheck.cpp
   ActionCallValidation.cpp
   CollectPrimitiveActions.cpp
+  InlineFunctions.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${SHARP_MAIN_INCLUDE_DIR}/sharp/Analysis

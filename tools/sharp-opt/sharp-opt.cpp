@@ -48,6 +48,7 @@ void registerSharpPipelines() {
   mlir::PassPipelineRegistration<>(
     "lower-to-hw", "Lower Txn to HW dialect via FIRRTL",
     [](mlir::OpPassManager &pm) {
+      pm.addPass(mlir::sharp::createInlineFunctionsPass());
       pm.addPass(mlir::sharp::createTxnToFIRRTLConversion());
       pm.addPass(mlir::createCanonicalizerPass());
       pm.addPass(circt::createLowerFIRRTLToHWPass());
@@ -63,6 +64,7 @@ void registerSharpPipelines() {
     "txn-export-verilog", "Export to Verilog after lowering from Txn",
     [](mlir::OpPassManager &pm) {
       // First run the lowering pipeline
+      pm.addPass(mlir::sharp::createInlineFunctionsPass());
       pm.addPass(mlir::sharp::createTxnToFIRRTLConversion());
       pm.addPass(mlir::createCanonicalizerPass());
       pm.addPass(circt::createLowerFIRRTLToHWPass());
