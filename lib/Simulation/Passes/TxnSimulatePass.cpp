@@ -28,6 +28,8 @@
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
+#include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
+#include "mlir/Conversion/Passes.h"
 #include "mlir/Target/LLVMIR/Dialect/All.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
@@ -1519,6 +1521,9 @@ struct TxnSimulatePass : public impl::TxnSimulatePassBase<TxnSimulatePass> {
       
       // Convert SCF to control flow
       pm.addPass(mlir::createSCFToControlFlowPass());
+      
+      // Convert memref to LLVM
+      pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
       
       // Convert arith to LLVM
       pm.addPass(mlir::createArithToLLVMConversionPass());

@@ -1198,29 +1198,59 @@ static LogicalResult convertOp(Operation *op, ConversionContext &ctx) {
     // Handle method calls
     auto callee = callOp.getCallee();
     
-    // Check if this is a value method call
-    bool isValueMethod = false;
-    if (auto symbolOp = SymbolTable::lookupNearestSymbolFrom(callOp, callee)) {
-      isValueMethod = isa<ValueMethodOp>(symbolOp);
-    }
-    
-    if (isValueMethod) {
-      // For value methods, we need to read the output port
-      StringRef methodName = callee.getLeafReference();
-      std::string portName = (methodName + "OUT").str();
+    if (callee.getNestedReferences().size() == 0) {
+      // Local method call
+      // Check if this is a value method call
+      bool isValueMethod = false;
+      if (auto symbolOp = SymbolTable::lookupNearestSymbolFrom(callOp, callee)) {
+        isValueMethod = isa<ValueMethodOp>(symbolOp);
+      }
       
-      // Find the FIRRTL module
-      auto firrtlModule = dyn_cast<FModuleOp>(ctx.firrtlBuilder.getBlock()->getParentOp());
-      if (!firrtlModule) return failure();
+      if (isValueMethod) {
+        // For value methods, we need to read the output port
+        StringRef methodName = callee.getLeafReference();
+        std::string portName = (methodName + "OUT").str();
+        
+        // Find the FIRRTL module
+        auto firrtlModule = dyn_cast<FModuleOp>(ctx.firrtlBuilder.getBlock()->getParentOp());
+        if (!firrtlModule) return failure();
+        
+        Value outputPort = getOrCreatePort(firrtlModule, portName, 
+                                         convertType(callOp.getType(0)), Direction::Out);
+        
+        // Create a node to read the value
+        auto nodeOp = ctx.firrtlBuilder.create<NodeOp>(
+            callOp.getLoc(), outputPort, 
+            ctx.firrtlBuilder.getStringAttr(methodName + "_call"));
+        ctx.txnToFirrtl[callOp.getResult(0)] = nodeOp.getResult();
+      }
+    } else if (callee.getNestedReferences().size() == 1) {
+      // Instance method call
+      StringRef instName = callee.getRootReference().getValue();
+      StringRef methodName = callee.getNestedReferences()[0].getValue();
       
-      Value outputPort = getOrCreatePort(firrtlModule, portName, 
-                                       convertType(callOp.getType(0)), Direction::Out);
-      
-      // Create a node to read the value
-      auto nodeOp = ctx.firrtlBuilder.create<NodeOp>(
-          callOp.getLoc(), outputPort, 
-          ctx.firrtlBuilder.getStringAttr(methodName + "_call"));
-      ctx.txnToFirrtl[callOp.getResult(0)] = nodeOp.getResult();
+      // For value method calls that produce results
+      if (callOp.getNumResults() > 0) {
+        // Find the instance ports
+        auto instPorts = ctx.instancePorts.find(instName);
+        if (instPorts != ctx.instancePorts.end()) {
+          // Find the output port for this method
+          auto outputPortName = (methodName + "_data").str();
+          auto outputPort = instPorts->second.find(outputPortName);
+          
+          if (outputPort != instPorts->second.end()) {
+            // Map the result to the output port
+            ctx.txnToFirrtl[callOp.getResult(0)] = outputPort->second;
+          } else {
+            // If the port wasn't found with _data suffix, try without
+            outputPortName = methodName.str();
+            outputPort = instPorts->second.find(outputPortName);
+            if (outputPort != instPorts->second.end()) {
+              ctx.txnToFirrtl[callOp.getResult(0)] = outputPort->second;
+            }
+          }
+        }
+      }
     }
   } else if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
     // Convert constants to FIRRTL
@@ -1659,14 +1689,27 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       
       if (foundGuard && guardCondition) {
         // Convert the guard condition to FIRRTL
-        // First, convert any operations that produce the guard condition
+        // First, we need to convert all operations in the rule body that the guard depends on
+        // Walk through all operations and convert them recursively
         for (auto &op : rule.getBody().front()) {
-          if (op.getNumResults() > 0 && op.getResult(0) == guardCondition) {
+          // Skip operations that are already converted or don't produce values
+          if (op.getNumResults() == 0) continue;
+          
+          // Check if any result is already converted
+          bool alreadyConverted = true;
+          for (auto result : op.getResults()) {
+            if (!ctx.txnToFirrtl.count(result)) {
+              alreadyConverted = false;
+              break;
+            }
+          }
+          
+          if (!alreadyConverted) {
             // Convert this operation and its dependencies
             if (failed(convertOp(&op, ctx))) {
               rule.emitError("Failed to convert guard condition operation");
+              continue;
             }
-            break;
           }
         }
         

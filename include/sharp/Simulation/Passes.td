@@ -47,7 +47,8 @@ def TxnSimulatePass : Pass<"sharp-simulate", "mlir::ModuleOp"> {
     "mlir::cf::ControlFlowDialect",
     "mlir::LLVM::LLVMDialect",
     "mlir::func::FuncDialect",
-    "mlir::ub::UBDialect"
+    "mlir::ub::UBDialect",
+    "mlir::memref::MemRefDialect"
   ];
 }
 

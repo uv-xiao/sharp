@@ -13,6 +13,7 @@ add_mlir_library(SharpTxnToFunc
   MLIRPass
   MLIRFuncDialect
   MLIRArithDialect
+  MLIRMemRefDialect
   MLIRSCFDialect
   MLIRTransformUtils
   SharpTxn

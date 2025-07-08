@@ -1,8 +1,9 @@
 // RUN: sharp-opt %s -sharp-simulate=mode=jit | FileCheck %s
 
-// CHECK-DAG: llvm.func @SimpleCounter_main()
+// CHECK-DAG: llvm.func @SimpleCounter_scheduler()
 // CHECK-DAG: llvm.func @SimpleCounter_read() -> i32
-// CHECK-DAG: llvm.func @SimpleCounter_increment()
+// CHECK-DAG: llvm.func @SimpleCounter_increment() -> i1
+// CHECK-DAG: llvm.func @SimpleCounter_rule_auto_incr() -> i1
 txn.module @SimpleCounter attributes {moduleName = "SimpleCounter"} {
   txn.value_method @read() -> i32 {
     %zero = arith.constant 0 : i32
@@ -14,9 +15,9 @@ txn.module @SimpleCounter attributes {moduleName = "SimpleCounter"} {
   }
   
   txn.rule @auto_incr {
-    %true = arith.constant true
-    txn.return
+    txn.call @increment() : () -> ()
+    txn.yield
   }
   
-  txn.schedule [@auto_incr, @increment]
+  txn.schedule [@auto_incr]
 }

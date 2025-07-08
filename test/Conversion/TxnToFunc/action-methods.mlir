@@ -3,18 +3,30 @@
 // Test action method conversion
 
 // CHECK-LABEL: module
-// CHECK: func.func @Actions_main() {
-// CHECK:   return
-// CHECK: }
-// CHECK: func.func @Actions_doNothing() {
-// CHECK:   return
+// CHECK: func.func @Actions_doNothing() -> i1 {
+// CHECK:   %[[FALSE:.*]] = arith.constant false
+// CHECK:   return %[[FALSE]] : i1
 // CHECK: }
 
-// CHECK: func.func @Actions_processValue(%arg0: i32) {
+// CHECK: func.func @Actions_processValue(%arg0: i32) -> i1 {
 // CHECK:   %[[C1:.*]] = arith.constant 1 : i32
 // CHECK:   %[[ADD:.*]] = arith.addi %arg0, %[[C1]]
-// CHECK:   return
+// CHECK:   %[[FALSE:.*]] = arith.constant false
+// CHECK:   return %[[FALSE]] : i1
 // CHECK: }
+
+// CHECK: func.func @Actions_rule_callDoNothing() -> i1 {
+// CHECK:   call @Actions_doNothing() : () -> i1
+// CHECK:   %[[FALSE:.*]] = arith.constant false
+// CHECK:   return %[[FALSE]] : i1
+// CHECK: }
+// CHECK: func.func @Actions_rule_callProcessValue() -> i1 {
+// CHECK:   %[[C42:.*]] = arith.constant 42 : i32
+// CHECK:   call @Actions_processValue(%[[C42]]) : (i32) -> i1
+// CHECK:   %[[FALSE:.*]] = arith.constant false
+// CHECK:   return %[[FALSE]] : i1
+// CHECK: }
+// CHECK: func.func @Actions_scheduler() {
 
 txn.module @Actions {
   txn.action_method @doNothing() {
@@ -27,5 +39,16 @@ txn.module @Actions {
     txn.return
   }
   
-  txn.schedule [@doNothing, @processValue]
+  txn.rule @callDoNothing {
+    txn.call @doNothing() : () -> ()
+    txn.yield
+  }
+  
+  txn.rule @callProcessValue {
+    %c42 = arith.constant 42 : i32
+    txn.call @processValue(%c42) : (i32) -> ()
+    txn.yield
+  }
+  
+  txn.schedule [@callDoNothing, @callProcessValue]
 }

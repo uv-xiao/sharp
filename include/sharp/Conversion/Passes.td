@@ -86,7 +86,8 @@ def ConvertTxnToFuncPass : Pass<"convert-txn-to-func", "mlir::ModuleOp"> {
     "::sharp::txn::TxnDialect",
     "::mlir::func::FuncDialect",
     "::mlir::arith::ArithDialect",
-    "::mlir::scf::SCFDialect"
+    "::mlir::scf::SCFDialect",
+    "::mlir::memref::MemRefDialect"
   ];
 }
 

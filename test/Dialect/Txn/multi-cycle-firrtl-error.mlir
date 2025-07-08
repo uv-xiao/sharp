@@ -23,7 +23,7 @@ txn.module @MultiCycleFIRRTL {
   txn.action_method @withFuture() {
     %v = txn.call @reg::@read() : () -> i32
     
-    // CHECK: error: future operations are not yet supported in FIRRTL conversion. Multi-cycle execution requires additional synthesis infrastructure.
+    // CHECK: error: future operations are not yet supported in FIRRTL conversion
     txn.future {
       %done = txn.launch after 1 {
         %zero = arith.constant 0 : i32

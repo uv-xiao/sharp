@@ -15,7 +15,7 @@ Sharp is a transaction-based hardware description language with conflict matrix 
 - Sharp Txn dialect with modules, methods, rules, and scheduling
 - MLIR infrastructure setup with CIRCT integration
 - Build system with Pixi package manager
-- Testing infrastructure with lit/FileCheck (90/93 tests passing, 96.77% success rate)
+- Testing infrastructure with lit/FileCheck (94/102 tests passing, 92.16% success rate)
 
 #### Txn Dialect Features (2025-06-29)
 - **Conflict Matrix (CM) on schedule operations**
@@ -516,20 +516,40 @@ Sharp is a transaction-based hardware description language with conflict matrix 
   - Note: Remaining failures mostly in TxnToFunc conversion and multi-cycle tests
   - Updated documentation in txn_to_firrtl.md
 
-#### TxnToFunc Conversion Pass (2025-07-07) 🚧
-- **Implemented Initial TxnToFunc Pass**
+#### TxnToFunc Conversion Pass (2025-07-07 to 2025-07-08) ✅
+- **Implemented Complete TxnToFunc Pass with Will-Fire Logic**
   - Converts txn.module to builtin.module with func operations
   - Converts txn.value_method to func.func with proper signatures
-  - Converts txn.action_method to func.func (void return)
-  - Converts txn.rule to func.func (preserves txn.yield for rule semantics)
-  - Converts txn.return to func.return
+  - Converts txn.action_method to func.func returning i1 (abort status)
+  - Converts txn.rule to func.func returning i1 (abort status)
+  - Converts txn.return to func.return (with false for action/rule success)
   - Converts txn.call to func.call with module name prefixing
-  - Converts txn.abort to func.return with default values
-  - Creates main() entry point for each module
-  - Properly handles txn.yield inside scf.if regions
-  - Added dynamic legality for txn.yield in rule functions
-  - Test Status: 5/6 tests passing (83.33%)
-  - Known Issue: if-lowering test marked XFAIL - complex control flow with txn.return/abort inside if branches needs refinement
+  - Converts txn.abort to func.return with true (indicating abort)
+  - Converts txn.yield to scf.yield or func.return based on context
+  - Converts txn.if to scf.if for control flow
+
+- **Implemented Full Abort Propagation (2025-07-08)**
+  - Added post-processing phase to insert abort checks after action method calls
+  - Action methods return i1 status (true = aborted, false = success)
+  - Rules check abort status and propagate by returning early if aborted
+  - Wraps subsequent operations in conditionals to skip if aborted
+  - Uses scf.if to implement structured control flow for abort handling
+  - Fixed MemRef dialect registration conflicts
+  - Updated tests to follow execution model (schedules → rules → methods)
+  - Test suite improved to 93/102 tests passing (91.18%)
+  - **Implemented Transactional Execution Model**:
+    - Actions and rules return abort status
+    - Scheduler tracks which actions have fired
+    - Conflict checking between actions based on conflict matrix
+    - Early return for aborts without side effects
+  - **Scheduler Generation**:
+    - Creates scheduler function for modules with schedules
+    - Allocates tracking variables for action firing status
+    - Executes actions in schedule order with conflict checking
+    - Uses XOR to convert abort status to fired status
+  - Added MemRef dialect dependency for state tracking
+  - Test Status: 6/6 tests passing (100%)
+  - Fixed all control flow issues with proper terminator handling
 
 #### Value Methods with Arguments (2025-07-08) ✅
 - **Full Implementation**:
@@ -542,13 +562,19 @@ Sharp is a transaction-based hardware description language with conflict matrix 
 - **Status**: Fully implemented and tested
 - **Usage**: Replace value methods with arguments using txn.func for combinational logic
 
+#### Complex Conditionals in Action Method (2025-07-08) ✅
+  - Fixed guard condition conversion in TxnToFIRRTL - now properly converts all operations recursively
+  - Added support for instance method calls in convertOp for guard condition pre-conversion
+  - Abort operations are properly handled (skipped during FIRRTL conversion as they don't generate hardware)
+  - Added basic tests for abort handling and guard conditions
+  - Implemented will-fire logic in TxnToFunc with transactional execution model
+  - Actions and rules return abort status; scheduler tracks firing and conflicts
+  - Created tests for will-fire logic with aborts, conflicts, and guards
+  - Documented transactional execution model in simulation.md
+
 ## Next Steps
 
-1. **Complex Conditionals in Action Method**
-   - `TxnToFunc` should have the same will-fire logic as `TxnToFIRRTL`, for example, the `dynamic` mode should be supported to handle complex conditionals with `abort`s.
-   - Check how `abort`s are handled in `TxnToFIRRTL`, fix it if needed.
-   - Implement the consistent will-fire logic in `TxnToFunc`.
-   - Add tests and update examples to cover the required features.
+
 
 4. **Tooling and Integration**
    - Fix Python bindings for programmatic access

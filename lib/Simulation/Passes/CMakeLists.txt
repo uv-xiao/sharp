@@ -25,6 +25,7 @@ add_mlir_library(SharpSimulationPasses
   MLIRTransformUtils
   MLIRExecutionEngine
   MLIRFuncToLLVM
+  MLIRMemRefToLLVM
   MLIRReconcileUnrealizedCasts
   MLIRSCFToControlFlow
   MLIRArithToLLVM

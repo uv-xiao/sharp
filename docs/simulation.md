@@ -9,6 +9,59 @@ Sharp provides a comprehensive simulation framework supporting multiple abstract
 - **Hybrid TL-RTL** simulation for progressive refinement
 - **JIT compilation** for optimized execution
 
+## Known Issues and Resolutions
+
+### TxnToFunc Conversion Issues
+
+The TxnToFunc conversion pass has several known limitations that affect simulation:
+
+#### 1. Primitive Instance Method Calls
+**Issue**: Calls to primitive instance methods (e.g., `@reg::@write`) fail to convert properly.
+
+**Example**:
+```mlir
+%reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+txn.call @reg::@write(%value) : (i32) -> ()  // Fails to convert
+```
+
+**Resolution**: The conversion pass needs to generate wrapper functions for primitive methods:
+- Create functions like `ModuleName_instanceName_methodName`
+- Map instance method calls to these wrapper functions
+- Handle primitive semantics in the generated functions
+
+#### 2. Control Flow with txn.if/yield
+**Issue**: The txn.if operation with internal yields creates invalid scf.if blocks.
+
+**Example**:
+```mlir
+txn.if %cond {
+  txn.yield  // Converts to scf.yield in wrong context
+} else {
+  txn.yield  // Same issue
+}
+```
+
+**Resolution**: 
+- The IfToSCFIfPattern should not move txn.yield operations
+- Instead, it should ensure proper scf.yield terminators are added
+- txn.yield inside txn.if should be filtered during conversion
+
+#### 3. Guard Conditions in Rules
+**Issue**: Guard conditions should control whether rules execute, but currently they're ignored.
+
+**Example**:
+```mlir
+txn.rule @conditionalRule {
+  %guard = arith.cmpi slt, %a, %b : i32
+  txn.if %guard {
+    txn.call @action() : () -> ()
+  }
+  txn.yield
+}
+```
+
+**Resolution**: Guard conditions should be evaluated in the scheduler to determine will-fire signals.
+
 ## Key Design Principles
 
 ### 1. Event-Driven Architecture
@@ -446,7 +499,109 @@ Complete examples in `test/Simulation/`:
    - Progressive refinement from TL to RTL
    - Need to verify TL models against RTL implementation
 
-### Performance Optimization Strategies
+### TxnToFunc Will-Fire Logic
+
+The TxnToFunc conversion implements will-fire logic consistent with TxnToFIRRTL using a transactional execution model.
+
+### Design Approach
+
+#### Transactional Execution Model
+Actions execute speculatively with a commit phase at the end:
+- Actions can abort via early return without side effects
+- State changes are buffered until commit
+- Conflicts are checked before committing changes
+
+#### Implementation Strategy
+
+1. **Static Mode (Default)**
+   - Conflicts analyzed at compile time
+   - Guard conditions generated directly
+   - No runtime overhead for conflict checking
+
+2. **Dynamic Mode**
+   - Runtime tracking of fired actions and method calls
+   - Conflict checking based on actual execution
+   - Abort causes early return without state changes
+
+Generated code structure:
+```mlir
+func.func @Module_scheduler() {
+  // Transaction buffers for state changes
+  %reg_buffer = memref.alloc() : memref<i32>
+  %reg_updated = memref.alloc() : memref<i1>
+  
+  // Track which actions fired successfully
+  %action1_fired = memref.alloc() : memref<i1>
+  %action2_fired = memref.alloc() : memref<i1>
+  
+  // Execute action 1
+  %action1_enabled = func.call @Module_rule1_guard() : () -> i1
+  scf.if %action1_enabled {
+    %no_conflicts = func.call @check_conflicts_1(%action1_fired, %action2_fired) : (memref<i1>, memref<i1>) -> i1
+    scf.if %no_conflicts {
+      // Execute speculatively
+      %aborted = func.call @Module_rule1_execute(%reg_buffer, %reg_updated) : (memref<i32>, memref<i1>) -> i1
+      %not_aborted = arith.xori %aborted, %true : i1
+      memref.store %not_aborted, %action1_fired[] : memref<i1>
+    }
+  }
+  
+  // Execute action 2 (similar pattern)
+  
+  // Commit phase - apply all buffered changes
+  %should_commit = memref.load %reg_updated[] : memref<i1>
+  scf.if %should_commit {
+    %new_value = memref.load %reg_buffer[] : memref<i32>
+    func.call @Register_write(%new_value) : (i32) -> ()
+  }
+}
+```
+
+### Abort Handling
+
+Aborts are implemented as early returns with status flags:
+```mlir
+func.func @Module_rule1_execute(%buffer: memref<i32>, %updated: memref<i1>) -> i1 {
+  %val = func.call @Register_read() : () -> i32
+  %c10 = arith.constant 10 : i32
+  %cond = arith.cmpi ult, %val, %c10 : i32
+  
+  scf.if %cond {
+    // Abort - return true to indicate abort
+    %true = arith.constant true : i1
+    return %true : i1
+  } else {
+    // Normal execution - buffer the write
+    %c20 = arith.constant 20 : i32
+    memref.store %c20, %buffer[] : memref<i32>
+    memref.store %true, %updated[] : memref<i1>
+    %false = arith.constant false : i1
+    return %false : i1
+  }
+}
+```
+
+### Conflict Matrix Integration
+
+The conflict matrix from analysis passes is embedded as constant data:
+```mlir
+// Generated conflict checking function
+func.func @check_conflicts_1(%action1_fired: memref<i1>, %action2_fired: memref<i1>) -> i1 {
+  // Check if conflicting actions have already fired
+  %a2_fired = memref.load %action2_fired[] : memref<i1>
+  %no_conflict = arith.xori %a2_fired, %true : i1
+  return %no_conflict : i1
+}
+```
+
+### Performance Optimizations
+
+1. **Speculative Execution**: Actions execute optimistically, only checking conflicts when necessary
+2. **Buffered Writes**: State changes are batched in the commit phase
+3. **Early Abort Detection**: Aborts immediately return without further computation
+4. **Static Conflict Analysis**: When possible, conflicts are resolved at compile time
+
+## General Performance Optimization
 
 1. **Event Queue Optimization**:
    - Use priority queues for efficient event scheduling
