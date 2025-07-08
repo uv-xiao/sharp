@@ -92,9 +92,9 @@ txn.module @NoSchedule {
 // CHECK-DAG: firrtl.constant 1
 // CHECK-DAG: firrtl.constant 2
 
-// Empty actions still have when blocks
-// CHECK-DAG: firrtl.when %noop1_wf
-// CHECK-DAG: firrtl.when %noop2_wf
+// Empty actions don't generate when blocks anymore
+// CHECK-NOT: firrtl.when %noop1_wf
+// CHECK-NOT: firrtl.when %noop2_wf
 
-// Action methods have when blocks
-// CHECK-DAG: firrtl.when %action_wf
+// Empty action methods don't have when blocks
+// CHECK-NOT: firrtl.when %action_wf

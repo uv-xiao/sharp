@@ -11,7 +11,7 @@ txn.module @TestRuleAttrs {
   txn.rule @resetRule {
     %c0 = arith.constant 0 : i32
     txn.call @r::@write(%c0) : (i32) -> ()
-    txn.yield
+    txn.return
   } {prefix = "rl_reset"}
   
   // CHECK: txn.rule @computeRule {
@@ -21,13 +21,13 @@ txn.module @TestRuleAttrs {
     %c1 = arith.constant 1 : i32
     %inc = arith.addi %val, %c1 : i32
     txn.call @r::@write(%inc) : (i32) -> ()
-    txn.yield
+    txn.return
   } {timing = "static(2)", prefix = "do_compute"}
   
   // CHECK: txn.rule @normalRule {
   txn.rule @normalRule {
     %val = txn.call @r::@read() : () -> i32
-    txn.yield
+    txn.return
   }
   
   txn.schedule [@resetRule, @computeRule, @normalRule] {conflict_matrix = {}}

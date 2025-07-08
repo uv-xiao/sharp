@@ -2,7 +2,7 @@
 
 // CHECK-LABEL: txn.module @MemoryTest
 txn.module @MemoryTest {
-  // CHECK: %mem = txn.instance @mem of @Memory<i32>
+  // CHECK: txn.instance @mem of @Memory<i32>
   %mem = txn.instance @mem of @Memory<i32> : !txn.module<"Memory">
   
   // Test read method
@@ -16,14 +16,14 @@ txn.module @MemoryTest {
   txn.action_method @write_test(%addr: i32, %data: i32) {
     // CHECK: txn.call @mem::@write(%{{.*}}, %{{.*}}) : (i32, i32) -> ()
     txn.call @mem::@write(%addr, %data) : (i32, i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Test clear method
   txn.action_method @clear_test() {
     // CHECK: txn.call @mem::@clear() : () -> ()
     txn.call @mem::@clear() : () -> ()
-    txn.yield
+    txn.return
   }
   
   // Test read-modify-write pattern
@@ -32,11 +32,11 @@ txn.module @MemoryTest {
     %one = arith.constant 1 : i32
     %new_val = arith.addi %val, %one : i32
     txn.call @mem::@write(%addr, %new_val) : (i32, i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // CHECK: txn.schedule
-  txn.schedule [@read_test, @write_test, @clear_test, @increment]
+  txn.schedule [@write_test, @clear_test, @increment]
 }
 
 // CHECK-LABEL: txn.module @MultiPortMemoryUsage
@@ -48,7 +48,7 @@ txn.module @MultiPortMemoryUsage {
   txn.action_method @copy(%src_addr: i32, %dst_addr: i32) {
     %data = txn.call @mem1::@read(%src_addr) : (i32) -> i64
     txn.call @mem2::@write(%dst_addr, %data) : (i32, i64) -> ()
-    txn.yield
+    txn.return
   }
   
   // Swap data between memories
@@ -57,7 +57,7 @@ txn.module @MultiPortMemoryUsage {
     %data2 = txn.call @mem2::@read(%addr2) : (i32) -> i64
     txn.call @mem1::@write(%addr1, %data2) : (i32, i64) -> ()
     txn.call @mem2::@write(%addr2, %data1) : (i32, i64) -> ()
-    txn.yield
+    txn.return
   }
   
   txn.schedule [@copy, @swap]

@@ -1,27 +1,74 @@
 // RUN: sharp-opt %s | FileCheck %s
 // RUN: sharp-opt %s --mlir-print-op-generic | FileCheck %s --check-prefix=GENERIC
 
+// Define primitives used in tests
+txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+  txn.fir_value_method @read() : () -> i32
+  txn.fir_action_method @write() : (i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Register_impl"}
+
+txn.primitive @SpecFIFO type = "spec" interface = !txn.module<"SpecFIFO"> {
+  txn.fir_value_method @notEmpty() : () -> i1
+  txn.fir_value_method @notFull() : () -> i1
+  txn.fir_action_method @enqueue() : (i32) -> ()
+  txn.fir_action_method @dequeue() : () -> i32
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@enqueue, @dequeue] {
+    conflict_matrix = {
+      "enqueue,dequeue" = 2 : i32,
+      "dequeue,enqueue" = 2 : i32,
+      "enqueue,enqueue" = 2 : i32,
+      "dequeue,dequeue" = 2 : i32
+    }
+  }
+} {firrtl.impl = "SpecFIFO_impl", software_semantics = {fifo_empty = true, fifo_data = []}}
+
+txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
+  txn.fir_value_method @read() : (i32) -> i32
+  txn.fir_action_method @write() : (i32, i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Memory_impl"}
+
 // Test basic future and launch operations
 txn.module @MultiCycleExample {
-    %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
-    %fifo = txn.instance @fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
+    %reg = txn.instance @reg of @Register : !txn.module<"Register">
+    %fifo = txn.instance @fifo of @SpecFIFO : !txn.module<"SpecFIFO">
     
     // CHECK-LABEL: txn.action_method @staticLaunch
     txn.action_method @staticLaunch(%data: i32) {
         // Per-cycle action
-        txn.call @reg.write(%data) : (i32) -> ()
+        txn.call @reg::@write(%data) : (i32) -> ()
         
         // Multi-cycle region
         // CHECK: txn.future {
         txn.future {
             // Static latency launch
-            // CHECK: %{{.*}} = txn.launch {latency = 3 : i32} {
-            %done1 = txn.launch {latency=3} {
+            // CHECK: %{{.*}} = txn.launch after 3 {
+            %done1 = txn.launch after 3 {
                 %c42 = arith.constant 42 : i32
-                txn.call @reg.write(%c42) : (i32) -> ()
+                txn.call @reg::@write(%c42) : (i32) -> ()
                 txn.yield
             }
-            // CHECK: txn.yield
         }
         txn.return
     }
@@ -31,17 +78,17 @@ txn.module @MultiCycleExample {
         // CHECK: txn.future {
         txn.future {
             // Static launch first
-            // CHECK: %[[DONE1:.*]] = txn.launch {latency = 2 : i32} {
-            %done1 = txn.launch {latency=2} {
-                txn.call @fifo.enqueue(%data) : (i32) -> ()
+            // CHECK: %[[DONE1:.*]] = txn.launch after 2 {
+            %done1 = txn.launch after 2 {
+                txn.call @fifo::@enqueue(%data) : (i32) -> ()
                 txn.yield
             }
             
             // Dynamic launch waiting for done1
             // CHECK: %[[DONE2:.*]] = txn.launch until %[[DONE1]] {
             %done2 = txn.launch until %done1 {
-                %v = txn.call @fifo.dequeue() : () -> i32
-                txn.call @reg.write(%v) : (i32) -> ()
+                %v = txn.call @fifo::@dequeue() : () -> i32
+                txn.call @reg::@write(%v) : (i32) -> ()
                 txn.yield
             }
         }
@@ -53,59 +100,57 @@ txn.module @MultiCycleExample {
         // CHECK: txn.future {
         txn.future {
             // First static launch
-            // CHECK: %[[DONE1:.*]] = txn.launch {latency = 1 : i32} {
-            %done1 = txn.launch {latency=1} {
-                txn.call @fifo.enqueue(%data) : (i32) -> ()
+            // CHECK: %[[DONE1:.*]] = txn.launch after 1 {
+            %done1 = txn.launch after 1 {
+                txn.call @fifo::@enqueue(%data) : (i32) -> ()
                 txn.yield
             }
             
             // Combined: wait for done1 then 2 more cycles
-            // CHECK: %[[DONE2:.*]] = txn.launch until %[[DONE1]] {latency = 2 : i32} {
-            %done2 = txn.launch until %done1 {latency=2} {
-                %v = txn.call @fifo.dequeue() : () -> i32
+            // CHECK: %[[DONE2:.*]] = txn.launch until %[[DONE1]] after 2 {
+            %done2 = txn.launch until %done1 after 2 {
+                %v = txn.call @fifo::@dequeue() : () -> i32
                 %c10 = arith.constant 10 : i32
                 %sum = arith.addi %v, %c10 : i32
-                txn.call @reg.write(%sum) : (i32) -> ()
+                txn.call @reg::@write(%sum) : (i32) -> ()
                 txn.yield
             }
             
             // Dynamic launch with completion signal
             // CHECK: %[[DONE3:.*]] = txn.launch until %[[DONE2]] {
             %done3 = txn.launch until %done2 {
-                %final = txn.call @reg.read() : () -> i32
-                txn.call @fifo.enqueue(%final) : (i32) -> ()
+                %final = txn.call @reg::@read() : () -> i32
+                txn.call @fifo::@enqueue(%final) : (i32) -> ()
                 txn.yield
             }
         }
         
         // Return completion status
-        %true = arith.constant true : i1
+        %true = arith.constant 1 : i1
         txn.return %true : i1
     }
     
     // CHECK-LABEL: txn.rule @multiCycleRule
     txn.rule @multiCycleRule {
-        %guard = txn.call @fifo.notEmpty() : () -> i1
+        %guard = arith.constant 1 : i1
         
-        txn.if %guard {
-            // CHECK: txn.future {
-            txn.future {
-                // Dequeue with retry - store in register first
-                // CHECK: %[[DONE1:.*]] = txn.launch {latency = 1 : i32} {
-                %done1 = txn.launch {latency=1} {
-                    %v = txn.call @fifo.dequeue() : () -> i32
-                    txn.call @reg.write(%v) : (i32) -> ()
-                    txn.yield
-                }
-                
-                // Process after 3 cycles
-                // CHECK: %[[DONE2:.*]] = txn.launch until %[[DONE1]] {latency = 3 : i32} {
-                %done2 = txn.launch until %done1 {latency=3} {
-                    %data = txn.call @reg.read() : () -> i32
-                    %doubled = arith.muli %data, %data : i32
-                    txn.call @reg.write(%doubled) : (i32) -> ()
-                    txn.yield
-                }
+        // CHECK: txn.future {
+        txn.future {
+            // Dequeue with retry - store in register first
+            // CHECK: %[[DONE1:.*]] = txn.launch after 1 {
+            %done1 = txn.launch after 1 {
+                %v = txn.call @fifo::@dequeue() : () -> i32
+                txn.call @reg::@write(%v) : (i32) -> ()
+                txn.yield
+            }
+            
+            // Process after 3 cycles
+            // CHECK: %[[DONE2:.*]] = txn.launch until %[[DONE1]] after 3 {
+            %done2 = txn.launch until %done1 after 3 {
+                %data = txn.call @reg::@read() : () -> i32
+                %doubled = arith.muli %data, %data : i32
+                txn.call @reg::@write(%doubled) : (i32) -> ()
+                txn.yield
             }
         }
     }
@@ -129,26 +174,26 @@ txn.module @EmptyFuture {
 
 // Test nested launches
 txn.module @NestedLaunches {
-    %mem = txn.instance @mem of @Memory<i32> : !txn.module<"Memory">
+    %mem = txn.instance @mem of @Memory : !txn.module<"Memory">
     
     // CHECK-LABEL: txn.action_method @nestedLaunch
     txn.action_method @nestedLaunch(%addr: i32) {
         // CHECK: txn.future {
         txn.future {
             // Outer launch
-            // CHECK: %[[OUTER:.*]] = txn.launch {latency = 1 : i32} {
-            %outer = txn.launch {latency=1} {
+            // CHECK: %[[OUTER:.*]] = txn.launch after 1 {
+            %outer = txn.launch after 1 {
                 // Read from memory
-                %data = txn.call @mem.read(%addr) : (i32) -> i32
+                %data = txn.call @mem::@read(%addr) : (i32) -> i32
                 
                 // Inner future with launches
                 // CHECK: txn.future {
                 txn.future {
-                    // CHECK: %[[INNER:.*]] = txn.launch {latency = 2 : i32} {
-                    %inner = txn.launch {latency=2} {
+                    // CHECK: %[[INNER:.*]] = txn.launch after 2 {
+                    %inner = txn.launch after 2 {
                         %c1 = arith.constant 1 : i32
                         %incremented = arith.addi %data, %c1 : i32
-                        txn.call @mem.write(%addr, %incremented) : (i32, i32) -> ()
+                        txn.call @mem::@write(%addr, %incremented) : (i32, i32) -> ()
                         txn.yield
                     }
                 }

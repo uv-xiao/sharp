@@ -217,9 +217,21 @@ conflict_with_earlier(m) = OR(method_called[M'] && conflict(M', M) for every M' 
 
 **NOTE**: The `dynamic` mode uses the conflict matrix of the called modules to determine "Conflict with earlier actions", which unifies all the conflict scenarios for the current action ("inside an action" and "with earlier actions" in `static` mode). The conflict matrix of the current module is not used for the current module's will-fire logic.
 
+#### Most-Dynamic Mode (Experimental)
+Most-dynamic mode extends dynamic mode by tracking conflicts at the primitive action level:
+
+```
+wf[action] = enabled[action] && 
+             AND{for every primitive p called by action: 
+                 NOT(primitive_called[p])}
+```
+
+Where `primitive_called[p]` tracks if any earlier action has called primitive `p`.
+
 **Trade-offs**:
 - Static mode: Simpler hardware, conservative conflict resolution, may block valid concurrent executions
 - Dynamic mode: Complex hardware with reachability tracking, precise conflict detection, maximum concurrency
+- Most-dynamic mode: Tracks primitive-level conflicts for even finer granularity, experimental implementation
 
 ### 4. Reachability Analysis
 

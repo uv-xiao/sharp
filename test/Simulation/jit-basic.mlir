@@ -1,6 +1,8 @@
-// RUN: not sharp-opt %s -sharp-simulate=mode=jit 2>&1 | FileCheck %s
+// RUN: sharp-opt %s -sharp-simulate=mode=jit | FileCheck %s
 
-// CHECK: error: cannot be converted to LLVM IR: missing `LLVMTranslationDialectInterface`
+// CHECK-DAG: llvm.func @BasicCounter_main()
+// CHECK-DAG: llvm.func @BasicCounter_getValue() -> i32
+// CHECK-DAG: llvm.func @BasicCounter_setValue(%arg0: i32)
 txn.module @BasicCounter attributes {moduleName = "BasicCounter"} {
   txn.value_method @getValue() -> i32 {
     %c42 = arith.constant 42 : i32
@@ -8,8 +10,8 @@ txn.module @BasicCounter attributes {moduleName = "BasicCounter"} {
   }
   
   txn.action_method @setValue(%val: i32) {
-    txn.yield
+    txn.return
   }
   
-  txn.schedule [@getValue, @setValue]
+  txn.schedule [@setValue]
 }

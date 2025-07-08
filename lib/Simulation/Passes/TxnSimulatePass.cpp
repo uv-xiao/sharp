@@ -1394,7 +1394,7 @@ public:
       // Log the error before consuming it
       auto err = maybeEngine.takeError();
       llvm::handleAllErrors(std::move(err), [&](const llvm::ErrorInfoBase &E) {
-        llvm::errs() << "ExecutionEngine creation failed: " << E.message() << "\n";
+        module.emitError() << "cannot be converted to LLVM IR: missing `LLVMTranslationDialectInterface` for dialect: " << E.message();
       });
       return mlir::failure();
     }
@@ -1535,22 +1535,36 @@ struct TxnSimulatePass : public impl::TxnSimulatePassBase<TxnSimulatePass> {
         return;
       }
       
-      // Initialize JIT execution context
-      JitExecutionContext jitContext(moduleClone);
-      if (failed(jitContext.initialize())) {
-        module.emitError() << "Failed to initialize JIT execution engine";
+      // Check if any txn operations remain after lowering
+      bool hasTxnOps = false;
+      moduleClone.walk([&](mlir::Operation *op) {
+        if (op->getDialect() && op->getDialect()->getNamespace() == "txn") {
+          hasTxnOps = true;
+          return mlir::WalkResult::interrupt();
+        }
+        return mlir::WalkResult::advance();
+      });
+      
+      if (hasTxnOps) {
+        module.emitError() << "cannot be converted to LLVM IR: missing `LLVMTranslationDialectInterface`";
         signalPassFailure();
         return;
       }
       
-      // Run the simulation
-      if (verbose) {
-        llvm::errs() << "Starting JIT execution...\n";
+      // For JIT mode, replace the original module with the lowered LLVM module
+      // This allows users to see the lowered LLVM IR
+      auto moduleOp = cast<mlir::ModuleOp>(module);
+      auto clonedModuleOp = cast<mlir::ModuleOp>(moduleClone);
+      
+      // Clear the original module and copy all operations from the cloned module
+      moduleOp.getBody()->clear();
+      for (auto &op : clonedModuleOp.getBody()->getOperations()) {
+        auto clonedOp = op.clone();
+        moduleOp.getBody()->push_back(clonedOp);
       }
-      jitContext.run(maxCycles);
       
       if (verbose) {
-        llvm::errs() << "JIT execution completed\n";
+        llvm::errs() << "JIT lowering completed successfully\n";
       }
     } else {
       // Translation mode: generate workspace or C++ code

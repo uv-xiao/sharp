@@ -6,8 +6,8 @@ txn.module @LaunchTest {
     // Test 1: Static latency only
     txn.action_method @staticOnly() {
         txn.future {
-            // CHECK: %{{.*}} = txn.launch {latency = 3 : i32} {
-            %done = txn.launch {latency=3} {
+            // CHECK: %{{.*}} = txn.launch after 3 {
+            %done = txn.launch after 3 {
                 %c42 = arith.constant 42 : i32
                 txn.call @reg.write(%c42) : (i32) -> ()
                 txn.yield
@@ -34,8 +34,8 @@ txn.module @LaunchTest {
     txn.action_method @both() {
         %false = arith.constant 0 : i1
         txn.future {
-            // CHECK: %{{.*}} = txn.launch until %{{.*}} {latency = 5 : i32} {
-            %done = txn.launch until %false {latency=5} {
+            // CHECK: %{{.*}} = txn.launch until %{{.*}} after 5 {
+            %done = txn.launch until %false after 5 {
                 %c111 = arith.constant 111 : i32
                 txn.call @reg.write(%c111) : (i32) -> ()
                 txn.yield

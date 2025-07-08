@@ -162,7 +162,7 @@ def ActionMethodOp : TxnOp<"action_method", [
 }
 
 def RuleOp : TxnOp<"rule", [
-    IsolatedFromAbove, NoTerminator
+    IsolatedFromAbove, NoTerminator, Symbol
   ]> {
   let summary = "Spontaneous transition rule";
   let description = [{

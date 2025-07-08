@@ -52,13 +52,14 @@ struct ValueMethodToFuncPattern : public mlir::OpConversionPattern<::sharp::txn:
                   mlir::ConversionPatternRewriter &rewriter) const override {
     auto loc = method.getLoc();
     
-    // Find parent module - it might be a direct parent or we might need to look up
-    auto parentModule = method->getParentOfType<::sharp::txn::ModuleOp>();
+    // Find parent module name - either from parent or attribute
     std::string funcName;
-    if (parentModule) {
+    if (auto parentModule = method->getParentOfType<::sharp::txn::ModuleOp>()) {
       funcName = parentModule.getName().str() + "_" + method.getName().str();
+    } else if (auto parentModuleAttr = method->getAttrOfType<mlir::StringAttr>("txn.parent_module")) {
+      funcName = parentModuleAttr.getValue().str() + "_" + method.getName().str();
     } else {
-      // If method was moved out, use just the method name
+      // Fallback to just method name
       funcName = method.getName().str();
     }
     
@@ -85,13 +86,14 @@ struct ActionMethodToFuncPattern : public mlir::OpConversionPattern<::sharp::txn
                   mlir::ConversionPatternRewriter &rewriter) const override {
     auto loc = method.getLoc();
     
-    // Find parent module - it might be a direct parent or we might need to look up
-    auto parentModule = method->getParentOfType<::sharp::txn::ModuleOp>();
+    // Find parent module name - either from parent or attribute
     std::string funcName;
-    if (parentModule) {
+    if (auto parentModule = method->getParentOfType<::sharp::txn::ModuleOp>()) {
       funcName = parentModule.getName().str() + "_" + method.getName().str();
+    } else if (auto parentModuleAttr = method->getAttrOfType<mlir::StringAttr>("txn.parent_module")) {
+      funcName = parentModuleAttr.getValue().str() + "_" + method.getName().str();
     } else {
-      // If method was moved out, use just the method name
+      // Fallback to just method name
       funcName = method.getName().str();
     }
     
@@ -118,13 +120,14 @@ struct RuleToFuncPattern : public mlir::OpConversionPattern<::sharp::txn::RuleOp
                   mlir::ConversionPatternRewriter &rewriter) const override {
     auto loc = rule.getLoc();
     
-    // Find parent module - it might be a direct parent or we might need to look up
-    auto parentModule = rule->getParentOfType<::sharp::txn::ModuleOp>();
+    // Find parent module name - either from parent or attribute
     std::string funcName;
-    if (parentModule) {
+    if (auto parentModule = rule->getParentOfType<::sharp::txn::ModuleOp>()) {
       funcName = parentModule.getName().str() + "_rule_" + rule.getSymName().str();
+    } else if (auto parentModuleAttr = rule->getAttrOfType<mlir::StringAttr>("txn.parent_module")) {
+      funcName = parentModuleAttr.getValue().str() + "_rule_" + rule.getSymName().str();
     } else {
-      // If rule was moved out, use just the rule name
+      // Fallback to just rule name
       funcName = "rule_" + rule.getSymName().str();
     }
     
@@ -167,11 +170,13 @@ struct ModuleToFuncPattern : public mlir::OpConversionPattern<::sharp::txn::Modu
     // Add return
     rewriter.create<mlir::func::ReturnOp>(loc);
     
-    // Move methods out of the module before erasing it
-    rewriter.setInsertionPoint(moduleOp);
+    // Store module name on methods before moving them out
+    auto moduleName = moduleOp.getName();
     for (auto &op : llvm::make_early_inc_range(moduleOp.getBodyBlock()->getOperations())) {
       if (isa<::sharp::txn::ValueMethodOp, ::sharp::txn::ActionMethodOp, 
               ::sharp::txn::RuleOp>(op)) {
+        // Store the parent module name as an attribute
+        op.setAttr("txn.parent_module", rewriter.getStringAttr(moduleName));
         op.moveBefore(moduleOp);
       }
     }
@@ -190,19 +195,34 @@ struct ReturnToFuncReturnPattern : public mlir::OpConversionPattern<::sharp::txn
   mlir::LogicalResult
   matchAndRewrite(::sharp::txn::ReturnOp op, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<mlir::func::ReturnOp>(op, adaptor.getOperands());
+    // Check if we're inside an scf.if - if so, we need special handling
+    if (op->getParentOfType<mlir::scf::IfOp>()) {
+      // In an scf.if, a return should become a func.return
+      // This will cause early exit from the containing function
+      rewriter.replaceOpWithNewOp<mlir::func::ReturnOp>(op, adaptor.getOperands());
+    } else {
+      // Normal case - convert to func.return
+      rewriter.replaceOpWithNewOp<mlir::func::ReturnOp>(op, adaptor.getOperands());
+    }
     return mlir::success();
   }
 };
 
-/// Convert txn.yield to func.return (for void returns)
-struct YieldToFuncReturnPattern : public mlir::OpConversionPattern<::sharp::txn::YieldOp> {
+/// Convert txn.yield to scf.yield (when inside scf.if) or func.return
+struct YieldToSCFYieldPattern : public mlir::OpConversionPattern<::sharp::txn::YieldOp> {
   using OpConversionPattern::OpConversionPattern;
 
   mlir::LogicalResult
   matchAndRewrite(::sharp::txn::YieldOp op, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<mlir::func::ReturnOp>(op);
+    // Check if we're inside an scf.if
+    if (op->getParentOfType<mlir::scf::IfOp>()) {
+      // Convert to scf.yield
+      rewriter.replaceOpWithNewOp<mlir::scf::YieldOp>(op, adaptor.getOperands());
+    } else {
+      // Otherwise, this is probably an error - yields should only be in if/while constructs
+      return mlir::failure();
+    }
     return mlir::success();
   }
 };
@@ -214,14 +234,25 @@ struct CallToFuncCallPattern : public mlir::OpConversionPattern<::sharp::txn::Ca
   mlir::LogicalResult
   matchAndRewrite(::sharp::txn::CallOp op, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    // Get the parent module name
-    auto parentModule = op->getParentOfType<::sharp::txn::ModuleOp>();
-    if (!parentModule) {
+    // Get the parent module name - either from module or from parent function's attribute
+    std::string moduleName;
+    if (auto parentModule = op->getParentOfType<::sharp::txn::ModuleOp>()) {
+      moduleName = parentModule.getName().str();
+    } else if (auto parentFunc = op->getParentOfType<mlir::func::FuncOp>()) {
+      // Extract module name from function name (format: ModuleName_methodName)
+      auto funcName = parentFunc.getName();
+      auto underscorePos = funcName.find('_');
+      if (underscorePos != StringRef::npos) {
+        moduleName = funcName.substr(0, underscorePos).str();
+      } else {
+        return mlir::failure();
+      }
+    } else {
       return mlir::failure();
     }
     
     // Construct the function name
-    auto funcName = parentModule.getName().str() + "_" + op.getCallee().getRootReference().str();
+    auto funcName = moduleName + "_" + op.getCallee().getRootReference().str();
     
     // Create func.call
     rewriter.replaceOpWithNewOp<mlir::func::CallOp>(
@@ -248,35 +279,29 @@ struct IfToSCFIfPattern : public mlir::OpConversionPattern<::sharp::txn::IfOp> {
     
     // Convert the then region
     if (!op.getThenRegion().empty()) {
-      rewriter.setInsertionPointToStart(&scfIf.getThenRegion().front());
+      auto &srcBlock = op.getThenRegion().front();
+      auto &dstBlock = scfIf.getThenRegion().front();
       
-      mlir::IRMapping mapping;
-      for (auto &innerOp : op.getThenRegion().front()) {
-        if (auto yieldOp = dyn_cast<::sharp::txn::YieldOp>(&innerOp)) {
-          // Convert txn.yield to scf.yield
-          rewriter.create<mlir::scf::YieldOp>(yieldOp.getLoc(), 
-                                              yieldOp.getOperands());
-        } else {
-          // Clone other operations
-          rewriter.clone(innerOp, mapping);
-        }
+      // Set insertion point at the beginning of destination block
+      rewriter.setInsertionPointToStart(&dstBlock);
+      
+      // Move all operations from source to destination
+      for (auto &op : llvm::make_early_inc_range(srcBlock)) {
+        op.moveBefore(&dstBlock, dstBlock.end());
       }
     }
     
     // Convert the else region if it exists
     if (!op.getElseRegion().empty() && !scfIf.getElseRegion().empty()) {
-      rewriter.setInsertionPointToStart(&scfIf.getElseRegion().front());
+      auto &srcBlock = op.getElseRegion().front();
+      auto &dstBlock = scfIf.getElseRegion().front();
       
-      mlir::IRMapping mapping;
-      for (auto &innerOp : op.getElseRegion().front()) {
-        if (auto yieldOp = dyn_cast<::sharp::txn::YieldOp>(&innerOp)) {
-          // Convert txn.yield to scf.yield
-          rewriter.create<mlir::scf::YieldOp>(yieldOp.getLoc(), 
-                                              yieldOp.getOperands());
-        } else {
-          // Clone other operations
-          rewriter.clone(innerOp, mapping);
-        }
+      // Set insertion point at the beginning of destination block
+      rewriter.setInsertionPointToStart(&dstBlock);
+      
+      // Move all operations from source to destination
+      for (auto &op : llvm::make_early_inc_range(srcBlock)) {
+        op.moveBefore(&dstBlock, dstBlock.end());
       }
     }
     
@@ -286,43 +311,44 @@ struct IfToSCFIfPattern : public mlir::OpConversionPattern<::sharp::txn::IfOp> {
   }
 };
 
-/// Convert txn.abort to func.return (empty return for early exit)
+/// Convert txn.abort to func.return (early exit)
 struct AbortToReturnPattern : public mlir::OpConversionPattern<::sharp::txn::AbortOp> {
   using OpConversionPattern::OpConversionPattern;
 
   mlir::LogicalResult
   matchAndRewrite(::sharp::txn::AbortOp op, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    // Check if we're inside an scf.if - if so, we shouldn't convert yet
-    if (op->getParentOfType<mlir::scf::IfOp>()) {
-      // The abort should be handled by the control flow transformation
-      // For now, just remove it as it represents early termination
-      rewriter.eraseOp(op);
-      return mlir::success();
-    }
-    
-    // Find the parent function
     auto funcOp = op->getParentOfType<mlir::func::FuncOp>();
     if (!funcOp) {
       return mlir::failure();
     }
     
-    // Create a return with appropriate values
-    // For now, we'll return default values for each return type
+    // Create a return with appropriate values for the function signature
     mlir::SmallVector<mlir::Value> returnValues;
     for (auto resultType : funcOp.getResultTypes()) {
-      // Create zero/default value for each return type
       if (auto intType = dyn_cast<mlir::IntegerType>(resultType)) {
         auto zero = rewriter.create<mlir::arith::ConstantIntOp>(
             op.getLoc(), 0, intType);
         returnValues.push_back(zero);
       } else {
-        // For other types, we might need more sophisticated handling
         return mlir::failure();
       }
     }
     
     rewriter.replaceOpWithNewOp<mlir::func::ReturnOp>(op, returnValues);
+    return mlir::success();
+  }
+};
+
+/// Erase txn.schedule operations
+struct ScheduleErasePattern : public mlir::OpConversionPattern<::sharp::txn::ScheduleOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(::sharp::txn::ScheduleOp op, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    // Just erase the schedule operation
+    rewriter.eraseOp(op);
     return mlir::success();
   }
 };
@@ -348,13 +374,22 @@ struct ConvertTxnToFuncPass
     target.addIllegalOp<::sharp::txn::ActionMethodOp>();
     target.addIllegalOp<::sharp::txn::RuleOp>();
     target.addIllegalOp<::sharp::txn::ReturnOp>();
-    target.addIllegalOp<::sharp::txn::YieldOp>();
     target.addIllegalOp<::sharp::txn::CallOp>();
     target.addIllegalOp<::sharp::txn::IfOp>();
     target.addIllegalOp<::sharp::txn::AbortOp>();
     
-    // Allow txn.schedule and other structural ops temporarily
-    target.addLegalOp<::sharp::txn::ScheduleOp>();
+    // Special handling for txn.yield - it's legal in rule functions
+    target.addDynamicallyLegalOp<::sharp::txn::YieldOp>([](::sharp::txn::YieldOp op) {
+      // Check if we're in a function that was converted from a rule
+      auto funcOp = op->getParentOfType<mlir::func::FuncOp>();
+      if (funcOp && funcOp.getName().contains("_rule_")) {
+        return true;  // Legal in rule functions
+      }
+      return false;  // Illegal elsewhere
+    });
+    
+    // Mark txn.schedule as illegal too
+    target.addIllegalOp<::sharp::txn::ScheduleOp>();
     
     TxnToFuncTypeConverter typeConverter;
     mlir::RewritePatternSet patterns(&getContext());
@@ -378,9 +413,9 @@ void populateTxnToFuncConversionPatterns(mlir::TypeConverter &typeConverter,
                                         mlir::RewritePatternSet &patterns) {
   patterns.add<ModuleToFuncPattern, ValueMethodToFuncPattern,
                ActionMethodToFuncPattern, RuleToFuncPattern,
-               ReturnToFuncReturnPattern, YieldToFuncReturnPattern,
+               ReturnToFuncReturnPattern, YieldToSCFYieldPattern,
                CallToFuncCallPattern, IfToSCFIfPattern,
-               AbortToReturnPattern>(
+               AbortToReturnPattern, ScheduleErasePattern>(
       typeConverter, patterns.getContext());
 }
 

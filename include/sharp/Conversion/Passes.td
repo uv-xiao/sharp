@@ -58,7 +58,7 @@ def TxnToFIRRTLConversion : Pass<"convert-txn-to-firrtl", "mlir::ModuleOp"> {
            "Generate debug attributes for will-fire signals">,
     Option<"willFireMode", "will-fire-mode", "std::string",
            /*default=*/"\"static\"",
-           "Will-fire logic generation mode: 'static' (conservative) or 'dynamic' (precise)">
+           "Will-fire logic generation mode: 'static' (conservative), 'dynamic' (precise), or 'most-dynamic' (primitive-level tracking)">
   ];
 }
 

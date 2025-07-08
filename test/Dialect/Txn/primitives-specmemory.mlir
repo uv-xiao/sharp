@@ -2,7 +2,7 @@
 
 // CHECK-LABEL: txn.module @SpecMemoryTest
 txn.module @SpecMemoryTest {
-  // CHECK: %mem = txn.instance @mem of @SpecMemory<i32>
+  // CHECK: txn.instance @mem of @SpecMemory<i32>
   %mem = txn.instance @mem of @SpecMemory<i32> : !txn.module<"SpecMemory">
   
   // Test read method with dynamic timing
@@ -16,14 +16,14 @@ txn.module @SpecMemoryTest {
   txn.action_method @write_test(%addr: i32, %data: i32) {
     // CHECK: txn.call @mem::@write(%{{.*}}, %{{.*}}) : (i32, i32) -> ()
     txn.call @mem::@write(%addr, %data) : (i32, i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Test setLatency method
   txn.action_method @set_latency_test(%latency: i32) {
     // CHECK: txn.call @mem::@setLatency(%{{.*}}) : (i32) -> ()
     txn.call @mem::@setLatency(%latency) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Test getLatency method
@@ -37,11 +37,11 @@ txn.module @SpecMemoryTest {
   txn.action_method @clear_test() {
     // CHECK: txn.call @mem::@clear() : () -> ()
     txn.call @mem::@clear() : () -> ()
-    txn.yield
+    txn.return
   }
   
   // CHECK: txn.schedule
-  txn.schedule [@read_test, @write_test, @set_latency_test, @get_latency_test, @clear_test]
+  txn.schedule [@write_test, @set_latency_test, @clear_test]
 }
 
 // CHECK-LABEL: txn.module @SpecMemoryLatencyTest
@@ -55,7 +55,7 @@ txn.module @SpecMemoryLatencyTest {
     %lat10 = arith.constant 10 : i32
     txn.call @fast_mem::@setLatency(%lat1) : (i32) -> ()
     txn.call @slow_mem::@setLatency(%lat10) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Cache-like behavior: check fast memory first, then slow
@@ -83,7 +83,7 @@ txn.module @SpecMemoryLatencyTest {
   txn.action_method @write_through(%addr: i32, %data: i64) {
     txn.call @fast_mem::@write(%addr, %data) : (i32, i64) -> ()
     txn.call @slow_mem::@write(%addr, %data) : (i32, i64) -> ()
-    txn.yield
+    txn.return
   }
   
   txn.schedule [@init, @read_hierarchical, @write_through]
@@ -110,7 +110,7 @@ txn.module @SpecMemoryBurstAccess {
     txn.call @mem::@write(%a2, %d2) : (i32, i32) -> ()
     txn.call @mem::@write(%a3, %d3) : (i32, i32) -> ()
     
-    txn.yield
+    txn.return
   }
   
   // Burst read: read 4 consecutive addresses
@@ -133,5 +133,5 @@ txn.module @SpecMemoryBurstAccess {
     txn.return %d0, %d1, %d2, %d3 : i32, i32, i32, i32
   }
   
-  txn.schedule [@burst_write, @burst_read]
+  txn.schedule [@burst_write]
 }

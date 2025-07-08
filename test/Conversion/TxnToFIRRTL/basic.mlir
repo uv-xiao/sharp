@@ -28,10 +28,9 @@ txn.module @Counter {
     txn.return
   }
   
-  txn.schedule [@increment, @getValue, @reset] {
+  txn.schedule [@increment, @reset] {
     conflict_matrix = {
-      "increment,reset" = 2 : i32,  // C
-      "getValue,reset" = 0 : i32    // SB
+      "increment,reset" = 2 : i32   // C
     }
   }
 }

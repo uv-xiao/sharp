@@ -2,9 +2,39 @@
 
 // Test that primitives are automatically constructed when used
 
+// Define Register primitive
+txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+  txn.fir_value_method @read() : () -> i32
+  txn.fir_action_method @write() : (i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Register_impl"}
+
+// Define Wire primitive  
+txn.primitive @Wire type = "hw" interface = !txn.module<"Wire"> {
+  txn.fir_value_method @read() : () -> i8
+  txn.fir_action_method @write() : (i8) -> ()
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 0 : i32,
+      "write,read" = 0 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Wire_impl"}
+
 txn.module @Counter {
   // Instantiate a Register primitive with type parameter
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  %count = txn.instance @count of @Register : !txn.module<"Register">
   
   txn.action_method @increment() {
     // Read current value
@@ -26,8 +56,7 @@ txn.module @Counter {
   }
   
   txn.schedule [
-    @increment,
-    @getCount
+    @increment
   ] {
     conflict_matrix = {}
   }
@@ -35,7 +64,7 @@ txn.module @Counter {
 
 // Test with Wire primitive
 txn.module @WireTest {
-  %wire = txn.instance @wire of @Wire<i8> : !txn.module<"Wire">
+  %wire = txn.instance @wire of @Wire : !txn.module<"Wire">
   
   txn.action_method @setValue(%val: i8) {
     txn.call @wire::@write(%val) : (i8) -> ()
@@ -48,8 +77,7 @@ txn.module @WireTest {
   }
   
   txn.schedule [
-    @setValue,
-    @getValue
+    @setValue
   ] {
     conflict_matrix = {}
   }

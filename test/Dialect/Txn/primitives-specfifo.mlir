@@ -2,14 +2,14 @@
 
 // CHECK-LABEL: txn.module @SpecFIFOTest
 txn.module @SpecFIFOTest {
-  // CHECK: %fifo = txn.instance @fifo of @SpecFIFO<i32>
+  // CHECK: txn.instance @fifo of @SpecFIFO<i32>
   %fifo = txn.instance @fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
   
   // Test enqueue method
   txn.action_method @enqueue_test(%data: i32) {
     // CHECK: txn.call @fifo::@enqueue(%{{.*}}) : (i32) -> ()
     txn.call @fifo::@enqueue(%data) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Test dequeue method
@@ -58,7 +58,7 @@ txn.module @SpecFIFOTest {
   }
   
   // CHECK: txn.schedule
-  txn.schedule [@enqueue_test, @dequeue_test, @is_empty_test, @size_test, @peek_test, @safe_dequeue]
+  txn.schedule [@enqueue_test, @dequeue_test, @safe_dequeue]
 }
 
 // CHECK-LABEL: txn.module @SpecFIFOProducerConsumer
@@ -70,7 +70,7 @@ txn.module @SpecFIFOProducerConsumer {
   txn.action_method @produce(%data: i64, %cmd: i8) {
     txn.call @data_fifo::@enqueue(%data) : (i64) -> ()
     txn.call @cmd_fifo::@enqueue(%cmd) : (i8) -> ()
-    txn.yield
+    txn.return
   }
   
   // Consumer processes if both FIFOs have data

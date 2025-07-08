@@ -9,5 +9,5 @@ txn.module @Adder attributes {moduleName = "Adder"} {
     txn.return %sum : i32
   }
   
-  txn.schedule [@add]
+  txn.schedule []
 }

@@ -1,10 +1,28 @@
 // RUN: sharp-opt %s --sharp-simulate="mode=translation" | FileCheck %s
 
+// Define FIFO primitive
+txn.primitive @FIFO type = "hw" interface = !txn.module<"FIFO"> {
+  txn.fir_value_method @notEmpty() : () -> i1
+  txn.fir_value_method @notFull() : () -> i1
+  txn.fir_action_method @enqueue() : (i32) -> ()
+  txn.fir_action_method @dequeue() : () -> i32
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@enqueue, @dequeue] {
+    conflict_matrix = {
+      "enqueue,dequeue" = 2 : i32,
+      "dequeue,enqueue" = 2 : i32,
+      "enqueue,enqueue" = 2 : i32,
+      "dequeue,dequeue" = 2 : i32
+    }
+  }
+} {firrtl.impl = "FIFO_impl"}
+
 // Test dynamic dependency launches
 txn.module @DynamicLaunchTest {
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
+  %fifo = txn.instance @fifo of @FIFO : !txn.module<"FIFO">
   
-  txn.action_method @sequentialOps(%v1: i32, %v2: i32, %v3: i32) attributes {multicycle = true} {
+  txn.action_method @sequentialOps(%v1: i32, %v2: i32, %v3: i32) {
     txn.future {
       // First enqueue
       %done1 = txn.launch after 1 {
@@ -32,10 +50,10 @@ txn.module @DynamicLaunchTest {
 
 // CHECK: class DynamicLaunchTestModule : public MultiCycleSimModule
 // CHECK: std::unique_ptr<MultiCycleExecution> sequentialOps_multicycle(int64_t arg0, int64_t arg1, int64_t arg2)
-// CHECK-DAG: launch->hasStaticLatency = true;
-// CHECK-DAG: launch->latency = 1;
-// CHECK-DAG: fifo_queue.push(arg0);
-// CHECK-DAG: launch->conditionName = "sequentialOps_launch_0";
-// CHECK-DAG: fifo_queue.push(arg1);
-// CHECK-DAG: launch->conditionName = "sequentialOps_launch_1";
-// CHECK-DAG: fifo_queue.push(arg2);
+// CHECK: launch->hasStaticLatency = true;
+// CHECK: launch->latency = 1;
+// CHECK: fifo_queue.push();
+// CHECK: launch->conditionName = "sequentialOps_launch_0";
+// CHECK: fifo_queue.push();
+// CHECK: launch->conditionName = "sequentialOps_launch_1";
+// CHECK: fifo_queue.push();

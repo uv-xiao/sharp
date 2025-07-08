@@ -2,31 +2,47 @@
 
 // Test complex conflict matrix with multiple relationships
 txn.module @ComplexConflicts {
+  // Create instances to demonstrate conflicts
+  %reg1 = txn.instance @reg1 of @Register<i32> : !txn.module<"Register">
+  %reg2 = txn.instance @reg2 of @Register<i32> : !txn.module<"Register">
+  
   // Four actions with different conflict relationships
   txn.action_method @a1() {
+    %c1 = arith.constant 1 : i32
+    txn.call @reg1::@write(%c1) : (i32) -> ()
     txn.return
   }
   
   txn.action_method @a2() {
+    %c2 = arith.constant 2 : i32
+    txn.call @reg2::@write(%c2) : (i32) -> ()
     txn.return
   }
   
   txn.action_method @a3() {
+    %val = txn.call @reg1::@read() : () -> i32
     txn.return
   }
   
   txn.rule @r1 {
-    txn.call @a1() : () -> ()
+    %val = txn.call @reg1::@read() : () -> i32
+    %c10 = arith.constant 10 : i32
+    %sum = arith.addi %val, %c10 : i32
+    txn.call @reg1::@write(%sum) : (i32) -> ()
     txn.return
   }
   
   txn.rule @r2 {
-    txn.call @a2() : () -> ()
+    %c20 = arith.constant 20 : i32
+    txn.call @reg2::@write(%c20) : (i32) -> ()
     txn.return
   }
   
   txn.rule @r3 {
-    txn.call @a3() : () -> ()
+    %val1 = txn.call @reg1::@read() : () -> i32
+    %val2 = txn.call @reg2::@read() : () -> i32
+    %sum = arith.addi %val1, %val2 : i32
+    txn.call @reg1::@write(%sum) : (i32) -> ()
     txn.return
   }
   

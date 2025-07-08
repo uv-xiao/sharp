@@ -1,4 +1,8 @@
+// RUN: sharp-opt %s | FileCheck %s
+
 // Test simple action method generation
+
+// CHECK-LABEL: txn.module @SimpleModule
 txn.module @SimpleModule {
   %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
   

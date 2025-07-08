@@ -8,10 +8,10 @@
 // CHECK: }
 // CHECK: func.func @Counter_getValue() -> i32 {
 // CHECK:   %[[C0:.*]] = arith.constant 0 : i32
-// CHECK:   txn.return %[[C0]] : i32
+// CHECK:   return %[[C0]] : i32
 // CHECK: }
 // CHECK: func.func @Counter_increment() {
-// CHECK:   txn.yield
+// CHECK:   return
 // CHECK: }
 
 txn.module @Counter {
@@ -21,8 +21,8 @@ txn.module @Counter {
   }
   
   txn.action_method @increment() {
-    txn.yield
+    txn.return
   }
   
-  txn.schedule [@getValue, @increment]
+  txn.schedule [@increment]
 }

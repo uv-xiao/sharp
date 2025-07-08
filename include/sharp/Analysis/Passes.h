@@ -48,6 +48,9 @@ std::unique_ptr<mlir::Pass> createValueMethodConflictCheckPass();
 /// Create a pass to validate that actions do not call other actions in the same module.
 std::unique_ptr<mlir::Pass> createActionCallValidationPass();
 
+/// Create a pass to collect primitive action calls for each action.
+std::unique_ptr<mlir::Pass> createCollectPrimitiveActionsPass();
+
 /// Generate the code for registering analysis passes.
 #define GEN_PASS_REGISTRATION
 #include "sharp/Analysis/Passes.h.inc"

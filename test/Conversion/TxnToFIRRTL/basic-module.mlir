@@ -42,6 +42,6 @@ txn.module @SimpleCounter {
 // Check ready signal
 // CHECK: firrtl.connect %incrementRDY
 
-// Check when blocks for actions
-// CHECK: firrtl.when %increment_wf
-// CHECK: firrtl.when %auto_inc_wf
+// Empty actions don't generate when blocks anymore
+// CHECK-NOT: firrtl.when %increment_wf
+// CHECK-NOT: firrtl.when %auto_inc_wf

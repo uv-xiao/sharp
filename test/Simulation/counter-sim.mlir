@@ -10,15 +10,15 @@ txn.module @Counter {
   
   // Action methods (no-op for now since we don't have state)
   txn.action_method @increment() {
-    txn.yield
+    txn.return
   }
   
   txn.action_method @decrement() {
-    txn.yield
+    txn.return
   }
   
   // Conflict matrix - increment and decrement conflict
-  txn.schedule [@getValue, @increment, @decrement] {
+  txn.schedule [@increment, @decrement] {
     conflict_matrix = {
       "increment,decrement" = 2 : i32,  // Conflict
       "getValue,increment" = 3 : i32,   // ConflictFree

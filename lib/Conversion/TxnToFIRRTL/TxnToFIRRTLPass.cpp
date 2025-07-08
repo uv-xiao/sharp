@@ -429,7 +429,172 @@ static Value generateDynamicWillFire(StringRef actionName, Value enabled,
   return wfNode.getResult();
 }
 
-/// Generate will-fire logic for an action (dispatcher for static/dynamic modes)
+/// Generate most-dynamic mode will-fire logic for an action
+/// Tracks primitive actions instead of just instance methods
+static Value generateMostDynamicWillFire(StringRef actionName, Value enabled,
+                                       ArrayRef<StringRef> schedule,
+                                       ConversionContext &ctx,
+                                       Operation *action,
+                                       const DenseMap<StringRef, Operation*> &actionMap) {
+  auto &builder = ctx.firrtlBuilder;
+  auto loc = builder.getUnknownLoc();
+  
+  // Start with enabled signal
+  Value wf = enabled;
+  
+  if (!wf) {
+    llvm::errs() << "generateMostDynamicWillFire: enabled signal is null for " << actionName << "\n";
+    return nullptr;
+  }
+  
+  // Track primitive actions that have been called by earlier actions
+  llvm::StringMap<Value> primitiveCalled;
+  
+  // Get primitive calls for current action from the attribute
+  SmallVector<StringRef> currentPrimitiveCalls;
+  if (auto attr = action->getAttrOfType<ArrayAttr>("primitive_calls")) {
+    for (auto elem : attr) {
+      if (auto strAttr = dyn_cast<StringAttr>(elem)) {
+        currentPrimitiveCalls.push_back(strAttr.getValue());
+      }
+    }
+  }
+  
+  LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Action " << actionName 
+             << " has primitive calls: ";
+             for (auto call : currentPrimitiveCalls) {
+               llvm::dbgs() << call << " ";
+             }
+             llvm::dbgs() << "\n");
+  
+  // Analyze earlier actions to see what primitive actions they might call
+  for (StringRef earlierName : schedule) {
+    if (earlierName == actionName) break;
+    
+    Value earlierWF = ctx.willFireSignals[earlierName];
+    if (!earlierWF) {
+      LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: No will-fire signal for earlier action " << earlierName << "\n");
+      continue;
+    }
+    
+    // Find the earlier action operation
+    auto it = actionMap.find(earlierName);
+    if (it == actionMap.end()) continue;
+    Operation *earlierAction = it->second;
+    
+    // Get primitive calls from the earlier action's attribute
+    if (auto attr = earlierAction->getAttrOfType<ArrayAttr>("primitive_calls")) {
+      LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Earlier action " << earlierName 
+                 << " has primitive calls\n");
+      for (auto elem : attr) {
+        if (auto strAttr = dyn_cast<StringAttr>(elem)) {
+          StringRef primitiveCall = strAttr.getValue();
+          LLVM_DEBUG(llvm::dbgs() << "  - " << primitiveCall << "\n");
+          
+          // Mark this primitive as called
+          if (primitiveCalled.count(primitiveCall) == 0) {
+            primitiveCalled[primitiveCall] = earlierWF;
+          } else {
+            // OR with existing signal
+            Value existing = primitiveCalled[primitiveCall];
+            primitiveCalled[primitiveCall] = builder.create<OrPrimOp>(loc, existing, earlierWF);
+          }
+        }
+      }
+    }
+  }
+  
+  // Check if any of current action's primitive calls conflict with earlier ones
+  for (StringRef primitiveCall : currentPrimitiveCalls) {
+    // Parse the primitive call format: instance::method
+    // For nested paths like counter1::reg::write, we need the last :: split
+    size_t lastDoubleColon = primitiveCall.rfind("::");
+    if (lastDoubleColon == StringRef::npos) continue;
+    
+    StringRef instancePath = primitiveCall.substr(0, lastDoubleColon);
+    StringRef methodName = primitiveCall.substr(lastDoubleColon + 2);
+    
+    // Check all earlier primitive calls for conflicts
+    for (const auto &entry : primitiveCalled) {
+      StringRef earlierCall = entry.first();
+      Value earlierCalled = entry.second;
+      
+      // Parse the earlier call format: instance::method
+      // For nested paths like counter1::reg::write, we need the last :: split
+      size_t earlierLastDoubleColon = earlierCall.rfind("::");
+      if (earlierLastDoubleColon == StringRef::npos) continue;
+      
+      StringRef earlierInstance = earlierCall.substr(0, earlierLastDoubleColon);
+      StringRef earlierMethod = earlierCall.substr(earlierLastDoubleColon + 2);
+      
+      // Check if same instance
+      if (instancePath == earlierInstance) {
+        // Get conflict relation between methods
+        // For primitives, we need to check their conflict matrix
+        // This is a simplified check - in reality we'd need the primitive's conflict matrix
+        ConflictRelation conflict = ConflictRelation::ConflictFree;
+        
+        LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Checking conflict between " 
+                   << instancePath << "::" << methodName << " and " 
+                   << earlierInstance << "::" << earlierMethod << "\n");
+        LLVM_DEBUG(llvm::dbgs() << "  Full primitive calls: " << primitiveCall << " vs " << earlierCall << "\n");
+        
+        // Common primitive conflicts:
+        // Register: read CF write, write C write
+        // Wire: read SA write, write C write
+        // FIFO: enqueue C dequeue, enqueue C enqueue, dequeue C dequeue
+        
+        // Check primitive type by looking at the instance path
+        // The instance might be named "reg", "wire", etc., or the path might contain the type
+        bool isRegister = instancePath.ends_with("reg") || instancePath.contains("Register");
+        bool isWire = instancePath.ends_with("wire") || instancePath.contains("Wire");
+        bool isFIFO = instancePath.ends_with("fifo") || instancePath.contains("FIFO");
+        
+        LLVM_DEBUG(llvm::dbgs() << "  Instance path: " << instancePath 
+                   << " isRegister: " << isRegister 
+                   << " methodName: " << methodName 
+                   << " earlierMethod: " << earlierMethod << "\n");
+        
+        if (isRegister) {
+          LLVM_DEBUG(llvm::dbgs() << "  Detected Register primitive\n");
+          if (methodName == "write" && earlierMethod == "write") {
+            conflict = ConflictRelation::Conflict;
+          }
+        } else if (isWire) {
+          if (methodName == "read" && earlierMethod == "write") {
+            conflict = ConflictRelation::SequenceAfter;
+          } else if (methodName == "write" && earlierMethod == "write") {
+            conflict = ConflictRelation::Conflict;
+          }
+        } else if (isFIFO) {
+          if ((methodName == "enqueue" && earlierMethod == "dequeue") ||
+              (methodName == "dequeue" && earlierMethod == "enqueue") ||
+              (methodName == "enqueue" && earlierMethod == "enqueue") ||
+              (methodName == "dequeue" && earlierMethod == "dequeue")) {
+            conflict = ConflictRelation::Conflict;
+          }
+        }
+        
+        // If there's a conflict, block this action
+        if (conflict != ConflictRelation::ConflictFree) {
+          LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Found conflict! Blocking " 
+                     << actionName << " when primitive " << earlierCall << " is called\n");
+          LLVM_DEBUG(llvm::dbgs() << "  - primitiveCall: " << primitiveCall << "\n");
+          LLVM_DEBUG(llvm::dbgs() << "  - earlierCall: " << earlierCall << "\n");
+          LLVM_DEBUG(llvm::dbgs() << "  - conflict type: " << static_cast<int>(conflict) << "\n");
+          Value notEarlierCalled = builder.create<NotPrimOp>(loc, earlierCalled);
+          wf = builder.create<AndPrimOp>(loc, wf, notEarlierCalled);
+          LLVM_DEBUG(llvm::dbgs() << "  - updated wf: " << wf << "\n");
+        }
+      }
+    }
+  }
+  
+  LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Final wf for " << actionName << ": " << wf << "\n");
+  return wf;
+}
+
+/// Generate will-fire logic for an action (dispatcher for static/dynamic/most-dynamic modes)
 static Value generateWillFire(StringRef actionName, Value enabled,
                             ArrayRef<StringRef> schedule,
                             ConversionContext &ctx,
@@ -447,6 +612,12 @@ static Value generateWillFire(StringRef actionName, Value enabled,
       return generateStaticWillFire(actionName, enabled, schedule, ctx, *actionMap);
     }
     return generateDynamicWillFire(actionName, enabled, schedule, ctx, action, *actionMap);
+  } else if (willFireMode == "most-dynamic") {
+    if (!action) {
+      llvm::errs() << "generateWillFire: most-dynamic mode requires action operation\n";
+      return generateStaticWillFire(actionName, enabled, schedule, ctx, *actionMap);
+    }
+    return generateMostDynamicWillFire(actionName, enabled, schedule, ctx, action, *actionMap);
   } else {
     return generateStaticWillFire(actionName, enabled, schedule, ctx, *actionMap);
   }
@@ -454,7 +625,11 @@ static Value generateWillFire(StringRef actionName, Value enabled,
 
 // Forward declaration
 static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx);
+static LogicalResult convertOp(Operation *op, ConversionContext &ctx);
 
+// Note: This function is currently unused but kept for potential future use
+// when implementing more sophisticated reachability analysis
+#if 0
 /// Build reachability conditions for method calls in an action's body
 static void buildReachabilityConditions(Region &region, Value currentCond, 
                                        ConversionContext &ctx,
@@ -518,6 +693,7 @@ static void buildReachabilityConditions(Region &region, Value currentCond,
     }
   }
 }
+#endif
 
 /// Check if action has potential internal conflicts (simple check)
 static bool hasConflictingCalls(Operation *action, ConversionContext &ctx) {
@@ -578,16 +754,31 @@ static bool isKnownPrimitive(StringRef moduleName) {
 static Type getInstanceDataType(::sharp::txn::InstanceOp inst) {
   // Check if the instance has type arguments
   auto typeArgsOpt = inst.getTypeArguments();
-  if (!typeArgsOpt)
-    return nullptr;
-    
-  auto typeArgs = typeArgsOpt.value();
-  if (typeArgs.empty())
-    return nullptr;
+  if (typeArgsOpt && !typeArgsOpt.value().empty()) {
+    auto typeArgs = typeArgsOpt.value();
+    // For now, assume single type parameter
+    if (auto typeAttr = dyn_cast<TypeAttr>(typeArgs[0]))
+      return typeAttr.getValue();
+  }
   
-  // For now, assume single type parameter
-  if (auto typeAttr = dyn_cast<TypeAttr>(typeArgs[0]))
-    return typeAttr.getValue();
+  // If no type arguments, try to infer from primitive definition
+  auto moduleName = inst.getModuleName();
+  if (auto primitiveOp = inst->getParentOfType<mlir::ModuleOp>().lookupSymbol<::sharp::txn::PrimitiveOp>(moduleName)) {
+    // Look for the first method to infer type
+    for (auto& op : primitiveOp.getBody().front()) {
+      if (auto methodOp = dyn_cast<::sharp::txn::FirValueMethodOp>(op)) {
+        auto methodType = methodOp.getFunctionType();
+        if (methodType.getNumResults() > 0) {
+          return methodType.getResult(0);
+        }
+      } else if (auto methodOp = dyn_cast<::sharp::txn::FirActionMethodOp>(op)) {
+        auto methodType = methodOp.getFunctionType();
+        if (methodType.getNumInputs() > 0) {
+          return methodType.getInput(0);
+        }
+      }
+    }
+  }
     
   return nullptr;
 }
@@ -984,6 +1175,110 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
   return success();
 }
 
+/// Convert a single operation to FIRRTL
+static LogicalResult convertOp(Operation *op, ConversionContext &ctx) {
+  // Handle dependency operations first
+  for (Value operand : op->getOperands()) {
+    if (ctx.txnToFirrtl.lookup(operand)) {
+      // Already converted
+      continue;
+    }
+    
+    // Find the defining operation
+    if (auto defOp = operand.getDefiningOp()) {
+      // Recursively convert the defining operation
+      if (failed(convertOp(defOp, ctx))) {
+        return failure();
+      }
+    }
+  }
+  
+  // Now convert this operation
+  if (auto callOp = dyn_cast<CallOp>(op)) {
+    // Handle method calls
+    auto callee = callOp.getCallee();
+    
+    // Check if this is a value method call
+    bool isValueMethod = false;
+    if (auto symbolOp = SymbolTable::lookupNearestSymbolFrom(callOp, callee)) {
+      isValueMethod = isa<ValueMethodOp>(symbolOp);
+    }
+    
+    if (isValueMethod) {
+      // For value methods, we need to read the output port
+      StringRef methodName = callee.getLeafReference();
+      std::string portName = (methodName + "OUT").str();
+      
+      // Find the FIRRTL module
+      auto firrtlModule = dyn_cast<FModuleOp>(ctx.firrtlBuilder.getBlock()->getParentOp());
+      if (!firrtlModule) return failure();
+      
+      Value outputPort = getOrCreatePort(firrtlModule, portName, 
+                                       convertType(callOp.getType(0)), Direction::Out);
+      
+      // Create a node to read the value
+      auto nodeOp = ctx.firrtlBuilder.create<NodeOp>(
+          callOp.getLoc(), outputPort, 
+          ctx.firrtlBuilder.getStringAttr(methodName + "_call"));
+      ctx.txnToFirrtl[callOp.getResult(0)] = nodeOp.getResult();
+    }
+  } else if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
+    // Convert constants to FIRRTL
+    if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue())) {
+      auto firrtlType = convertType(constOp.getType());
+      if (!firrtlType) return failure();
+      
+      APInt value = intAttr.getValue();
+      if (value.getBitWidth() == 1) {
+        value = value.zext(std::max(1u, value.getBitWidth()));
+      }
+      APSInt apSInt(value, !isa<SIntType>(firrtlType));
+      
+      auto firrtlConst = ctx.firrtlBuilder.create<ConstantOp>(
+          constOp.getLoc(), firrtlType, apSInt);
+      ctx.txnToFirrtl[constOp.getResult()] = firrtlConst.getResult();
+    }
+  } else if (auto cmpOp = dyn_cast<arith::CmpIOp>(op)) {
+    // Make sure operands are converted
+    Value lhs = ctx.txnToFirrtl.lookup(cmpOp.getLhs());
+    Value rhs = ctx.txnToFirrtl.lookup(cmpOp.getRhs());
+    if (!lhs || !rhs) return failure();
+    
+    Value result;
+    switch (cmpOp.getPredicate()) {
+      case arith::CmpIPredicate::eq:
+        result = ctx.firrtlBuilder.create<EQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+        break;
+      case arith::CmpIPredicate::ne:
+        result = ctx.firrtlBuilder.create<NEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+        break;
+      case arith::CmpIPredicate::sgt:
+      case arith::CmpIPredicate::ugt:
+        result = ctx.firrtlBuilder.create<GTPrimOp>(cmpOp.getLoc(), lhs, rhs);
+        break;
+      case arith::CmpIPredicate::sge:
+      case arith::CmpIPredicate::uge:
+        result = ctx.firrtlBuilder.create<GEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+        break;
+      case arith::CmpIPredicate::slt:
+      case arith::CmpIPredicate::ult:
+        result = ctx.firrtlBuilder.create<LTPrimOp>(cmpOp.getLoc(), lhs, rhs);
+        break;
+      case arith::CmpIPredicate::sle:
+      case arith::CmpIPredicate::ule:
+        result = ctx.firrtlBuilder.create<LEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
+        break;
+    }
+    
+    if (result) {
+      ctx.txnToFirrtl[cmpOp.getResult()] = result;
+    }
+  }
+  // Add more operation types as needed
+  
+  return success();
+}
+
 /// Convert a Txn module to FIRRTL
 static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule, 
                                  ConversionContext &ctx,
@@ -1344,12 +1639,53 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     // Generate enabled signal
     Value enabled;
     if (auto rule = dyn_cast<RuleOp>(action)) {
-      // Evaluate rule guard
-      // TODO: Properly evaluate guard condition
-      // For now, rules are always enabled
-      auto intTy = IntType::get(mlirCtx, false, 1);
-      enabled = ctx.firrtlBuilder.create<ConstantOp>(
-          action->getLoc(), Type(intTy), APSInt(APInt(1, 1), true));
+      // Evaluate rule guard by examining the rule body
+      // A rule's guard is determined by conditions that affect whether
+      // the rule executes its main actions
+      
+      // Look for the first conditional in the rule body
+      Value guardCondition;
+      bool foundGuard = false;
+      
+      rule.walk([&](IfOp ifOp) {
+        if (!foundGuard && ifOp->getParentOp() == rule) {
+          // This is a top-level if in the rule - likely the guard
+          guardCondition = ifOp.getCondition();
+          foundGuard = true;
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      });
+      
+      if (foundGuard && guardCondition) {
+        // Convert the guard condition to FIRRTL
+        // First, convert any operations that produce the guard condition
+        for (auto &op : rule.getBody().front()) {
+          if (op.getNumResults() > 0 && op.getResult(0) == guardCondition) {
+            // Convert this operation and its dependencies
+            if (failed(convertOp(&op, ctx))) {
+              rule.emitError("Failed to convert guard condition operation");
+            }
+            break;
+          }
+        }
+        
+        // Look up the converted condition
+        Value firrtlGuard = ctx.txnToFirrtl.lookup(guardCondition);
+        if (firrtlGuard) {
+          enabled = firrtlGuard;
+        } else {
+          // If we can't find the guard, default to always enabled
+          auto intTy = IntType::get(mlirCtx, false, 1);
+          enabled = ctx.firrtlBuilder.create<ConstantOp>(
+              action->getLoc(), Type(intTy), APSInt(APInt(1, 1), true));
+        }
+      } else {
+        // No guard found - rule is always enabled
+        auto intTy = IntType::get(mlirCtx, false, 1);
+        enabled = ctx.firrtlBuilder.create<ConstantOp>(
+            action->getLoc(), Type(intTy), APSInt(APInt(1, 1), true));
+      }
     } else if (auto method = dyn_cast<ActionMethodOp>(action)) {
       // Methods use their enable port
       StringRef prefix = method.getPrefix().value_or(method.getSymName());
@@ -1372,6 +1708,23 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   }
   
   // Second pass: generate will-fire signals with simplified conflict_inside
+  // For most-dynamic mode, we need two sub-passes:
+  // 1. Generate basic will-fire signals without primitive tracking
+  // 2. Update will-fire signals with primitive tracking
+  
+  if (willFireMode == "most-dynamic") {
+    // First sub-pass: generate basic will-fire signals
+    for (StringRef name : scheduleOrder) {
+      Value enabled = enabledSignals[name];
+      if (!enabled) continue;
+      
+      // Just store the enabled signal as initial will-fire
+      std::string wfName = name.str() + "_wf";
+      auto wfNode = ctx.firrtlBuilder.create<NodeOp>(enabled.getLoc(), enabled, wfName);
+      ctx.willFireSignals[name] = wfNode.getResult();
+    }
+  }
+  
   for (StringRef name : scheduleOrder) {
     Value enabled = enabledSignals[name];
     if (!enabled) {
@@ -1481,8 +1834,28 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     
     // Generate will-fire signal
     Operation *actionForWF = actionMap[name];
-    generateWillFire(name, effectiveEnabled, scheduleOrder, ctx, willFireMode, actionForWF, &actionMap);
+    Value wf = generateWillFire(name, effectiveEnabled, scheduleOrder, ctx, willFireMode, actionForWF, &actionMap);
+    
+    // Create or update wire for will-fire signal and store it
+    if (wf) {
+      std::string wfName = name.str() + "_wf";
+      if (willFireMode == "most-dynamic" && ctx.willFireSignals.count(name)) {
+        // In most-dynamic mode, we already created a node, so update the existing one
+        // by creating a new node with the updated value
+        auto oldNode = ctx.willFireSignals[name].getDefiningOp();
+        ctx.firrtlBuilder.setInsertionPointAfter(oldNode);
+        auto wfNode = ctx.firrtlBuilder.create<NodeOp>(actionForWF->getLoc(), wf, wfName + "_updated");
+        ctx.willFireSignals[name] = wfNode.getResult();
+        // We'll need to replace uses of the old node later
+      } else {
+        auto wfNode = ctx.firrtlBuilder.create<NodeOp>(actionForWF->getLoc(), wf, wfName);
+        ctx.willFireSignals[name] = wfNode.getResult();
+      }
+    }
   }
+  
+  // Track conversion failures
+  bool conversionFailed = false;
   
   // Convert value methods
   txnModule.walk([&](ValueMethodOp valueMethod) {
@@ -1532,6 +1905,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     
     if (failed(convertBodyOps(valueMethod.getBody(), ctx))) {
       valueMethod.emitError("Failed to convert value method body");
+      conversionFailed = true;
       return;
     }
     
@@ -1609,17 +1983,53 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       }
     }
     
-    // Execute method body when will-fire is true
-    ctx.firrtlBuilder.create<WhenOp>(actionMethod.getLoc(), wf, false, [&]() {
-      // Convert method body
-      // Note: Don't clear ctx.txnToFirrtl here to preserve block argument mappings
-      // Block arguments and pre-converted conditions are preserved
-        
-      if (failed(convertBodyOps(actionMethod.getBody(), ctx))) {
-        actionMethod.emitError("Failed to convert action method body");
-        return;
+    // Check if method body has any operations that generate FIRRTL
+    bool hasNonTerminatorOps = false;
+    for (auto &block : actionMethod.getBody()) {
+      for (auto &op : block) {
+        // Skip terminators and operations that don't generate FIRRTL
+        if (!isa<ReturnOp, YieldOp, AbortOp>(op)) {
+          hasNonTerminatorOps = true;
+          break;
+        }
       }
-    });
+      if (hasNonTerminatorOps) break;
+    }
+    
+    // Only create when block if there are operations to convert
+    if (hasNonTerminatorOps) {
+      // Execute method body when will-fire is true
+      ctx.firrtlBuilder.create<WhenOp>(actionMethod.getLoc(), wf, false, [&]() {
+        // Map method arguments to FIRRTL ports
+        auto portNames = firrtlModule.getPortNames();
+        auto blockArgs = firrtlModule.getBodyBlock()->getArguments();
+        for (unsigned i = 0; i < actionMethod.getNumArguments(); ++i) {
+          Value methodArg = actionMethod.getArgument(i);
+          // For action methods with args, we created ports with pattern: methodOUT
+          std::string argPortName = (prefix + "OUT").str();
+          if (actionMethod.getNumArguments() > 1) {
+            argPortName = (prefix + "OUT_arg" + std::to_string(i)).str();
+          }
+          
+          for (size_t j = 0; j < portNames.size(); ++j) {
+            if (cast<StringAttr>(portNames[j]).getValue() == argPortName) {
+              ctx.txnToFirrtl[methodArg] = blockArgs[j];
+              break;
+            }
+          }
+        }
+        
+        // Convert method body
+        // Note: Don't clear ctx.txnToFirrtl here to preserve block argument mappings
+        // Block arguments and pre-converted conditions are preserved
+          
+        if (failed(convertBodyOps(actionMethod.getBody(), ctx))) {
+          actionMethod.emitError("Failed to convert action method body");
+          conversionFailed = true;
+          return;
+        }
+      });
+    }
   });
   
   // Third pass: Convert rules
@@ -1630,20 +2040,42 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       Value wf = ctx.willFireSignals[ruleName];
       if (!wf) return;
       
-      // Execute rule body when will-fire is true
-      ctx.firrtlBuilder.create<WhenOp>(rule.getLoc(), wf, false, [&]() {
-        // Convert rule body
-        // Note: Don't clear ctx.txnToFirrtl here to preserve pre-converted conditions
-        if (failed(convertBodyOps(rule.getBody(), ctx))) {
-          rule.emitError("Failed to convert rule body");
-          return;
+      // Check if rule body has any operations that generate FIRRTL
+      bool hasNonTerminatorOps = false;
+      for (auto &block : rule.getBody()) {
+        for (auto &op : block) {
+          // Skip terminators and operations that don't generate FIRRTL
+          if (!isa<ReturnOp, YieldOp, AbortOp>(op)) {
+            hasNonTerminatorOps = true;
+            break;
+          }
         }
-      });
+        if (hasNonTerminatorOps) break;
+      }
+      
+      // Only create when block if there are operations to convert
+      if (hasNonTerminatorOps) {
+        // Execute rule body when will-fire is true
+        ctx.firrtlBuilder.create<WhenOp>(rule.getLoc(), wf, false, [&]() {
+          // Convert rule body
+          // Note: Don't clear ctx.txnToFirrtl here to preserve pre-converted conditions
+          if (failed(convertBodyOps(rule.getBody(), ctx))) {
+            rule.emitError("Failed to convert rule body");
+            conversionFailed = true;
+            return;
+          }
+        });
+      }
     });
   }
   
   // For now, skip conflict_inside calculation to avoid dominance issues
   // This will be addressed in a future enhancement
+  
+  // Return failure if any conversion failed
+  if (conversionFailed) {
+    return failure();
+  }
   
   return success();
 }

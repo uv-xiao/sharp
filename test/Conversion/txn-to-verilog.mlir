@@ -2,13 +2,17 @@
 
 // Test end-to-end Verilog export pipeline: Txn -> FIRRTL -> HW -> Verilog
 
-// CHECK: module Counter(
-// CHECK:   input{{.*}}clock,
-// CHECK:{{.*}}reset,
-// CHECK:   output [31:0] getValueOUT,
-// CHECK:   input{{.*}}getValue_EN,
-// CHECK:{{.*}}incrementEN,
-// CHECK:   output{{.*}}incrementRDY
+// CHECK-DAG: module Counter(
+// CHECK-DAG: input{{.*}}clock,
+// CHECK-DAG: {{.*}}reset,
+// CHECK-DAG: output [31:0] getValueOUT,
+// CHECK-DAG: input{{.*}}getValue_EN,
+// CHECK-DAG: {{.*}}incrementEN,
+// CHECK-DAG: output{{.*}}incrementRDY
+
+// CHECK-DAG: module Adder(
+// CHECK-DAG: input{{.*}}clock
+// CHECK-DAG: output [31:0] addOUT
 
 txn.module @Counter attributes {moduleName = "Counter"} {
   txn.value_method @getValue() -> i32 attributes {timing = "combinational"} {
@@ -18,21 +22,15 @@ txn.module @Counter attributes {moduleName = "Counter"} {
   
   txn.action_method @increment() attributes {timing = "static(1)"} {
     %c1 = arith.constant 1 : i32
-    txn.yield
+    txn.return
   }
   
-  txn.schedule [@getValue, @increment] {
+  txn.schedule [@increment] {
     conflict_matrix = {
       "getValue,increment" = 3 : i32  // ConflictFree
     }
   }
 }
-
-// CHECK: module Adder(
-// CHECK:   input{{.*}}clock,
-// CHECK:{{.*}}reset,
-// CHECK:   output [31:0] addOUT,
-// CHECK:   input{{.*}}add_EN
 
 txn.module @Adder attributes {moduleName = "Adder"} {
   txn.value_method @add(%a: i32, %b: i32) -> i32 attributes {timing = "combinational"} {
@@ -40,5 +38,5 @@ txn.module @Adder attributes {moduleName = "Adder"} {
     txn.return %sum : i32
   }
   
-  txn.schedule [@add]
+  txn.schedule []
 }

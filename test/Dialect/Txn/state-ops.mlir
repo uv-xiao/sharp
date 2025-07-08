@@ -21,16 +21,16 @@ txn.module @StatefulCounter {
     %c1 = arith.constant 1 : i32
     %new = arith.addi %old, %c1 : i32
     txn.write %count, %new : i32
-    txn.yield
+    txn.return
   }
   
   txn.action_method @reset() {
     %zero = arith.constant 0 : i32
     txn.write %count, %zero : i32
-    txn.yield
+    txn.return
   }
   
-  txn.schedule [@getValue, @increment, @reset] {
+  txn.schedule [@increment, @reset] {
     conflict_matrix = {
       "increment,reset" = 2 : i32,     // Conflict between state writes
       "getValue,increment" = 3 : i32,  // ConflictFree - read doesn't conflict

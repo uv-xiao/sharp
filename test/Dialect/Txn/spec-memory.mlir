@@ -11,20 +11,18 @@ txn.module @MemoryExample {
   
   txn.action_method @write(%addr: i32, %data: i32) {
     // Future: txn.mem_write %mem[%addr], %data
-    txn.yield
+    txn.return
   }
   
-  txn.value_method @read(%addr: i32) -> i32 attributes {timing = "static(2)"} {
+  txn.value_method @read(%addr: i32) -> i32 {
     // Future: %val = txn.mem_read %mem[%addr]
     %placeholder = arith.constant 0 : i32
     txn.return %placeholder : i32
   }
   
-  txn.schedule [@write, @read] {
+  txn.schedule [@write] {
     conflict_matrix = {
       "write,read" = 2 : i32  // Conflict between write and read
     }
   }
 }
-
-// CHECK-LABEL: txn.module @MemoryExample

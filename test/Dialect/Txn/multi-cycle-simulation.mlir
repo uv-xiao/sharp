@@ -1,13 +1,25 @@
 // RUN: sharp-opt %s --sharp-simulate="mode=translation" | FileCheck %s
 
-// CHECK: struct LaunchState
-// CHECK: struct MultiCycleExecution
-// CHECK: class MultiCycleSimModule
+// Define primitives
+txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+  txn.fir_value_method @read() : () -> i32
+  txn.fir_action_method @write() : (i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Register_impl"}
 
 txn.module @MultiCycleCounter {
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  %count = txn.instance @count of @Register : !txn.module<"Register">
   
-  txn.action_method @increment() attributes {multicycle = true} {
+  txn.action_method @increment() {
     // Per-cycle action
     %v = txn.call @count::@read() : () -> i32
     %one = arith.constant 1 : i32
@@ -49,9 +61,10 @@ txn.module @MultiCycleCounter {
   txn.schedule [@increment]
 }
 
-// CHECK: class MultiCycleCounterModule : public MultiCycleSimModule
+// CHECK: class MultiCycleCounterModule : public MultiCycleSimModule {
+// CHECK: MultiCycleCounterModule() : MultiCycleSimModule
 // CHECK: registerMultiCycleAction("increment"
-// CHECK: std.unique_ptr<MultiCycleExecution> increment_multicycle(
+// CHECK: std::unique_ptr<MultiCycleExecution> increment_multicycle()
 // CHECK: launch->hasStaticLatency = true;
 // CHECK: launch->latency = 3;
 // CHECK: launch->conditionName = "increment_launch_0";

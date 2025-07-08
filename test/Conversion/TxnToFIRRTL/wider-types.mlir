@@ -25,7 +25,7 @@ txn.module @WiderTypes {
     txn.return
   }
   
-  txn.schedule [@get8bit, @process16bit, @compute64bit] {
+  txn.schedule [@process16bit, @compute64bit] {
     conflict_matrix = {}
   }
 }

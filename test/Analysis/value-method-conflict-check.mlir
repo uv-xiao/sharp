@@ -6,17 +6,17 @@ txn.module @ValidValueMethod {
   
   // This value method has no conflicts specified, so it's valid
   txn.value_method @getValue() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
   txn.action_method @setValue(%v: i32) {
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   
   // No conflicts specified - all default to CF
-  txn.schedule [@getValue, @setValue]
+  txn.schedule [@setValue]
 }
 
 // -----
@@ -25,21 +25,21 @@ txn.module @ValidValueMethod {
 txn.module @ValueMethodWithSBConflict {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   
-  // expected-error@+1 {{value method 'getValue' has non-CF conflict with action 'setValue' (SB (Sequenced Before))}}
+  // expected-error@+1 {{value method 'getValue' has non-CF conflict with action 'setValue' (SB (Sequence Before))}}
   txn.value_method @getValue() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
   txn.action_method @setValue(%v: i32) {
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   
-  txn.schedule [@getValue, @setValue] {
-    conflict_matrix = #txn.conflict_dict<{
-      "getValue,setValue" = #txn.SB
-    }>
+  txn.schedule [@setValue] {
+    conflict_matrix = {
+      "getValue,setValue" = 0 : i32  // SB
+    }
   }
 }
 
@@ -49,21 +49,21 @@ txn.module @ValueMethodWithSBConflict {
 txn.module @ValueMethodWithSAConflict {
   %wire = txn.instance @wire of @Wire<i32> : !txn.module<"Wire">
   
-  // expected-error@+1 {{value method 'readWire' appears in conflict matrix with non-CF relation (SA (Sequenced After))}}
+  // expected-error@+1 {{value method 'readWire' has non-CF conflict with action 'writeWire' (SA (Sequence After))}}
   txn.value_method @readWire() -> i32 {
-    %v = txn.call @wire.read() : () -> i32
+    %v = txn.call @wire::@read() : () -> i32
     txn.return %v : i32
   }
   
   txn.action_method @writeWire(%v: i32) {
-    txn.call @wire.write(%v) : (i32) -> ()
+    txn.call @wire::@write(%v) : (i32) -> ()
     txn.return
   }
   
-  txn.schedule [@readWire, @writeWire] {
-    conflict_matrix = #txn.conflict_dict<{
-      "writeWire,readWire" = #txn.SA
-    }>
+  txn.schedule [@writeWire] {
+    conflict_matrix = {
+      "writeWire,readWire" = 1 : i32  // SA
+    }
   }
 }
 
@@ -75,7 +75,7 @@ txn.module @ValueMethodWithConflict {
   
   // expected-error@+1 {{value method 'compute' has non-CF conflict with action 'update' (C (Conflict))}}
   txn.value_method @compute() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     %two = arith.constant 2 : i32
     %result = arith.muli %v, %two : i32
     txn.return %result : i32
@@ -83,14 +83,14 @@ txn.module @ValueMethodWithConflict {
   
   txn.action_method @update() {
     %v = txn.call @compute() : () -> i32
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   
-  txn.schedule [@compute, @update] {
-    conflict_matrix = #txn.conflict_dict<{
-      "compute,update" = #txn.C
-    }>
+  txn.schedule [@update] {
+    conflict_matrix = {
+      "compute,update" = 2 : i32  // C
+    }
   }
 }
 
@@ -102,12 +102,12 @@ txn.module @ExplicitCFConflicts {
   
   // This is valid - CF conflicts are allowed for value methods
   txn.value_method @getValue() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
   txn.action_method @setValue(%v: i32) {
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   
@@ -120,11 +120,11 @@ txn.module @ExplicitCFConflicts {
   }
   
   // Explicit CF relationships are fine
-  txn.schedule [@getValue, @setValue, @incrementRule] {
-    conflict_matrix = #txn.conflict_dict<{
-      "getValue,setValue" = #txn.CF,
-      "getValue,incrementRule" = #txn.CF
-    }>
+  txn.schedule [@setValue, @incrementRule] {
+    conflict_matrix = {
+      "getValue,setValue" = 3 : i32,  // CF
+      "getValue,incrementRule" = 3 : i32  // CF
+    }
   }
 }
 
@@ -134,29 +134,29 @@ txn.module @ExplicitCFConflicts {
 txn.module @MultipleValueMethodsWithConflicts {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
   
-  // expected-error@+1 {{value method 'getValue1' has non-CF conflict with action 'setValue' (SB (Sequenced Before))}}
+  // expected-error@+1 {{value method 'getValue1' has non-CF conflict with action 'setValue' (SB (Sequence Before))}}
   txn.value_method @getValue1() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     txn.return %v : i32
   }
   
-  // expected-error@+1 {{value method 'getValue2' appears in conflict matrix with non-CF relation (C (Conflict))}}
+  // expected-error@+1 {{value method 'getValue2' has non-CF conflict with action 'setValue' (C (Conflict))}}
   txn.value_method @getValue2() -> i32 {
-    %v = txn.call @reg.read() : () -> i32
+    %v = txn.call @reg::@read() : () -> i32
     %two = arith.constant 2 : i32
     %result = arith.addi %v, %two : i32
     txn.return %result : i32
   }
   
   txn.action_method @setValue(%v: i32) {
-    txn.call @reg.write(%v) : (i32) -> ()
+    txn.call @reg::@write(%v) : (i32) -> ()
     txn.return
   }
   
-  txn.schedule [@getValue1, @getValue2, @setValue] {
-    conflict_matrix = #txn.conflict_dict<{
-      "getValue1,setValue" = #txn.SB,
-      "getValue2,setValue" = #txn.C
-    }>
+  txn.schedule [@setValue] {
+    conflict_matrix = {
+      "getValue1,setValue" = 0 : i32,  // SB
+      "getValue2,setValue" = 2 : i32  // C
+    }
   }
 }

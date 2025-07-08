@@ -13,12 +13,12 @@ txn.module @DataProcessor {
   txn.action_method @processData(%val: i32) attributes {timing = "static(5)"} {
     %c2 = arith.constant 2 : i32
     %result = arith.muli %val, %c2 : i32
-    txn.yield
+    txn.return
   }
   
   txn.rule @compute {
     %ready = arith.constant true
-    txn.yield %ready : i1
+    txn.return %ready : i1
   }
   
   txn.schedule [@compute, @getData, @processData] {
@@ -30,16 +30,16 @@ txn.module @DataProcessor {
 
 txn.module @Controller {
   txn.action_method @start() {
-    txn.yield
+    txn.return
   }
   
   txn.action_method @stop() {
-    txn.yield
+    txn.return
   }
   
   txn.rule @monitor {
     %check = arith.constant true
-    txn.yield %check : i1
+    txn.return %check : i1
   }
   
   txn.schedule [@monitor, @start, @stop] {

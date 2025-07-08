@@ -124,8 +124,6 @@ ConflictMatrix ConflictMatrixInferencePass::extractConflictMatrix(
       // Parse key format: "action1,action2"
       size_t commaPos = key.find(',');
       if (commaPos != std::string::npos) {
-        StringRef action1 = StringRef(key).substr(0, commaPos);
-        StringRef action2 = StringRef(key).substr(commaPos + 1);
         cm[key] = static_cast<ConflictRelation>(value);
       }
     }

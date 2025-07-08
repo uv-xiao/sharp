@@ -10,7 +10,7 @@ txn.module @FIFOExample {
   // Placeholder for future SpecFIFO implementation
   txn.action_method @enqueue(%data: i32) {
     // Future: txn.enqueue %fifo, %data
-    txn.yield
+    txn.return
   }
   
   txn.value_method @dequeue() -> i32 {
@@ -21,11 +21,9 @@ txn.module @FIFOExample {
   
   txn.value_method @isEmpty() -> i1 {
     // Future: %empty = txn.fifo_empty %fifo
-    %true = arith.constant true
+    %true = arith.constant 1 : i1
     txn.return %true : i1
   }
   
-  txn.schedule [@enqueue, @dequeue, @isEmpty]
+  txn.schedule [@enqueue]
 }
-
-// CHECK-LABEL: txn.module @FIFOExample

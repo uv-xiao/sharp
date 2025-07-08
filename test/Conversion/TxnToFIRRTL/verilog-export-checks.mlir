@@ -13,7 +13,7 @@ txn.module @BasicModule {
     txn.return
   }
   
-  txn.schedule [@getValue, @doAction] {
+  txn.schedule [@doAction] {
     conflict_matrix = {}
   }
 }
@@ -29,7 +29,7 @@ txn.module @ArithModule {
     txn.return %sum : i32
   }
   
-  txn.schedule [@compute] {
+  txn.schedule [] {
     conflict_matrix = {}
   }
 }
@@ -48,7 +48,7 @@ txn.module @IntWidths {
     txn.return %c1000 : i16
   }
   
-  txn.schedule [@getByte, @getShort] {
+  txn.schedule [] {
     conflict_matrix = {}
   }
 }

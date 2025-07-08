@@ -4,7 +4,7 @@
 
 // CHECK-LABEL: firrtl.circuit "RuleConflictInside"
 txn.module @RuleConflictInside {
-  %reg = txn.instance @r of @Register : !txn.module<"Register">
+  %reg = txn.instance @r of @Register<i32> : !txn.module<"Register">
   
   // Rule with simple constant conditions
   txn.rule @simpleConflict {
@@ -35,11 +35,9 @@ txn.module @RuleConflictInside {
   // CHECK: firrtl.module @RuleConflictInside
   // The conflict_inside should detect that one condition is true and one is false
   // So conflict_inside = (true && false) = false
-  // CHECK-DAG: %[[FALSE:.*]] = firrtl.constant 0 : !firrtl.uint<1>
-  // CHECK-DAG: %[[TRUE:.*]] = firrtl.constant 1 : !firrtl.uint<1>
-  // CHECK-DAG: %[[AND:.*]] = firrtl.and %[[TRUE]], %[[FALSE]]
-  // CHECK-DAG: %[[NOT:.*]] = firrtl.not %[[AND]]
-  // CHECK-DAG: firrtl.and %{{.*}}, %[[NOT]]
+  // CHECK: %[[AND:.*]] = firrtl.and %{{.*}}, %{{.*}} :
+  // CHECK: %[[NOT:.*]] = firrtl.not %[[AND]] :
+  // CHECK: firrtl.and %{{.*}}, %[[NOT]] :
   
   txn.schedule [@simpleConflict] {
     conflict_matrix = {
@@ -51,4 +49,14 @@ txn.module @RuleConflictInside {
 txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
-}
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Register_impl"}

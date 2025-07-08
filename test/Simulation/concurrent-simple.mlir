@@ -10,12 +10,12 @@ txn.module @Producer {
     txn.return %val : i32
   }
   
-  txn.schedule [@produce]
+  txn.schedule []
 }
 
 txn.module @Consumer {
   txn.action_method @consume(%val: i32) {
-    txn.yield
+    txn.return
   }
   
   txn.schedule [@consume]

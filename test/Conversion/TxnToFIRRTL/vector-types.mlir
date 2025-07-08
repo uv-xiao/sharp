@@ -18,7 +18,7 @@ txn.module @VectorOps {
     txn.return
   }
   
-  txn.schedule [@getVector, @processVector] {
+  txn.schedule [@processVector] {
     conflict_matrix = {}
   }
 }

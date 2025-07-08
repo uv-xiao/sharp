@@ -20,7 +20,7 @@ txn.module @SimpleCounter {
     txn.return
   }
   
-  txn.schedule [@getValue, @reset] {
+  txn.schedule [@reset] {
     conflict_matrix = {}
   }
 }

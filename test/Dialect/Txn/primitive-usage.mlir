@@ -23,7 +23,7 @@ txn.module @SystemWithPrimitives {
     // CHECK: txn.call @dataWire.write(%[[VAL]]) : (i32) -> ()
     txn.call @dataWire.write(%val) : (i32) -> ()
     
-    txn.yield
+    txn.return
   }
   
   // Action method that writes to register
@@ -43,8 +43,8 @@ txn.module @SystemWithPrimitives {
     txn.return %output : i32
   }
   
-  // CHECK: txn.schedule [@transferData, @storeValue, @readOutput]
-  txn.schedule [@transferData, @storeValue, @readOutput]
+  // CHECK: txn.schedule [@transferData, @storeValue]
+  txn.schedule [@transferData, @storeValue]
 }
 
 // Primitives need to be defined for the above to work
@@ -53,7 +53,7 @@ txn.primitive @RegisterPrimitive type = "hw" interface = !txn.module<"RegisterPr
   txn.fir_action_method @write() : (i32) -> ()
   txn.clock_by @clk
   txn.reset_by @rst
-  txn.schedule [@read, @write] {
+  txn.schedule [@write] {
     conflict_matrix = {
       "read,read" = 3 : i32,
       "read,write" = 3 : i32,
@@ -68,7 +68,7 @@ txn.primitive @WirePrimitive type = "hw" interface = !txn.module<"WirePrimitive"
   txn.fir_action_method @write() : (i32) -> ()
   txn.clock_by @clk
   txn.reset_by @rst
-  txn.schedule [@read, @write] {
+  txn.schedule [@write] {
     conflict_matrix = {
       "read,read" = 3 : i32,
       "read,write" = 0 : i32,

@@ -128,8 +128,7 @@ LogicalResult ValueMethodConflictCheckPass::checkValueMethod(
             << "value method '" << methodName 
             << "' has non-CF conflict with action '" << action
             << "' (" << conflictToString(it->second) << ")";
-        mlir::emitRemark(valueMethod.getLoc()) 
-            << "value methods must be conflict-free (CF) with all actions and other value methods";
+        // Note: value methods must be conflict-free (CF) with all actions and other value methods
         hasConflict = true;
         return true;
       }
@@ -160,8 +159,7 @@ LogicalResult ValueMethodConflictCheckPass::checkValueMethod(
                 << "value method '" << methodName 
                 << "' appears in conflict matrix with non-CF relation ("
                 << conflictToString(entry.second) << ")";
-            mlir::emitRemark(valueMethod.getLoc())
-                << "value methods must only have conflict-free (CF) relationships";
+            // Note: value methods must only have conflict-free (CF) relationships
             hasConflict = true;
           }
         }
@@ -198,7 +196,6 @@ StringRef ValueMethodConflictCheckPass::conflictToString(ConflictRelation rel) {
     case txn::ConflictRelation::SequenceAfter: return "SA (Sequence After)";
     case txn::ConflictRelation::Conflict: return "C (Conflict)";
     case txn::ConflictRelation::ConflictFree: return "CF (Conflict-Free)";
-    default: return "Unknown";
   }
 }
 

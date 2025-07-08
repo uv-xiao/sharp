@@ -91,7 +91,14 @@ LogicalResult ActionCallValidationPass::validateModule(txn::ModuleOp module) {
 
 LogicalResult ActionCallValidationPass::validateAction(Operation *action, 
                                                       txn::ModuleOp module) {
-  auto actionName = cast<SymbolOpInterface>(action).getNameAttr().getValue();
+  StringRef actionName;
+  if (auto rule = dyn_cast<RuleOp>(action)) {
+    actionName = rule.getSymName();
+  } else if (auto method = dyn_cast<ActionMethodOp>(action)) {
+    actionName = method.getSymName();
+  } else {
+    return failure();
+  }
   LLVM_DEBUG(llvm::dbgs() << "  Validating action: " << actionName << "\n");
   
   bool hasErrors = false;
@@ -103,8 +110,8 @@ LogicalResult ActionCallValidationPass::validateAction(Operation *action,
       call.emitError() << "action '" << actionName 
                       << "' cannot call action '" << targetName.value_or("<unknown>")
                       << "' in the same module";
-      mlir::emitRemark(call.getLoc()) << "actions can only call value methods in the same module "
-                                       << "or methods of child module instances";
+      // Note: actions can only call value methods in the same module 
+      // or methods of child module instances
       hasErrors = true;
     }
   });

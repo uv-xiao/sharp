@@ -246,4 +246,35 @@ def ActionCallValidation : Pass<"sharp-validate-action-calls", "mlir::ModuleOp">
   let dependentDialects = ["::sharp::txn::TxnDialect"];
 }
 
+def SharpAnalysisCollectPrimitiveActionsPass : Pass<"sharp-collect-primitive-actions", "mlir::ModuleOp"> {
+  let summary = "Collect primitive action calls for each action";
+  let description = [{
+    This pass analyzes Sharp Txn modules to collect all primitive action calls
+    made by each action (rule or action method). The pass adds a "primitive_calls"
+    attribute to each action containing the list of primitive instance paths that
+    the action calls methods on.
+    
+    This information is used by the most-dynamic mode of the TxnToFIRRTL conversion
+    pass to track conflicts at the primitive action level rather than just at the
+    module method level.
+    
+    The pass traces through method calls recursively to find all primitive calls:
+    - Direct primitive calls (e.g., @reg::@write)
+    - Indirect calls through module methods that eventually call primitives
+    
+    Example output:
+    - Rule @incrementFirst gets attribute: primitive_calls = ["counter1::reg::write", "counter1::reg::read"]
+    - Rule @resetFirst gets attribute: primitive_calls = ["counter1::reg::write"]
+    - Rule @incrementSecond gets attribute: primitive_calls = ["counter2::reg::write", "counter2::reg::read"]
+    
+    This enables most-dynamic mode to detect that incrementFirst and resetFirst
+    conflict because they both access counter1::reg, while incrementSecond does
+    not conflict with them because it accesses counter2::reg.
+  }];
+  
+  let constructor = "mlir::sharp::createCollectPrimitiveActionsPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
 #endif // SHARP_ANALYSIS_PASSES

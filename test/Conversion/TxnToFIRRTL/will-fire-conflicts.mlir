@@ -6,15 +6,23 @@
 // CHECK: firrtl.module @ConflictTest
 
 txn.module @ConflictTest {
+  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  
   txn.action_method @a1() {
+    %c1 = arith.constant 1 : i32
+    txn.call @reg::@write(%c1) : (i32) -> ()
     txn.return
   }
   
   txn.action_method @a2() {
+    %c2 = arith.constant 2 : i32
+    txn.call @reg::@write(%c2) : (i32) -> ()
     txn.return
   }
   
   txn.action_method @a3() {
+    %c3 = arith.constant 3 : i32
+    txn.call @reg::@write(%c3) : (i32) -> ()
     txn.return
   }
   

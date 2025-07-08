@@ -40,8 +40,7 @@ txn.module @TypeTest {
   }
   
   txn.schedule [
-    @testTypes,
-    @readAll
+    @testTypes
   ] {
     conflict_matrix = {}
   }

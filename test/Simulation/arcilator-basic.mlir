@@ -15,5 +15,5 @@ txn.module @Counter attributes {moduleName = "Counter"} {
     txn.return %val : i32
   }
   
-  txn.schedule [@getCount, @getValue]
+  txn.schedule []
 }

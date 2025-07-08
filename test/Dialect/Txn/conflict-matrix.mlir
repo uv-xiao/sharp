@@ -5,11 +5,11 @@
 // CHECK-LABEL: txn.module @ConflictExample
 txn.module @ConflictExample {
   txn.rule @r1 {
-    txn.yield
+    txn.return
   }
   
   txn.rule @r2 {
-    txn.yield
+    txn.return
   }
   
   txn.action_method @m1() {

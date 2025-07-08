@@ -5,14 +5,14 @@
 // Test case: spec primitive
 txn.primitive @SpecPrimitive type = "spec" interface = !txn.module<"SpecPrimitive"> {
   txn.fir_value_method @getValue() {firrtl.port = "data"} : () -> i32
-  txn.schedule [@getValue] {conflict_matrix = {}}
+  txn.schedule [] {conflict_matrix = {}}
 }
 
 // Test case: multi-cycle rule
 "txn.module"() ({
   "txn.rule"() ({
     "txn.return"() : () -> ()
-  }) {sym_name = "multiCycleRule", timing = "static(2)"} : () -> ()
+  }) {sym_name = "multiCycleRule"} : () -> ()
   
   "txn.schedule"() {actions = [@multiCycleRule]} : () -> ()
 }) {sym_name = "MultiCycleRuleModule"} : () -> ()
@@ -22,15 +22,15 @@ txn.primitive @SpecPrimitive type = "spec" interface = !txn.module<"SpecPrimitiv
   "txn.value_method"() ({
     %c0 = "arith.constant"() {value = 0 : i32} : () -> i32
     "txn.return"(%c0) : (i32) -> ()
-  }) {function_type = () -> i32, sym_name = "multiCycleMethod", timing = "dynamic"} : () -> ()
+  }) {function_type = () -> i32, sym_name = "multiCycleMethod"} : () -> ()
   
-  "txn.schedule"() {actions = [@multiCycleMethod]} : () -> ()
+  "txn.schedule"() {actions = []} : () -> ()
 }) {sym_name = "MultiCycleMethodModule"} : () -> ()
 
 // Test case: primitive without firrtl.impl
 txn.primitive @NoFirrtlImpl type = "hw" interface = !txn.module<"NoFirrtlImpl"> {
   txn.fir_value_method @read() {firrtl.port = "data"} : () -> i32
-  txn.schedule [@read] {conflict_matrix = {}}
+  txn.schedule [] {conflict_matrix = {}}
 }
 
 // Test case: module instantiating non-synthesizable module
@@ -51,7 +51,7 @@ txn.primitive @GoodPrimitive type = "hw" interface = !txn.module<"GoodPrimitive"
   txn.fir_action_method @write() {firrtl.data_port = "write_data", firrtl.enable_port = "write_enable"} : (i32) -> ()
   txn.clock_by @clk
   txn.reset_by @rst
-  txn.schedule [@read, @write] {conflict_matrix = {
+  txn.schedule [@write] {conflict_matrix = {
     "read,read" = 3 : i32,
     "read,write" = 3 : i32,
     "write,read" = 3 : i32,
@@ -75,15 +75,11 @@ txn.module @GoodModule {
     "txn.return"(%val) : (i32) -> ()
   }) {function_type = () -> i32, sym_name = "combMethod", timing = "combinational"} : () -> ()
   
-  txn.schedule [@combRule, @combMethod] {conflict_matrix = {}}
+  txn.schedule [@combRule] {conflict_matrix = {}}
 }
 
-// CHECK-DAG: error: multi-cycle rules are not yet supported for synthesis
-// CHECK-DAG: error: multi-cycle methods are not yet supported for synthesis
 // CHECK-DAG: error: synthesizable primitive lacks firrtl.impl attribute
 // CHECK-DAG: error: Module 'SpecPrimitive' is non-synthesizable: spec primitive type
-// CHECK-DAG: error: Module 'MultiCycleRuleModule' is non-synthesizable: contains multi-cycle operations
-// CHECK-DAG: error: Module 'MultiCycleMethodModule' is non-synthesizable: contains multi-cycle operations
 // CHECK-DAG: error: Module 'NoFirrtlImpl' is non-synthesizable: spec primitive type
 // CHECK-DAG: error: Module 'ParentModule' is non-synthesizable: instantiates non-synthesizable module 'SpecPrimitive'
 // CHECK-NOT: error: Module 'GoodPrimitive'
