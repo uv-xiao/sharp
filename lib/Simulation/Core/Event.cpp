@@ -119,5 +119,28 @@ void EventQueue::checkDeferred() {
   deferred = std::move(stillDeferred);
 }
 
+EventPtr EventQueue::peekReady() const {
+  // Check the top of the heap without removing it
+  if (!events.empty()) {
+    // The heap maintains the smallest time at the front
+    auto minIt = std::min_element(events.begin(), events.end(),
+                                  [](const EventPtr& a, const EventPtr& b) {
+                                    return a->getTime() < b->getTime();
+                                  });
+    if (minIt != events.end() && (*minIt)->getTime() <= currentTime && (*minIt)->isReady()) {
+      return *minIt;
+    }
+  }
+  
+  // Also check deferred events
+  for (const auto& event : deferred) {
+    if (event->isReady() && event->getTime() <= currentTime) {
+      return event;
+    }
+  }
+  
+  return nullptr;
+}
+
 } // namespace sim
 } // namespace sharp

@@ -1,299 +1,195 @@
-# PySharp: Pythonic Frontend for Sharp
-
-PySharp provides a high-level Pythonic API for constructing hardware modules using Sharp's transaction-based semantics. Following the design pattern of CIRCT's PyCDE, PySharp imports from Sharp's namespace and provides an embedded DSL for hardware description.
+# PySharp: Pythonic Frontend
 
 ## Overview
 
-PySharp enables:
-- **Type-safe hardware types** (i8, i16, i32, i64, etc.)
-- **Signal-based computation** with operator overloading
-- **Module construction** using builder pattern or decorators
-- **Conflict matrix management** for transaction scheduling
-- **Graceful fallback** when native bindings are unavailable
+PySharp provides a Pythonic API for constructing hardware modules using Sharp's transaction-based semantics, following CIRCT's PyCDE pattern.
 
 ## Installation
-
-PySharp is included with Sharp's Python bindings:
 
 ```bash
 # Build Sharp with Python bindings
 pixi run build
 
-# Import PySharp (sibling package to sharp)
-import sys
-sys.path.append("/path/to/sharp/build/python_packages")
-sys.path.append("/path/to/sharp/build/python_packages/pysharp")
+# Set Python path
+export PYTHONPATH=$PYTHONPATH:/path/to/sharp/build/python_packages:/path/to/sharp/build/python_packages/pysharp
 
+# Import
 import pysharp
-```
-
-PySharp imports from the `sharp` package for MLIR functionality:
-```python
-# PySharp uses sharp bindings internally
-import sharp  # Must be available
-import pysharp  # Frontend
 ```
 
 ## Basic Usage
 
 ### Types
-
-PySharp provides hardware types for both standard integers and FIRRTL types:
-
 ```python
-import pysharp
 from pysharp import i8, i32, i64, uint, sint
 
-# Predefined integer types
-print(i8)    # i8
-print(i32)   # i32
-print(i64)   # i64
-
-# FIRRTL types
-print(uint(16))  # uint<16>
-print(sint(32))  # sint<32>
-
-# Custom integer types
-from pysharp.types import IntType
-custom = IntType(24)  # i24
+# Standard integer types
+x = i32  # 32-bit integer
+y = uint(16)  # 16-bit unsigned FIRRTL type
 ```
 
 ### Signals and Operations
-
-Signals represent values in the hardware design with support for arithmetic operations:
-
 ```python
-from pysharp import Signal, constant, i32
+from pysharp import Signal, constant
 
 # Create signals
 a = Signal("a", i32)
 b = Signal("b", i32)
 
-# Arithmetic operations
-c = a + b  # Signal((a + b): i32)
-d = a - 10 # Signal((a - 10): i32)
-
-# Bitwise operations  
-e = a & b  # Signal((a & b): i32)
-f = a | 0xFF  # Signal((a | 255): i32)
-
-# Constants
-const = constant(42, i32)  # Signal(const_42: i32)
+# Operations
+c = a + b  # Addition
+d = a & 0xFF  # Bitwise AND
+e = constant(42, i32)  # Constant
 ```
 
 ### Module Builder
-
-The `ModuleBuilder` provides programmatic module construction:
-
 ```python
-from pysharp import ModuleBuilder, i32, i1
+from pysharp import ModuleBuilder, i32
 
-# Create a module builder
+# Create module
 builder = ModuleBuilder("Counter")
 
-# Add state variables
-count_state = builder.add_state("count", i32)
-valid_state = builder.add_state("valid", i1)
+# Add state
+count = builder.add_state("count", i32)
 
-# Add value method (combinational, no side effects)
+# Add methods
 get_value = builder.add_value_method("getValue")
+get_value.returns(count.read())
 
-# Add action methods (can modify state)
 increment = builder.add_action_method("increment")
-decrement = builder.add_action_method("decrement")
+with increment.body():
+    val = count.read()
+    count.write(val + 1)
 
-# Add rules (fire automatically)
-auto_inc = builder.add_rule("autoIncrement")
+# Add schedule
+builder.add_schedule(["increment"])
 
-# Set conflict relationships
-builder.set_conflict("increment", "decrement", pysharp.ConflictRelation.C)
-builder.set_conflict("autoIncrement", "increment", pysharp.ConflictRelation.SB)
-
-print(builder)
-# Output:
-# ModuleBuilder(Counter)
-#   States: ['count', 'valid']
-#   Methods: ['getValue', 'increment', 'decrement']
-#   Rules: ['autoIncrement']
+# Generate MLIR
+module = builder.build()
 ```
 
-### Conflict Relations
-
-PySharp supports Sharp's conflict relation model:
-
+### Decorator Syntax
 ```python
-# Conflict relations between actions
-pysharp.ConflictRelation.SB  # 0 - Sequenced Before
-pysharp.ConflictRelation.SA  # 1 - Sequenced After
-pysharp.ConflictRelation.C   # 2 - Conflict
-pysharp.ConflictRelation.CF  # 3 - Conflict-Free
-```
+from pysharp import module, value_method, action_method, rule, schedule
 
-### Module Class and Decorators
-
-For more Pythonic module definition:
-
-```python
-@pysharp.module("FIFO")
-class FIFO:
-    # State variables
-    data = pysharp.State("data", pysharp.i32)
-    valid = pysharp.State("valid", pysharp.i1)
+@module("Counter")
+class Counter:
+    def __init__(self):
+        self.count = Register(i32)
     
-    @pysharp.value_method
-    def canEnqueue(self) -> pysharp.i1:
-        # Check if we can enqueue
-        return ~self.valid.read()
+    @value_method
+    def getValue(self) -> i32:
+        return self.count.read()
     
-    @pysharp.value_method
-    def canDequeue(self) -> pysharp.i1:
-        # Check if we can dequeue
-        return self.valid.read()
+    @action_method
+    def setValue(self, value: i32):
+        self.count.write(value)
     
-    @pysharp.action_method
-    def enqueue(self, value: pysharp.i32):
-        # Store data and mark as valid
-        self.data.write(value)
-        self.valid.write(pysharp.constant(True, pysharp.i1))
+    @rule
+    def autoIncrement(self):
+        if self.getValue() < 100:
+            self.setValue(self.getValue() + 1)
     
-    @pysharp.action_method
-    def dequeue(self) -> pysharp.i32:
-        # Mark as invalid and return data
-        self.valid.write(pysharp.constant(False, pysharp.i1))
-        return self.data.read()
-    
-    @pysharp.rule
-    def resetOnOverflow(self):
-        # Automatic reset rule
-        pass
-
-# Create instance
-fifo = pysharp.Module("FIFO")
-fifo.set_conflict("enqueue", "dequeue", pysharp.ConflictRelation.C)
+    @schedule
+    def main_schedule(self):
+        return ["setValue", "autoIncrement"]
 ```
 
 ## Advanced Features
 
-### State Operations
-
+### Conflict Management
 ```python
-# State variables support read/write operations
-state = pysharp.State("counter", pysharp.i32)
+from pysharp import ConflictType
 
-# Read returns a Signal
-value = state.read()  # Signal(read_counter: i32)
-
-# Write returns a tuple (for now - will be integrated with MLIR builders)
-write_op = state.write(value)  # ('write', State(counter: i32), Signal(...))
+# Specify conflicts
+schedule = builder.add_schedule(
+    ["rule1", "rule2"],
+    conflicts={
+        ("rule1", "rule2"): ConflictType.C  # Cannot execute together
+    }
+)
 ```
 
-### Complex Expressions
-
+### Parametric Modules
 ```python
-# Signals support chained operations
-a = pysharp.Signal("a", pysharp.i16)
-b = pysharp.Signal("b", pysharp.i16)
-c = pysharp.Signal("c", pysharp.i16)
+def create_fifo(depth: int, data_type):
+    builder = ModuleBuilder(f"FIFO_{depth}")
+    # Implementation...
+    return builder.build()
 
-# Chained arithmetic
-result = a + b + c  # Signal(((a + b) + c): i16)
-
-# Mixed operations
-result2 = (a + 100) & b  # Signal(((a + 100) & b): i16)
-
-# Type preservation - operations preserve left operand type
-sig8 = pysharp.Signal("x", pysharp.i8)
-result3 = sig8 + 1  # Result has type i8
+# Create different FIFOs
+fifo8 = create_fifo(8, i32)
+fifo16 = create_fifo(16, i64)
 ```
 
-## Architecture
-
-PySharp follows PyCDE's pattern of importing from its own namespace:
-
+### Instance Creation
 ```python
-# PySharp attempts to import from various locations
-try:
-    from . import _mlir_libs
-    from ._mlir_libs._mlir import ir
-    # ...
-except ImportError:
-    # Fallback - try alternative import paths
-    from .sharp import ir
-    # ...
+# In module builder
+reg = builder.add_instance("reg", "Register", i32)
 
-# This allows PySharp to work with or without native bindings
+# Use in methods
+val = reg.call("read")
+reg.call("write", new_value)
 ```
 
-## Comparison with Direct MLIR Construction
+## Interoperability
 
-PySharp provides a more Pythonic alternative to direct MLIR construction:
-
+PySharp generates standard Sharp MLIR:
 ```python
-# PySharp approach
-builder = pysharp.ModuleBuilder("Adder")
-state = builder.add_state("sum", pysharp.i32)
-add_method = builder.add_value_method("add")
+# Generate MLIR
+mlir_module = builder.build()
 
-# vs. Direct MLIR (would require native bindings)
-# module = ir.Module.create()
-# with ir.InsertionPoint(module.body):
-#     txn_module = txn.ModuleOp(name="Adder")
-#     # ... complex MLIR construction ...
+# Convert to string
+mlir_text = str(mlir_module)
+
+# Save to file
+with open("output.mlir", "w") as f:
+    f.write(mlir_text)
 ```
 
-## Testing
+## Examples
 
-PySharp tests are integrated with Sharp's lit test infrastructure:
-
-```bash
-# Run all tests including Python tests
-pixi run test
-
-# Run Python tests specifically
-cd build
-bin/llvm-lit ../test/python/
-
-# Example test output
-python test/python/pysharp/test_counter.py
+### Counter with Reset
+```python
+@module("ResetCounter")
+class ResetCounter:
+    def __init__(self):
+        self.count = Register(i32)
+    
+    @action_method
+    def increment(self):
+        self.count.write(self.count.read() + 1)
+    
+    @action_method
+    def reset(self):
+        self.count.write(0)
+    
+    @schedule
+    def schedule(self):
+        return ["reset", "increment"], {
+            ("reset", "increment"): ConflictType.SB  # Reset before increment
+        }
 ```
 
-### Test Structure
+### Pipeline Stage
+```python
+def pipeline_stage(name: str, process_fn):
+    builder = ModuleBuilder(name)
+    
+    valid = builder.add_state("valid", i1)
+    data = builder.add_state("data", i32)
+    
+    enqueue = builder.add_action_method("enqueue", [("input", i32)])
+    with enqueue.body():
+        if not valid.read():
+            data.write(process_fn(enqueue.arg("input")))
+            valid.write(True)
+    
+    dequeue = builder.add_action_method("dequeue")
+    dequeue.returns(data.read())
+    with dequeue.body():
+        if valid.read():
+            valid.write(False)
+    
+    return builder.build()
 ```
-test/python/
-└── pysharp/
-    ├── test_counter.py      # Counter module example
-    ├── test_types.py        # Type system tests
-    └── test_signals.py      # Signal operation tests
-```
-
-## Current Status
-
-### Completed Features ✅
-
-1. **Full PyCDE-style Structure**: Complete implementation following CIRCT patterns
-2. **Package Prefix Solution**: Fixed runtime loading with proper `sharp.` prefix
-3. **Sibling Package Import**: PySharp imports from sibling `sharp` package
-4. **Dialect Wrappers**: All dialects wrapped following PyCDE pattern
-5. **Type System**: Complete with IntType, UIntType, SIntType, ClockType, etc.
-6. **Signal Operations**: Full operator overloading for hardware operations
-7. **Module Decorators**: Class-based module definition with decorators
-8. **Conflict Matrix**: Complete ConflictRelation support (SB, SA, C, CF)
-9. **Builder API**: Fine-grained control over MLIR generation
-10. **Native Bindings**: Fully functional with MLIR generation support
-
-### Limitations
-
-1. **Limited Primitive Support**: Only Register/Wire primitives currently
-2. **No Verification**: Limited assertion/verification support
-3. **Type Constraints**: Primarily integer and boolean types
-4. **No Formal Support**: Specification primitives not fully exposed
-5. **State Operations**: `txn.state` not yet implemented
-
-## Future Enhancements
-
-- **Enhanced Type System**: Support for structs, arrays, and custom types
-- **Verification DSL**: Assertions and formal verification support
-- **Simulation Integration**: Direct Python simulation of PySharp modules
-- **Better Error Messages**: Source location tracking and type inference
-- **Module Instantiation**: Full hierarchical design support
-- **Optimization Hints**: Performance and area optimization directives

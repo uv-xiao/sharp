@@ -31,8 +31,8 @@ txn.module @SimpleCounter {
 // CHECK-SAME: in %incrementEN: !firrtl.uint<1>
 // CHECK-SAME: out %incrementRDY: !firrtl.uint<1>
 
-// Check will-fire logic
-// CHECK: %increment_wf = firrtl.node %incrementEN
+// Check will-fire logic - now includes reach_abort calculation
+// CHECK: %increment_wf = firrtl.node
 // CHECK: %auto_inc_wf = firrtl.node
 
 // Check value method implementation

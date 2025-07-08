@@ -272,7 +272,7 @@ Per `STATUS.md`:
 
 ### Development Diary
 
-Claude Code should note down the development progress in `archieves/DIARY.md`. It should be updated every claude code session (how the user interacts with the claude code and what the claude code does). The user could provide some guidance files (like PLAN.md, etc.) to the claude code, and when claude code finished using the files and do not need them anymore, the files should be moved to `archieves/` directory with date marked (e.g., `archieves/2025-06-29-PLAN.md`). The `archieves/DIARY.md` entries should refer to the guidance files.
+Claude Code should note down the development progress in `DIARY.md`. It should be updated every claude code session (how the user interacts with the claude code and what the claude code does).
 
 
 ## Key Documentation Files

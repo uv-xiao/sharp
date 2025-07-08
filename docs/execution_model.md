@@ -1,92 +1,50 @@
 # Sharp Execution Model
 
-This document describes the execution model for Sharp, inspired by Koika's one-rule-at-a-time semantics with method extensions for modular hardware design.
-
 ## Overview
 
-Sharp adopts a **one-rule-at-a-time (1RaaT)** execution model where actions execute atomically and sequentially within each clock cycle. This model provides:
-
-1. **Sequential Semantics**: Actions appear to execute in program order
-2. **Atomic Execution**: Each action completes entirely before the next begins
-3. **Deterministic Behavior**: No race conditions or timing ambiguities
-4. **Modular Composition**: Methods enable hierarchical design
+Sharp adopts a **one-rule-at-a-time (1RaaT)** execution model where actions execute atomically and sequentially within each clock cycle, providing deterministic behavior without race conditions.
 
 ## Core Concepts
 
 ### Terminology
+- **Action**: Rule or action method - the schedulable units that modify state
+- **Rule**: Guarded atomic action executing autonomously
+- **Action Method**: State-modifying method callable from parent modules  
+- **Value Method**: Pure function reading state without side effects
 
-- **Action**: Either a rule or an action method. These are the schedulable units that can modify state.
-- **Rule**: A guarded atomic action defined within a module that executes autonomously
-- **Action Method**: A method that can modify state, callable from parent modules
-- **Value Method**: A pure function that reads state without side effects (not schedulable)
 
-### Rules
+### Scheduling and Conflicts
 
-A **rule** is a guarded atomic action that executes when its guard condition is true:
+Conflict relations:
+- **SB (0)**: Sequenced Before - A executes before B
+- **SA (1)**: Sequenced After - A executes after B
+- **C (2)**: Conflict - A and B cannot execute same cycle
+- **CF (3)**: Conflict-Free - A and B can execute any order
 
-```mlir
-txn.rule @doSomething {
-    %guard = txn.call @canProceed() : () -> i1
-    txn.if %guard {
-        // Action body executes atomically
-        %value = txn.call @getValue() : () -> i32
-        txn.call @setValue(%value) : (i32) -> ()
-    }
-}
-```
+Key constraints:
+- Schedules contain only actions (rules/action methods)
+- Value methods must be conflict-free with all actions
+- Actions cannot call other actions in same module
 
-### Methods
+## Multi-Cycle Operations
 
-Methods extend the basic 1RaaT model with modular interfaces:
-
-1. **Value Methods**: Pure functions that read state without side effects
-   - Must be conflict-free with all other actions
-   - Not included in schedules
-   - Example: Wire's read cannot be a value method since "read SA write" is required
-
-2. **Action Methods**: Procedures that can modify state atomically
-   - Included in schedules alongside rules
-   - Can be called by parent modules
+Launch operations enable deferred execution:
 
 ```mlir
-txn.value_method @getValue() -> i32 {
-    %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
-    %state = txn.call @reg.read() : () -> i32
-    txn.return %state
-}
-
-txn.action_method @setValue(%v: i32) {
-    %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
-    txn.call @reg.write(%v) : (i32) -> ()
+txn.future {
+  // Static latency - must succeed after delay or panic
+  %done1 = txn.launch after 3 {
+    txn.call @reg::@write(%data) : (i32) -> ()
+    txn.yield
+  }
+  
+  // Dynamic latency - retry until successful
+  %done2 = txn.launch until %done1 {
+    txn.call @fifo::@enqueue(%data) : (i32) -> ()
+    txn.yield
+  }
 }
 ```
-
-### Scheduling
-
-The schedule specifies the execution order of **actions only** (rules and action methods). Value methods are not included in schedules.
-
-Within each cycle, actions execute based on:
-
-1. **Explicit Ordering**: User-specified schedule constraints
-2. **Conflict Relations**: 
-   - **SB (Sequenced Before)**: Action A must execute before Action B in the same cycle
-   - **SA (Sequenced After)**: Action A must execute after Action B in the same cycle
-   - **C (Conflict)**: Actions cannot execute in the same cycle
-   - **CF (Conflict-Free)**: Actions can execute in any order within the same cycle
-   
-   Important constraints:
-   - **Value methods** can only have CF relations with all other methods (actions and values)
-   - **Actions** can have any relation (SB, SA, C, CF) with other actions
-   - SA/SB constraints are essential for:
-     - Specifying partial ordering constraints when the schedule is not fully determined
-     - Propagating ordering constraints from child instances to parent modules
-     - The ActionScheduling pass uses SA/SB to complete partial schedules
-
-### Method Call Restrictions
-
-1. Actions cannot call other actions in the same module
-2. Actions can call value methods in the same module
-3. Actions can call methods (both value and action) of child module instances
 
 ## Execution Semantics
 
@@ -166,254 +124,22 @@ Multi-cycle operations allow actions to span multiple clock cycles. The executio
 
 3. **Commit Phase**: Same as single cycle execution
 
-### Launch Operations
-
-Multi-cycle actions can contain per-cycle actions and launches. Launch operations allow deferred execution with dependencies:
-
-```mlir
-txn.instance @reg of @Register<i32> : !txn.module<"Register">
-txn.instance @fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
-
-txn.action_method @multiCycleAction(%data: i32) {multicycle = true} {
-    // Per-cycle actions execute immediately
-    txn.call @reg.write(%data) : (i32) -> ()
-    
-    // Multi-cycle actions are enclosed by txn.future
-    txn.future {
-      // Static latency launch
-      %done1 = txn.launch after 3 {
-          // This block executes 3 cycles later
-          // If after 3 cycles, this block fails, a panic will be raised
-          txn.call @reg.write(%data) : (i32) -> ()
-          txn.yield
-      }
-      
-      // Dynamic latency launch
-      %done2 = txn.launch until %done1 {
-          // This launch only starts when %done1 is true
-          // If the enqueue fails, NO panic will be raised
-          // Instead, the block will be tried again in the next cycle until it succeeds
-          txn.call @fifo.enqueue(%data) : (i32) -> ()
-          txn.yield
-      }
-
-      // Combined: dependency with static latency
-      %done3 = txn.launch until %done2 after 1 {
-        // This launch only starts 1 cycle after %done2 is true
-        // If the launch fails, a panic will be raised (due to the static latency)
-        // ...
-        txn.yield
-      }
-    }
-}
-
-txn.rule @multiCycleRule {multicycle = true} {
-    // Rules can also be multi-cycle
-    txn.future {
-      // Contains one or multiple launches, similar to action methods
-    }
-}
-```
-
-**Key Semantics**:
-- Static launches (`{latency=n}`) must succeed after the specified delay or panic
-- Dynamic launches (`until %cond`) retry until successful
-- Launches can depend on completion of previous launches
-- Per-cycle actions execute before any launches start
-
-## Conflict Resolution
-
-### Conflict Matrix
-
-The scheduler uses a conflict matrix to determine compatible rule executions:
-
-```
-        R1   R2   R3
-   R1   -    SB   CF
-   R2   SA   -    C
-   R3   CF   C    -
-```
-
-Where:
-- `SB`: R1 must execute before R2
-- `SA`: R2 must execute after R1  
-- `C`: R2 and R3 cannot execute in same cycle
-- `CF`: R1 and R3 can execute in any order
-
-### Method Conflicts
-
-Method calls introduce implicit conflicts:
-
-1. **Action-Action**: Two calls to the same action method conflict
-2. **Value methods must be conflict-free**: Value methods cannot have conflicts with any actions
-3. **Value-Value**: Value methods never conflict with each other
 
 ## Implementation Strategy
 
 ### Transaction-Level Simulation
 
-Sharp implements a complete event-driven simulation infrastructure with the 1RaaT execution model:
+**Implementation**: `lib/Simulation/Core/Simulator.cpp`, `lib/Simulation/Core/SimModule.cpp`
 
-```cpp
-class Simulator {
-    void executeCycle() {
-        // Phase 1: Value Phase - Calculate all value method results
-        for (auto& valueMethod : module->valueMethods) {
-            valueMethodCache[valueMethod->name] = valueMethod->compute();
-        }
-        
-        // Phase 2: Execution Phase - Execute actions in schedule order
-        for (auto& actionName : module->schedule) {
-            auto* action = module->getAction(actionName);
-            
-            if (action->isActionMethod()) {
-                // Wait for parent module enablement
-                if (!action->isEnabled() && !allCallersAborted(action)) {
-                    continue; // Stall
-                }
-            }
-            
-            // Check guard and conflicts
-            if (action->checkGuard() && !hasConflict(action)) {
-                ExecutionResult result = action->execute();
-                recordResult(action, result);
-                
-                // Handle multi-cycle actions
-                if (action->isMultiCycle()) {
-                    handleMultiCycleExecution(action);
-                }
-            }
-        }
-        
-        // Phase 3: Commit Phase - Apply successful state updates
-        commitSuccessfulUpdates();
-        advanceTime();
-    }
-};
-```
+- Event-driven architecture with three-phase execution
+- Performance metrics collection
+- Multi-cycle support via continuations
 
-**Key Features**:
-- **Event-driven architecture** with dependency tracking
-- **Performance metrics** collection (cycles, method calls, conflicts)
-- **Breakpoint support** for debugging
-- **Multi-cycle operations** through continuation events
+**Concurrent mode** (DAM Methodology)
 
-### RTL Translation
+**Implementation**: `lib/Simulation/Concurrent/ConcurrentSimulator.cpp`, `lib/Simulation/Concurrent/Context.cpp`
 
-Sharp provides complete translation to synthesizable hardware through FIRRTL:
-
-1. **Guard Evaluation**: Combinational logic for all guards
-2. **Conflict Resolution**: Will-fire signals with conflict matrix checking
-3. **Sequential Execution**: Ready/enable protocol for methods
-4. **State Updates**: Register writes with proper clock/reset
-
-**Translation Pipeline**:
-```bash
-# Generate Verilog through FIRRTL
-sharp-opt input.mlir --txn-export-verilog -o output.v
-
-# Or step-by-step:
-sharp-opt input.mlir --convert-txn-to-firrtl | \
-  circt-opt --lower-firrtl-to-hw | \
-  circt-opt --export-verilog -o output.v
-```
-
-**Key Features**:
-- Automatic conflict matrix inference
-- Parametric primitive instantiation
-- Method interface generation
-- Proper clock/reset handling
-
-## Examples
-
-### Simple Counter
-
-```mlir
-txn.module @Counter {
-    %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
-    
-    txn.value_method @getValue() -> i32 {
-        %v = txn.call @count.read() : () -> i32
-        txn.return %v : i32
-    }
-    
-    txn.action_method @increment() {
-        %v = txn.call @count.read() : () -> i32
-        %one = arith.constant 1 : i32
-        %next = arith.addi %v, %one : i32
-        txn.call @count.write(%next) : (i32) -> ()
-        txn.return
-    }
-    
-    txn.rule @autoIncrement {
-        %v = txn.call @getValue() : () -> i32
-        %max = arith.constant 100 : i32
-        %cond = arith.cmpi ult, %v, %max : i32
-        txn.if %cond {
-            txn.call @increment() : () -> ()
-        }
-        txn.yield
-    }
-    
-    txn.schedule [@increment, @autoIncrement]  
-}
-```
-
-### Pipeline Stage
-
-```mlir
-txn.module @PipelineStage {
-    %valid = txn.instance @valid of @Register<i1> : !txn.module<"Register">
-    %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
-    
-    txn.action_method @enqueue(%v: i32) {
-        %is_empty = txn.call @valid.read() : () -> i1
-        %true = arith.constant true : i1
-        %not_valid = arith.xori %is_empty, %true : i1
-        txn.if %not_valid {
-            txn.call @data.write(%v) : (i32) -> ()
-            txn.call @valid.write(%true) : (i1) -> ()
-        }
-        txn.return
-    }
-    
-    txn.action_method @dequeue() -> i32 {
-        %is_valid = txn.call @valid.read() : () -> i1
-        %result = txn.call @data.read() : () -> i32
-        txn.if %is_valid {
-            %false = arith.constant false : i1
-            txn.call @valid.write(%false) : (i1) -> ()
-        }
-        txn.return %result : i32
-    }
-    
-    txn.schedule [@enqueue, @dequeue]
-}
-```
-
-## Comparison with Other Models
-
-### vs. Verilog Always Blocks
-- Sharp: Atomic rule execution, no race conditions
-- Verilog: Concurrent execution, potential races
-
-### vs. SystemVerilog Assertions  
-- Sharp: Rules are synthesizable hardware
-- SVA: Primarily for verification, not synthesis
-
-### vs. Chisel/FIRRTL
-- Sharp: Explicit scheduling and conflicts
-- Chisel: Implicit scheduling through connections
-
-### vs. Bluespec
-- Sharp: Similar atomic semantics, simpler conflict model
-- Bluespec: Complex implicit conditions, compiler-driven scheduling
-
-## Advanced Simulation Modes
-
-### Concurrent Simulation (DAM Methodology)
-
-Sharp implements DAM (Discrete-event simulation with Adaptive Multiprocessing) for high-performance multi-module simulation:
+Sharp implements DAM (Dataflow Abstract Machine) for high-performance multi-module simulation:
 
 ```cpp
 // Each module runs in its own context with local time
@@ -431,69 +157,83 @@ class Context {
 };
 ```
 
+**Code Position**: Context.cpp implements this pattern
+
 **Key Principles**:
 - **Asynchronous time**: No global synchronization barrier
 - **Time-bridging channels**: Handle inter-module communication
 - **Lazy synchronization**: Only sync when necessary
 - **Thread affinity**: Pin contexts to CPU cores for performance
 
-### RTL Simulation Integration
+### RTL Translation
+- Automatic conflict matrix inference
+- Will-fire signal generation
+- Ready/enable method protocols
+- Synthesizable FIRRTL/Verilog output
 
-Sharp integrates with CIRCT's arcilator for cycle-accurate RTL simulation:
-
-```bash
-# Convert to Arc dialect and simulate
-sharp-opt input.mlir --sharp-arcilator -o arc.mlir
-arcilator arc.mlir --trace  # Generates VCD waveforms
-```
-
-### Hybrid TL-RTL Simulation
-
-Mix transaction-level and RTL modules with configurable synchronization:
+## Example
 
 ```mlir
-sim.bridge_config @bridge {
-    sim.tl_module @TLProducer
-    sim.rtl_module @RTLConsumer
-    sim.sync_mode "lockstep"  // or "decoupled", "adaptive"
+txn.module @Counter {
+  %count = txn.instance @count of @Register<i32>
+  
+  txn.value_method @getValue() -> i32 {
+    %v = txn.call @count::@read() : () -> i32
+    txn.return %v : i32
+  }
+  
+  txn.rule @increment {
+    %v = txn.call @getValue() : () -> i32
+    %limit = arith.constant 100 : i32
+    %cond = arith.cmpi ult, %v, %limit : i32
+    txn.if %cond {
+      %one = arith.constant 1 : i32
+      %next = arith.addi %v, %one : i32
+      txn.call @count::@write(%next) : (i32) -> ()
+    }
+    txn.yield
+  }
+  
+  txn.schedule [@increment]
 }
 ```
 
-**Synchronization Modes**:
-- **Lockstep**: TL and RTL advance together
-- **Decoupled**: Allow bounded time divergence
-- **Adaptive**: Dynamically adjust based on activity
+## Documentation vs Implementation Mismatches
 
-### JIT Compilation
+### Issues Found
 
-Experimental JIT mode for long-running simulations:
+1. **Three-Phase Execution Model**
+   - **Documentation**: Describes Value Phase → Execution Phase → Commit Phase
+   - **Implementation**: Simulation code doesn't clearly implement this three-phase model
+   - **Location**: `lib/Simulation/Core/Simulator.cpp` should implement this pattern
+   - **Impact**: Execution semantics may not match specification
 
-```bash
-# Compile and execute directly
-sharp-opt input.mlir --sharp-simulate=mode=jit
-```
+2. **Method Call Semantics**
+   - **Documentation**: Value methods calculated once per cycle in Value Phase
+   - **Implementation**: Current simulation may not enforce this constraint
+   - **Impact**: Value method results might be inconsistent within a cycle
 
-## Performance Optimization
+3. **Multi-Cycle Execution**
+   - **Documentation**: Detailed multi-cycle execution model with launch operations
+   - **Implementation**: Multi-cycle support appears incomplete in simulation infrastructure
+   - **Location**: `lib/Simulation/` directories don't show complete multi-cycle implementation
 
-### Simulation Statistics
+4. **DAM Implementation**
+   - **Documentation**: Describes sophisticated DAM methodology
+   - **Implementation**: `lib/Simulation/Concurrent/` exists but may not fully implement described features
+   - **Location**: ConcurrentSimulator.cpp and Context.cpp
 
-All simulation modes collect comprehensive metrics:
-- Total cycles executed
-- Method call counts and conflicts
-- Rule firing patterns
-- Event queue depths
-- For concurrent: speedup metrics
+### Missing Components
 
-### Optimization Techniques
+1. **Action Stalling Logic**: Documentation describes action method stalling but implementation unclear
+2. **Abort Propagation**: Multi-cycle abort handling not fully implemented  
+3. **Condition Tracking**: Launch until/after conditions not integrated with simulation
+4. **Time Synchronization**: DAM time-bridging channels not fully implemented
 
-1. **Conflict Caching**: Precompute and cache conflict checks
-2. **Event Batching**: Group non-conflicting events
-3. **Parallel Rule Evaluation**: Use SIMD for guard evaluation
-4. **Memory Pooling**: Reuse event objects
+### Fixes Needed
 
-## Future Extensions
-
-1. **Formal Verification Integration**: Connect to model checkers
-2. **Hardware-in-the-Loop**: Co-simulation with FPGA prototypes
-3. **Distributed Simulation**: Multi-machine simulation for large designs
-4. **Incremental Compilation**: Faster iteration cycles
+1. **Implement proper three-phase execution** in Simulator.cpp
+2. **Add value method caching** to enforce once-per-cycle calculation
+3. **Complete multi-cycle support** with launch operation handling
+4. **Enhance DAM implementation** with proper time synchronization
+5. **Add abort propagation** throughout execution pipeline

@@ -89,6 +89,9 @@ private:
   // Breakpoints: module -> set of methods
   StringMap<std::set<std::string>> breakpoints;
   
+  // Value method cache: module::method -> computed value
+  StringMap<SmallVector<Value>> valueMethodCache;
+  
   /// Check if event conflicts with currently executing events
   bool hasConflicts(EventPtr event) const;
   
@@ -103,6 +106,18 @@ private:
   
   /// Check if we should break
   bool shouldBreak(StringRef module, StringRef method) const;
+  
+  /// Execute the value phase - calculate all value methods
+  void executeValuePhase();
+  
+  /// Execute event during execution phase (no state commit)
+  ExecutionResult executeEventPhase(EventPtr event);
+  
+  /// Execute commit phase - apply all state updates
+  void executeCommitPhase(const std::vector<ExecutionResult>& results);
+  
+  /// Clear value method cache
+  void clearValueMethodCache();
 };
 
 /// Builder for setting up simulations

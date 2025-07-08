@@ -50,6 +50,12 @@ struct ExecutionResult {
   
   /// Events to trigger
   SmallVector<EventPtr, 4> triggeredEvents;
+  
+  /// Whether the execution was aborted
+  bool aborted = false;
+  
+  /// Source event that generated this result (for commit phase)
+  EventPtr sourceEvent;
 };
 
 /// Represents a simulation event
@@ -135,6 +141,9 @@ public:
   
   /// Mark an event as completed
   void markComplete(EventID id);
+  
+  /// Peek at the next ready event without removing it
+  EventPtr peekReady() const;
 
 private:
   std::vector<EventPtr> events; // Min-heap by time

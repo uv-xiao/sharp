@@ -66,6 +66,9 @@ struct ConversionContext {
   /// Reachability conditions for method calls
   DenseMap<Operation*, Value> reachabilityConditions;
   
+  /// Reachability conditions for abort operations
+  DenseMap<Operation*, Value> abortReachabilityConditions;
+  
   /// Track instance ports for method call connections
   DenseMap<StringRef, DenseMap<StringRef, Value>> instancePorts;
   
@@ -182,6 +185,194 @@ static ConflictRelation getConflictRelationFromString(const std::string &method1
   return ConflictRelation::ConflictFree;
 }
 
+/// Helper to walk an action and track reachability conditions
+static void walkWithPathConditions(
+    Operation *op, Value pathCondition, ConversionContext &ctx,
+    llvm::function_ref<void(Operation*, Value)> callback) {
+  
+  // Handle regions
+  for (auto &region : op->getRegions()) {
+    for (auto &block : region) {
+      for (auto &nested : block) {
+        if (auto ifOp = dyn_cast<IfOp>(&nested)) {
+          // Get the FIRRTL condition
+          Value cond = ctx.txnToFirrtl.lookup(ifOp.getCondition());
+          if (!cond) {
+            // If condition not converted yet, skip
+            continue;
+          }
+          
+          // Build path condition for then branch
+          Value thenCond = pathCondition;
+          if (pathCondition) {
+            thenCond = ctx.firrtlBuilder.create<AndPrimOp>(ifOp.getLoc(), pathCondition, cond);
+          } else {
+            thenCond = cond;
+          }
+          
+          // Walk then region
+          for (auto &thenBlock : ifOp.getThenRegion()) {
+            for (auto &thenOp : thenBlock) {
+              walkWithPathConditions(&thenOp, thenCond, ctx, callback);
+            }
+          }
+          
+          // Build path condition for else branch if exists
+          if (!ifOp.getElseRegion().empty()) {
+            Value notCond = ctx.firrtlBuilder.create<NotPrimOp>(ifOp.getLoc(), cond);
+            Value elseCond = pathCondition;
+            if (pathCondition) {
+              elseCond = ctx.firrtlBuilder.create<AndPrimOp>(ifOp.getLoc(), pathCondition, notCond);
+            } else {
+              elseCond = notCond;
+            }
+            
+            // Walk else region
+            for (auto &elseBlock : ifOp.getElseRegion()) {
+              for (auto &elseOp : elseBlock) {
+                walkWithPathConditions(&elseOp, elseCond, ctx, callback);
+              }
+            }
+          }
+        } else {
+          // For non-if operations, pass through the path condition
+          callback(&nested, pathCondition);
+          // Recursively walk nested operations
+          walkWithPathConditions(&nested, pathCondition, ctx, callback);
+        }
+      }
+    }
+  }
+}
+
+/// Calculate reach_abort for an action
+/// reach_abort[action] = OR(reach(abort_i, action) for every abort_i in action) 
+///                     || OR(reach(call_i, action) && reach_abort(method[call_i]) for every call_i in action)
+static Value calculateReachAbort(Operation *action, ConversionContext &ctx, 
+                               const DenseMap<StringRef, Operation*> &actionMap) {
+  auto &builder = ctx.firrtlBuilder;
+  auto loc = action->getLoc();
+  auto boolType = IntType::get(builder.getContext(), false, 1);
+  
+  // Start with false (no abort)
+  Value reachAbort = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                APSInt(APInt(1, 0), true));
+  
+  // Walk the action body with path conditions
+  Region *bodyRegion = nullptr;
+  if (auto rule = dyn_cast<RuleOp>(action)) {
+    bodyRegion = &rule.getBody();
+  } else if (auto method = dyn_cast<ActionMethodOp>(action)) {
+    bodyRegion = &method.getBody();
+  }
+  
+  if (!bodyRegion) return reachAbort;
+  
+  // Walk through the body tracking path conditions
+  for (auto &block : *bodyRegion) {
+    for (auto &op : block) {
+      walkWithPathConditions(&op, nullptr, ctx, [&](Operation *nested, Value pathCond) {
+        if (isa<::sharp::txn::AbortOp>(nested)) {
+          // Found an abort - use its path condition
+          Value abortReach = pathCond;
+          if (!abortReach) {
+            // No path condition means always reachable
+            abortReach = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                   APSInt(APInt(1, 1), true));
+          }
+          // OR with existing reach_abort
+          reachAbort = builder.create<OrPrimOp>(loc, reachAbort, abortReach);
+        } else if (auto callOp = dyn_cast<CallOp>(nested)) {
+          // For method calls, use path condition combined with the call's own condition
+          Value callReach = pathCond;
+          
+          // Check if ReachabilityAnalysis provided a condition 
+          auto condIt = ctx.reachabilityConditions.find(nested);
+          if (condIt != ctx.reachabilityConditions.end()) {
+            Value analysisCondition = ctx.txnToFirrtl.lookup(condIt->second);
+            if (analysisCondition) {
+              if (callReach) {
+                callReach = builder.create<AndPrimOp>(loc, callReach, analysisCondition);
+              } else {
+                callReach = analysisCondition;
+              }
+            }
+          } else if (callOp.getCondition()) {
+            // Fall back to the condition operand if present
+            Value callCond = ctx.txnToFirrtl.lookup(callOp.getCondition());
+            if (callCond) {
+              if (callReach) {
+                callReach = builder.create<AndPrimOp>(loc, callReach, callCond);
+              } else {
+                callReach = callCond;
+              }
+            }
+          }
+          
+          if (!callReach) {
+            // Default: always reachable
+            callReach = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                  APSInt(APInt(1, 1), true));
+          }
+          
+          // Check if the called method can abort
+          // For instance method calls, check the method type
+          if (callOp.getCallee().getNestedReferences().size() == 1) {
+            StringRef instanceName = callOp.getCallee().getRootReference().getValue();
+            StringRef methodName = callOp.getCallee().getNestedReferences()[0].getValue();
+            
+            // For primitive methods, we know their abort behavior
+            // Register/Wire read/write methods don't abort
+            // FIFO dequeue can abort if empty, enqueue can abort if full
+            // TODO: In a full implementation, we'd check the instance type and method
+            
+            // For now, assume primitive methods don't abort except FIFO operations
+            bool methodCanAbort = false;
+            if (methodName == "dequeue" || methodName == "enqueue") {
+              // FIFO operations can abort
+              methodCanAbort = true;
+            }
+            
+            if (methodCanAbort) {
+              // Create abort condition: callReach && method_aborts
+              // For FIFO, the abort condition depends on empty/full status
+              // This is a simplification - in reality we'd need the FIFO's status signals
+              Value methodAbortCond = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                                APSInt(APInt(1, 0), true)); // TODO: Get actual abort condition
+              Value callAborts = builder.create<AndPrimOp>(loc, callReach, methodAbortCond);
+              reachAbort = builder.create<OrPrimOp>(loc, reachAbort, callAborts);
+            }
+          } else {
+            // For local method calls, we'd need to recursively analyze the called method
+            // This requires inter-procedural analysis which is complex
+            // For now, conservatively assume local action methods might abort
+            StringRef methodName = callOp.getCallee().getRootReference().getValue();
+            
+            // Look up if this is an action method
+            bool isActionMethod = false;
+            ctx.currentTxnModule.walk([&](ActionMethodOp am) {
+              if (am.getSymName() == methodName) {
+                isActionMethod = true;
+              }
+            });
+            
+            if (isActionMethod) {
+              // Conservatively assume action methods can abort
+              // In reality, we'd analyze the method body
+              Value methodAbortCond = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                                APSInt(APInt(1, 1), true)); // Conservative: assume can abort
+              Value callAborts = builder.create<AndPrimOp>(loc, callReach, methodAbortCond);
+              reachAbort = builder.create<OrPrimOp>(loc, reachAbort, callAborts);
+            }
+          }
+        }
+      });
+    }
+  }
+  
+  return reachAbort;
+}
+
 /// Get conflict relation between two actions by examining their method calls
 static ConflictRelation getConflictRelation(StringRef a1, StringRef a2,
                                            const ConversionContext &ctx,
@@ -256,7 +447,7 @@ static ConflictRelation getConflictRelation(StringRef a1, StringRef a2,
 }
 
 /// Generate static mode will-fire logic for an action
-/// wf[action] = enabled[action] && !conflicts_with_earlier[action] && !conflict_inside[action]
+/// wf[action] = enabled[action] && !reach_abort[action] && !conflicts_with_earlier[action] && !conflict_inside[action]
 static Value generateStaticWillFire(StringRef actionName, Value enabled,
                                   ArrayRef<StringRef> schedule,
                                   ConversionContext &ctx,
@@ -270,6 +461,17 @@ static Value generateStaticWillFire(StringRef actionName, Value enabled,
   if (!wf) {
     llvm::errs() << "generateStaticWillFire: enabled signal is null for " << actionName << "\n";
     return nullptr;
+  }
+  
+  // Calculate reach_abort for this action
+  auto actionIt = actionMap.find(actionName);
+  if (actionIt != actionMap.end()) {
+    Value reachAbort = calculateReachAbort(actionIt->second, ctx, actionMap);
+    if (reachAbort) {
+      // wf = enabled && !reach_abort
+      Value notAbort = builder.create<NotPrimOp>(loc, reachAbort);
+      wf = builder.create<AndPrimOp>(loc, wf, notAbort);
+    }
   }
   
   // Check conflicts with earlier actions (static mode)
@@ -310,19 +512,12 @@ static Value generateStaticWillFire(StringRef actionName, Value enabled,
   
   // conflict_inside is already handled in the main logic
   
-  // Create node for will-fire signal
-  auto wfNode = builder.create<NodeOp>(loc, wf,
-                                      (actionName.str() + "_wf"),
-                                      NameKindEnum::DroppableName);
-  
-  // Store in context
-  ctx.willFireSignals[actionName] = wfNode.getResult();
-  
-  return wfNode.getResult();
+  // Return the will-fire value - node creation is handled in the main loop
+  return wf;
 }
 
 /// Generate dynamic mode will-fire logic for an action
-/// wf[action] = enabled[action] && AND{for every m in action, NOT(reach(m, action) && conflict_with_earlier(m))}
+/// wf[action] = enabled[action] && !reach_abort[action] && AND{for every m in action, NOT(reach(m, action) && conflict_with_earlier(m))}
 static Value generateDynamicWillFire(StringRef actionName, Value enabled,
                                    ArrayRef<StringRef> schedule,
                                    ConversionContext &ctx,
@@ -338,6 +533,14 @@ static Value generateDynamicWillFire(StringRef actionName, Value enabled,
   if (!wf) {
     llvm::errs() << "generateDynamicWillFire: enabled signal is null for " << actionName << "\n";
     return nullptr;
+  }
+  
+  // Calculate reach_abort for this action
+  Value reachAbort = calculateReachAbort(action, ctx, actionMap);
+  if (reachAbort) {
+    // wf = enabled && !reach_abort
+    Value notAbort = builder.create<NotPrimOp>(loc, reachAbort);
+    wf = builder.create<AndPrimOp>(loc, wf, notAbort);
   }
   
   // Track method calls that have been made by earlier actions
@@ -418,19 +621,13 @@ static Value generateDynamicWillFire(StringRef actionName, Value enabled,
   
   // conflict_inside is already handled in the main logic
   
-  // Create node for will-fire signal
-  auto wfNode = builder.create<NodeOp>(loc, wf,
-                                      (actionName.str() + "_wf"),
-                                      NameKindEnum::DroppableName);
-  
-  // Store in context
-  ctx.willFireSignals[actionName] = wfNode.getResult();
-  
-  return wfNode.getResult();
+  // Return the will-fire value - node creation is handled in the main loop
+  return wf;
 }
 
 /// Generate most-dynamic mode will-fire logic for an action
-/// Tracks primitive actions instead of just instance methods
+/// wf[action] = enabled[action] && !reach_abort[action] && 
+///              AND{for every direct/indirect method call m by action: NOT(reach(m, action) && conflict_with_earlier(m))}
 static Value generateMostDynamicWillFire(StringRef actionName, Value enabled,
                                        ArrayRef<StringRef> schedule,
                                        ConversionContext &ctx,
@@ -445,6 +642,14 @@ static Value generateMostDynamicWillFire(StringRef actionName, Value enabled,
   if (!wf) {
     llvm::errs() << "generateMostDynamicWillFire: enabled signal is null for " << actionName << "\n";
     return nullptr;
+  }
+  
+  // Calculate reach_abort for this action
+  Value reachAbort = calculateReachAbort(action, ctx, actionMap);
+  if (reachAbort) {
+    // wf = enabled && !reach_abort
+    Value notAbort = builder.create<NotPrimOp>(loc, reachAbort);
+    wf = builder.create<AndPrimOp>(loc, wf, notAbort);
   }
   
   // Track primitive actions that have been called by earlier actions
@@ -2195,6 +2400,22 @@ struct TxnToFIRRTLConversionPass
     auto module = getOperation();
     MLIRContext *ctx = &getContext();
     ConversionContext convCtx(ctx);
+    
+    // First, collect reachability analysis results if available
+    // The ReachabilityAnalysis pass adds condition operands to txn.call operations
+    module.walk([&](::sharp::txn::ModuleOp txnModule) {
+      txnModule.walk([&](Operation *op) {
+        // Collect reachability conditions from CallOps
+        if (auto callOp = dyn_cast<CallOp>(op)) {
+          if (auto cond = callOp.getCondition()) {
+            convCtx.reachabilityConditions[op] = cond;
+          }
+        }
+        // Also need to collect abort reachability conditions
+        // Since ReachabilityAnalysis now tracks aborts, we need to extract that info
+        // For now, we'll handle this during the conversion phase
+      });
+    });
     
     // Get sorted module list
     SmallVector<::sharp::txn::ModuleOp> sortedModules;

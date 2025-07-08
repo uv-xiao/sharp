@@ -192,6 +192,22 @@ void ReachabilityAnalysisPass::processOperation(Operation *op,
     return;
   }
   
+  // Handle txn.abort operations similarly to calls
+  if (auto abortOp = dyn_cast<txn::AbortOp>(op)) {
+    // Record the reachability condition for this abort
+    if (pathCondition) {
+      state.reachabilityConditions[op] = pathCondition;
+      LLVM_DEBUG(llvm::dbgs() << "  Found abort with condition: " << pathCondition << "\n");
+    } else {
+      // Even without a path condition, record that we found an abort
+      // Use a true constant to indicate it's always reachable at the top level
+      auto trueVal = builder.create<arith::ConstantIntOp>(op->getLoc(), 1, 1);
+      state.reachabilityConditions[op] = trueVal;
+      LLVM_DEBUG(llvm::dbgs() << "  Found unconditional abort\n");
+    }
+    return;
+  }
+  
   // For other operations, process nested regions if any
   for (auto &region : op->getRegions()) {
     processRegion(region, pathCondition, state, builder);
