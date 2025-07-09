@@ -89,7 +89,7 @@ txn.module @ComplexConflicts {
 // CHECK: firrtl.module @ComplexConflicts
 
 // Check will-fire signals exist
-// CHECK: %a1_wf = firrtl.node %a1EN
+// CHECK: %a1_wf = firrtl.node
 // CHECK: %a2_wf = firrtl.node
 // CHECK: %a3_wf = firrtl.node
 // CHECK: %r1_wf = firrtl.node

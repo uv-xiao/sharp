@@ -73,6 +73,13 @@ circt::firrtl::FModuleOp createFIFOFIRRTLModule(OpBuilder &builder, Location loc
                                                 StringRef name, Type dataType,
                                                 unsigned addressWidth = 10);
 
+/// Create a FIRRTL module implementation for Memory primitive.
+/// This creates the actual hardware implementation with memory ports.
+/// Note: This must be created within a firrtl.circuit context.
+circt::firrtl::FModuleOp createMemoryFIRRTLModule(OpBuilder &builder, Location loc,
+                                                  StringRef name, Type dataType,
+                                                  unsigned addressWidth);
+
 /// Create a SpecFIFO primitive.
 /// SpecFIFO is an unbounded FIFO for specification and verification.
 /// It provides enqueue/dequeue/isEmpty/size/peek operations.

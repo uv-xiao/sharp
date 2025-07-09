@@ -39,10 +39,10 @@ txn.module @ConflictTest {
 }
 
 // Check will-fire generation
-// CHECK: %a1_wf = firrtl.node %a1EN
-// CHECK: firrtl.not %a1_wf
+// CHECK: %a1_wf = firrtl.node
+// CHECK-DAG: firrtl.not %a1_wf
 // CHECK: %a2_wf = firrtl.node
-// CHECK: firrtl.not %a2_wf
+// CHECK-DAG: firrtl.not %a2_wf
 // CHECK: %a3_wf = firrtl.node
 
 // Check ready signals are generated

@@ -203,42 +203,43 @@ sharp-opt input.mlir \
   --export-verilog -o output.v
 ```
 
-## Documentation vs Implementation Mismatches
+## Documentation vs Implementation Status
 
-### Critical Issues Found
+### Issues Resolved
 
-1. **Missing `reach_abort` Logic**
-   - **Location**: All will-fire generation functions (lines 258-449)
-   - **Issue**: Documentation describes `reach_abort[actionk]` as part of will-fire formula, but implementation doesn't calculate or use it
-   - **Impact**: Abort handling may not work correctly in FIRRTL conversion
-   - **Code Position**: TxnToFIRRTLPass.cpp lines 24-33 show formula but no implementation
+1. **✅ `reach_abort` Logic Implemented**
+   - **Location**: Lines 250-370 (`calculateReachAbort` function)
+   - **Status**: Fully implemented with path condition tracking and abort propagation
+   - **Implementation**: All will-fire modes (static, dynamic, most-dynamic) now include reach_abort calculation
 
-2. **Incomplete `conflict_inside` Implementation**
-   - **Location**: Documentation describes detailed conflict_inside logic
-   - **Issue**: Comments in code (line 311, 419) say "conflict_inside is already handled in the main logic" but actual implementation unclear
-   - **Impact**: Internal conflicts within actions may not be properly detected
+2. **✅ `conflict_inside` Implementation**
+   - **Location**: Lines 2050-2080 in main conversion logic
+   - **Status**: Implemented with reachability condition checking
+   - **Implementation**: Checks conflicts between method calls within an action using reach conditions
 
-3. **Most-Dynamic Mode Stub**
-   - **Location**: Lines 432-449 in TxnToFIRRTLPass.cpp
-   - **Issue**: Function exists but doesn't implement the recursive call tracking described in documentation
-   - **Impact**: Most-dynamic mode doesn't actually provide better conflict detection
+3. **✅ Reachability Conditions Integration**
+   - **Location**: Lines 290-310 in `calculateReachAbort`
+   - **Status**: Properly integrated with ReachabilityAnalysis pass results
+   - **Implementation**: Uses both analysis-provided conditions and fallback to call operands
 
-4. **Reachability Conditions Integration**
-   - **Location**: Lines 363-401 (dynamic mode) 
-   - **Issue**: Code attempts to use `call.getCondition()` but this may not exist if ReachabilityAnalysis wasn't run
-   - **Impact**: Will-fire logic may use incorrect reachability assumptions
+### Remaining Issues
 
-### Missing Implementation Components
+1. **Most-Dynamic Mode Incomplete**
+   - **Location**: Lines 630-750 in TxnToFIRRTLPass.cpp
+   - **Issue**: Has reach_abort but lacks full recursive call tracking as described in docs
+   - **Impact**: Most-dynamic mode provides some improvement but not full capability
 
-1. **Abort Propagation**: The `reach_abort` calculation described in formulas
-2. **Condition Integration**: Proper handling of reachability conditions from ReachabilityAnalysis pass
-3. **Multi-Cycle Support**: Launch operations described as "TODO" (line 110)
-4. **Primitive Conflict Matrix**: Integration with primitive-level conflict definitions
+2. **Multi-Cycle Support**
+   - **Location**: Line 186 notes "This is a TODO"
+   - **Issue**: Launch operations for multi-cycle execution not implemented
+   - **Impact**: Cannot generate FIRRTL for designs with launch operations
 
-### Fixes Needed
+3. **Primitive Conflict Matrix**
+   - **Issue**: Primitive methods assumed to have hardcoded conflict behavior
+   - **Impact**: May not accurately model all primitive conflicts
 
-1. **Implement reach_abort calculation** in all will-fire generation functions
-2. **Add explicit conflict_inside logic** that uses reachability conditions
-3. **Complete most-dynamic mode** with recursive call tracking  
-4. **Add proper integration** with ReachabilityAnalysis pass results
-5. **Implement multi-cycle operations** for launch/future support
+### Implementation Notes
+
+- The implementation uses a helper function `walkWithPathConditions` to track control flow paths
+- Abort conditions from both explicit `txn.abort` ops and method calls are considered
+- Test suite needs updating to match new output format with temporary variables

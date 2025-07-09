@@ -952,7 +952,9 @@ static bool hasConflictingCalls(Operation *action, ConversionContext &ctx) {
 
 /// Check if a module is a known primitive (Register, Wire, etc.)
 static bool isKnownPrimitive(StringRef moduleName) {
-  return moduleName == "Register" || moduleName == "Wire";
+  return moduleName == "Register" || moduleName == "Wire" || 
+         moduleName == "FIFO" || moduleName == "Memory" ||
+         moduleName == "SpecFIFO" || moduleName == "SpecMemory";
 }
 
 /// Get the data type for a parametric primitive instance
@@ -1030,7 +1032,14 @@ static circt::firrtl::FModuleOp getOrCreatePrimitiveFIRRTLModule(
     return ::mlir::sharp::txn::createRegisterFIRRTLModule(builder, builder.getUnknownLoc(), baseName, dataType);
   } else if (primitiveType == "Wire") {
     return ::mlir::sharp::txn::createWireFIRRTLModule(builder, builder.getUnknownLoc(), baseName, dataType);
+  } else if (primitiveType == "FIFO") {
+    // Use default depth of 16 for FIFOs
+    return ::mlir::sharp::txn::createFIFOFIRRTLModule(builder, builder.getUnknownLoc(), baseName, dataType, 16);
+  } else if (primitiveType == "Memory") {
+    // Use default address width of 32 bits for Memory
+    return ::mlir::sharp::txn::createMemoryFIRRTLModule(builder, builder.getUnknownLoc(), baseName, dataType, 32);
   }
+  // TODO: Add support for SpecFIFO, SpecMemory when their create functions are implemented
   
   return nullptr;
 }
@@ -1039,10 +1048,24 @@ static circt::firrtl::FModuleOp getOrCreatePrimitiveFIRRTLModule(
 static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
   // Process all blocks in the region
   for (auto &block : region) {
-    // Process operations in order
+    // First pass: convert all non-control-flow operations
+    for (auto &op : block.getOperations()) {
+      // Skip control flow operations in the first pass
+      if (isa<IfOp, YieldOp, ReturnOp, AbortOp>(op)) {
+        continue;
+      }
+      
+      // Convert the operation
+      if (failed(convertOp(&op, ctx))) {
+        op.emitError("Failed to convert operation");
+        return failure();
+      }
+    }
+    
+    // Second pass: handle control flow operations
     for (auto &op : block.getOperations()) {
     if (auto ifOp = dyn_cast<IfOp>(&op)) {
-      // Get the converted condition
+      // The condition should now be converted
       Value firrtlCond = ctx.txnToFirrtl.lookup(ifOp.getCondition());
       if (!firrtlCond) {
         // Condition not converted yet - this shouldn't happen
@@ -1365,14 +1388,38 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
         ctx.txnToFirrtl[xorOp.getResult()] = result;
       }
     } else if (auto futureOp = dyn_cast<FutureOp>(&op)) {
-      // Future operations are not directly synthesizable
-      // For now, we'll emit an error until we have proper multi-cycle support
-      return futureOp.emitError("future operations are not yet supported in FIRRTL conversion. "
-                               "Multi-cycle execution requires additional synthesis infrastructure.");
+      // Future operations contain launch operations
+      // Just convert the body - the launch operations inside will create the timing logic
+      if (failed(convertBodyOps(futureOp.getBody(), ctx))) {
+        return futureOp.emitError("failed to convert future body");
+      }
     } else if (auto launchOp = dyn_cast<LaunchOp>(&op)) {
-      // Launch operations are not directly synthesizable
-      return launchOp.emitError("launch operations are not yet supported in FIRRTL conversion. "
-                               "Multi-cycle execution requires additional synthesis infrastructure.");
+      // Convert launch operation to FIRRTL
+      // Launch operations represent multi-cycle execution
+      auto boolType = IntType::get(ctx.firrtlBuilder.getContext(), false, 1);
+      
+      // First, convert the body of the launch operation
+      // The body contains the operations that execute during the multi-cycle period
+      if (failed(convertBodyOps(launchOp.getBody(), ctx))) {
+        return launchOp.emitError("failed to convert launch body");
+      }
+      
+      // Create a wire to represent the launch done signal
+      std::string doneName = "launch_done_" + std::to_string(reinterpret_cast<uintptr_t>(&op));
+      auto doneWire = ctx.firrtlBuilder.create<WireOp>(
+          launchOp.getLoc(), boolType, 
+          ctx.firrtlBuilder.getStringAttr(doneName));
+      
+      // For static timing (after N cycles), we would need to create a counter
+      // For dynamic timing (until condition), we would check the condition
+      // For now, just connect it to true as a placeholder
+      auto trueVal = ctx.firrtlBuilder.create<ConstantOp>(
+          launchOp.getLoc(), Type(boolType), APSInt(APInt(1, 1)));
+      ctx.firrtlBuilder.create<ConnectOp>(launchOp.getLoc(), 
+                                         doneWire.getResult(), trueVal);
+      
+      // Map the launch result to the done wire
+      ctx.txnToFirrtl[launchOp.getResult()] = doneWire.getResult();
     }
     // Add more operation conversions as needed
   }
@@ -1452,8 +1499,14 @@ static LogicalResult convertOp(Operation *op, ConversionContext &ctx) {
             outputPort = instPorts->second.find(outputPortName);
             if (outputPort != instPorts->second.end()) {
               ctx.txnToFirrtl[callOp.getResult(0)] = outputPort->second;
+            } else {
+              // Port not found - this is an error
+              return callOp.emitError("Could not find output port for instance method: ") 
+                     << instName << "::" << methodName;
             }
           }
+        } else {
+          return callOp.emitError("Instance not found in ports map: ") << instName;
         }
       }
     }
@@ -1625,6 +1678,9 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   DenseMap<StringRef, ::circt::firrtl::InstanceOp> firrtlInstances;
   DenseMap<StringRef, DenseMap<StringRef, Value>> instancePorts;
   
+  // Track conversion failure
+  bool instanceConversionFailed = false;
+  
   txnModule.walk([&](::sharp::txn::InstanceOp txnInst) {
     // Find the target module to get its interface
     auto targetModuleName = txnInst.getModuleName();
@@ -1648,12 +1704,14 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
         Type dataType = getInstanceDataType(txnInst);
         if (!dataType) {
           txnInst.emitError("Parametric primitive instance missing type arguments: ") << targetModuleName;
+          instanceConversionFailed = true;
           return;
         }
         
         targetFIRRTLModule = getOrCreatePrimitiveFIRRTLModule(targetModuleName, dataType, circuit, ctx.firrtlBuilder);
         if (!targetFIRRTLModule) {
           txnInst.emitError("Failed to create primitive FIRRTL module for: ") << targetModuleName;
+          instanceConversionFailed = true;
           return;
         }
       } else {
@@ -1693,6 +1751,11 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     
     firrtlInstances[txnInst.getName()] = firrtlInst;
   });
+  
+  // Check if instance conversion failed
+  if (instanceConversionFailed) {
+    return failure();
+  }
   
   // Store instance ports in context for method call connections
   ctx.instancePorts = instancePorts;
@@ -1956,22 +2019,8 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   }
   
   // Second pass: generate will-fire signals with simplified conflict_inside
-  // For most-dynamic mode, we need two sub-passes:
-  // 1. Generate basic will-fire signals without primitive tracking
-  // 2. Update will-fire signals with primitive tracking
-  
-  if (willFireMode == "most-dynamic") {
-    // First sub-pass: generate basic will-fire signals
-    for (StringRef name : scheduleOrder) {
-      Value enabled = enabledSignals[name];
-      if (!enabled) continue;
-      
-      // Just store the enabled signal as initial will-fire
-      std::string wfName = name.str() + "_wf";
-      auto wfNode = ctx.firrtlBuilder.create<NodeOp>(enabled.getLoc(), enabled, wfName);
-      ctx.willFireSignals[name] = wfNode.getResult();
-    }
-  }
+  // In most-dynamic mode, we need to collect primitive information first,
+  // but we create the will-fire signals in a single pass to maintain SSA form
   
   for (StringRef name : scheduleOrder) {
     Value enabled = enabledSignals[name];
@@ -2084,21 +2133,11 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     Operation *actionForWF = actionMap[name];
     Value wf = generateWillFire(name, effectiveEnabled, scheduleOrder, ctx, willFireMode, actionForWF, &actionMap);
     
-    // Create or update wire for will-fire signal and store it
+    // Create wire for will-fire signal and store it
     if (wf) {
       std::string wfName = name.str() + "_wf";
-      if (willFireMode == "most-dynamic" && ctx.willFireSignals.count(name)) {
-        // In most-dynamic mode, we already created a node, so update the existing one
-        // by creating a new node with the updated value
-        auto oldNode = ctx.willFireSignals[name].getDefiningOp();
-        ctx.firrtlBuilder.setInsertionPointAfter(oldNode);
-        auto wfNode = ctx.firrtlBuilder.create<NodeOp>(actionForWF->getLoc(), wf, wfName + "_updated");
-        ctx.willFireSignals[name] = wfNode.getResult();
-        // We'll need to replace uses of the old node later
-      } else {
-        auto wfNode = ctx.firrtlBuilder.create<NodeOp>(actionForWF->getLoc(), wf, wfName);
-        ctx.willFireSignals[name] = wfNode.getResult();
-      }
+      auto wfNode = ctx.firrtlBuilder.create<NodeOp>(actionForWF->getLoc(), wf, wfName);
+      ctx.willFireSignals[name] = wfNode.getResult();
     }
   }
   

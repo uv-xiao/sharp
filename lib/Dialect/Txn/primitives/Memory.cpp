@@ -128,6 +128,19 @@ namespace txn {
   return primitive;
 }
 
+circt::firrtl::FModuleOp createMemoryFIRRTLModule(OpBuilder &builder, Location loc,
+                                                  StringRef name, Type dataType,
+                                                  unsigned addressWidth) {
+  // TODO: Implement FIRRTL memory module generation
+  // This would create a module with:
+  // - Read/write ports with address/data/enable signals
+  // - Internal memory array storage
+  // - Clear functionality
+  // 
+  // For now, return nullptr like FIFO does
+  return nullptr;
+}
+
 } // namespace txn
 } // namespace sharp
 } // namespace mlir
