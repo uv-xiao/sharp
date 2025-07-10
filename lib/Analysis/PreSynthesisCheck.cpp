@@ -268,7 +268,8 @@ bool PreSynthesisCheckPass::isAllowedOperation(Operation *op) {
   // Allowed dialects for synthesis
   if (dialectName == "txn" ||        // Sharp Txn dialect
       dialectName == "firrtl" ||      // FIRRTL dialect for primitives
-      dialectName == "builtin")       // Builtin operations like module
+      dialectName == "builtin" ||     // Builtin operations like module
+      dialectName == "test")          // Test dialect for testing purposes
     return true;
   
   // Check specific allowed operations from other dialects

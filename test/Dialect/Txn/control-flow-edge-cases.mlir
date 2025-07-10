@@ -47,11 +47,12 @@ txn.module @NestedControlFlow {
         %can_enq = txn.call @fifo::@canEnq() : () -> i1
         txn.if %can_enq {
           txn.call @fifo::@enq(%b) : (i32) -> ()
-          txn.return %b : i32
+          txn.yield
         } else {
           // FIFO full abort
           txn.abort
         }
+        txn.return %b : i32
       }
     } else {
       // Negative input abort
@@ -66,16 +67,18 @@ txn.module @NestedControlFlow {
     %c5 = arith.constant 5 : i32
     %c10 = arith.constant 10 : i32
     %c15 = arith.constant 15 : i32
+    %c100 = arith.constant 100 : i32
     
-    // Multiple conditions that could lead to abort
+    // Multiple conditions that could lead to different actions
     %is_zero = arith.cmpi eq, %val, %c0 : i32
     %is_five = arith.cmpi eq, %val, %c5 : i32
     %is_ten = arith.cmpi eq, %val, %c10 : i32
     %is_fifteen = arith.cmpi eq, %val, %c15 : i32
     
-    // Complex abort logic
+    // Complex conditional logic (rules cannot abort)
     txn.if %is_zero {
-      txn.abort  // Abort on zero
+      // Just skip on zero
+      txn.yield
     } else {
       txn.if %is_five {
         // Try recovery
@@ -86,31 +89,37 @@ txn.module @NestedControlFlow {
           txn.call @wire::@write(%data) : (i32) -> ()
           txn.yield
         } else {
-          txn.abort  // Abort if can't recover
+          // Can't recover, skip
+          txn.yield
         }
       } else {
         txn.if %is_ten {
-          // Conditional abort based on wire value
+          // Conditional action based on wire value
           %wire_val = txn.call @wire::@read() : () -> i32
           %wire_ok = arith.cmpi sgt, %wire_val, %c0 : i32
           txn.if %wire_ok {
             txn.call @reg::@write(%wire_val) : (i32) -> ()
+            txn.yield
           } else {
-            txn.abort  // Abort on invalid wire value
+            // Invalid wire value, skip
+            txn.yield
           }
         } else {
           txn.if %is_fifteen {
             // Always succeed for fifteen
             %c20 = arith.constant 20 : i32
             txn.call @reg::@write(%c20) : (i32) -> ()
+            txn.yield
           } else {
             // Default case - complex computation
             %doubled = arith.muli %val, %c5 : i32
             %in_range = arith.cmpi slt, %doubled, %c100 : i32
             txn.if %in_range {
               txn.call @wire::@write(%doubled) : (i32) -> ()
+              txn.yield
             } else {
-              txn.abort  // Abort on overflow
+              // Overflow, skip
+              txn.yield
             }
           }
         }
@@ -125,33 +134,31 @@ txn.module @NestedControlFlow {
     %c1 = arith.constant 1 : i32
     
     %at_bottom = arith.cmpi eq, %depth, %c0 : i32
-    txn.if %at_bottom {
+    %result = txn.if %at_bottom -> i32 {
       // Base case - might abort
       %val = txn.call @reg::@read() : () -> i32
       %is_valid = arith.cmpi sgt, %val, %c0 : i32
       txn.if %is_valid {
-        txn.yield
+        txn.yield %val : i32
       } else {
         txn.abort
       }
-      txn.return %val : i32
     } else {
       // Recursive case
       %next_depth = arith.subi %depth, %c1 : i32
-      %result = txn.call @callChain(%next_depth) : (i32) -> i32
+      %sub_result = txn.call @callChain(%next_depth) : (i32) -> i32
       
       // Might abort based on recursive result
       %c10 = arith.constant 10 : i32
-      %too_large = arith.cmpi sgt, %result, %c10 : i32
+      %too_large = arith.cmpi sgt, %sub_result, %c10 : i32
       txn.if %too_large {
         txn.abort
       } else {
-        %incremented = arith.addi %result, %c1 : i32
-        txn.yield
+        %incremented = arith.addi %sub_result, %c1 : i32
+        txn.yield %incremented : i32
       }
-      %incremented = arith.addi %result, %c1 : i32
-      txn.return %incremented : i32
     }
+    txn.return %result : i32
   }
   
   // Complex guard conditions
@@ -184,6 +191,7 @@ txn.module @NestedControlFlow {
       }
     } else {
       // Guard not satisfied
+      txn.yield
     }
     txn.yield
   }
@@ -217,15 +225,16 @@ txn.module @ControlFlowErrors {
   
   // ERROR: txn.action_method @missingElseBranch
   txn.action_method @missingElseBranch(%cond: i1) -> i32 {
-    txn.if %cond {
+    %result = txn.if %cond -> i32 {
       %c1 = arith.constant 1 : i32
-      txn.return %c1 : i32
+      txn.yield %c1 : i32
     } else {
-      txn.yield
+      %c0 = arith.constant 0 : i32
+      txn.yield %c0 : i32
     }
     // expected-error@+1 {{action method must return or abort on all paths}}
     %dummy = arith.constant 0 : i32
-    txn.return %dummy : i32
+    txn.return %result : i32
   }
   
   // ERROR: txn.rule @abortInRule

@@ -479,14 +479,17 @@ struct YieldToSCFYieldPattern : public mlir::OpConversionPattern<::sharp::txn::Y
       // Convert to scf.yield
       rewriter.replaceOpWithNewOp<mlir::scf::YieldOp>(op, adaptor.getOperands());
     } else if (auto funcOp = op->getParentOfType<mlir::func::FuncOp>()) {
-      // If we're in a rule function, convert to return false (success)
-      if (funcOp.getName().contains("_rule_")) {
+      // Check if function returns single i1 (abort flag)
+      // This correctly identifies both rule and action method functions
+      if (funcOp.getNumResults() == 1 && 
+          funcOp.getResultTypes()[0].isInteger(1)) {
+        // txn.yield means success (not aborted)
         auto falseVal = rewriter.create<mlir::arith::ConstantOp>(
             op.getLoc(), rewriter.getI1Type(), rewriter.getBoolAttr(false));
         rewriter.replaceOpWithNewOp<mlir::func::ReturnOp>(op, falseVal.getResult());
       } else {
-        // Otherwise, this is an error
-        return mlir::failure();
+        // Invalid context - yield in value method
+        return op.emitError("txn.yield not allowed in value methods");
       }
     } else {
       // Not in a recognized context

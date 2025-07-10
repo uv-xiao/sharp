@@ -84,6 +84,8 @@ void MethodAttributeValidationPass::runOnOperation() {
   
   if (hasErrors) {
     signalPassFailure();
+  } else {
+    llvm::outs() << "Method attribute validation passed\n";
   }
 }
 

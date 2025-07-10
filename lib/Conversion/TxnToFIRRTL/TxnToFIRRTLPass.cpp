@@ -1410,38 +1410,9 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
         ctx.txnToFirrtl[xorOp.getResult()] = result;
       }
     } else if (auto futureOp = dyn_cast<FutureOp>(&op)) {
-      // Future operations contain launch operations
-      // Just convert the body - the launch operations inside will create the timing logic
-      if (failed(convertBodyOps(futureOp.getBody(), ctx))) {
-        return futureOp.emitError("failed to convert future body");
-      }
+      return futureOp.emitError("error: future operations are not yet supported in FIRRTL conversion. Multi-cycle execution requires additional synthesis infrastructure.");
     } else if (auto launchOp = dyn_cast<LaunchOp>(&op)) {
-      // Convert launch operation to FIRRTL
-      // Launch operations represent multi-cycle execution
-      auto boolType = IntType::get(ctx.firrtlBuilder.getContext(), false, 1);
-      
-      // First, convert the body of the launch operation
-      // The body contains the operations that execute during the multi-cycle period
-      if (failed(convertBodyOps(launchOp.getBody(), ctx))) {
-        return launchOp.emitError("failed to convert launch body");
-      }
-      
-      // Create a wire to represent the launch done signal
-      std::string doneName = "launch_done_" + std::to_string(reinterpret_cast<uintptr_t>(&op));
-      auto doneWire = ctx.firrtlBuilder.create<WireOp>(
-          launchOp.getLoc(), boolType, 
-          ctx.firrtlBuilder.getStringAttr(doneName));
-      
-      // For static timing (after N cycles), we would need to create a counter
-      // For dynamic timing (until condition), we would check the condition
-      // For now, just connect it to true as a placeholder
-      auto trueVal = ctx.firrtlBuilder.create<ConstantOp>(
-          launchOp.getLoc(), Type(boolType), APSInt(APInt(1, 1)));
-      ctx.firrtlBuilder.create<ConnectOp>(launchOp.getLoc(), 
-                                         doneWire.getResult(), trueVal);
-      
-      // Map the launch result to the done wire
-      ctx.txnToFirrtl[launchOp.getResult()] = doneWire.getResult();
+      return launchOp.emitError("error: future operations are not yet supported in FIRRTL conversion. Multi-cycle execution requires additional synthesis infrastructure.");
     }
     // Add more operation conversions as needed
   }
