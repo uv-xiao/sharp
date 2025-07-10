@@ -10,6 +10,7 @@ add_mlir_dialect_library(SharpAnalysis
   ActionCallValidation.cpp
   CollectPrimitiveActions.cpp
   InlineFunctions.cpp
+  PrimitiveGen.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${SHARP_MAIN_INCLUDE_DIR}/sharp/Analysis
@@ -21,5 +22,6 @@ add_mlir_dialect_library(SharpAnalysis
   MLIRIR
   MLIRPass
   SharpTxn
+  SharpTxnPrimitives
   MLIRArithDialect
   )

@@ -6,8 +6,9 @@ Sharp uses a transaction-based model for hardware description. In this model:
 - Hardware is composed of **modules** containing state and behavior
 - Behavior is expressed through **actions** that execute atomically
 - Actions can be:
-  - **value methods** (read-only) or **action methods** (state-modifying)
+  - **action methods** (state-modifying)
   - **rules** define autonomous behavior that executes when conditions are met
+- **value methods** (read-only) are not considered actions
 
 ## Key Concepts
 
@@ -50,9 +51,14 @@ txn.module @Toggle {
     txn.call @state::@write(%new) : (i1) -> ()
     txn.yield
   }
+
+  txn.rule @default {
+    %current = txn.call @state::@read() : () -> i1
+    txn.call @state::@write(%current) : (i1) -> ()
+  }
   
-  // Schedule declares all state-modifying actions
-  txn.schedule [@toggle]
+  // Schedule declares all methods/rules
+  txn.schedule [@toggle, @default]
 }
 ```
 
@@ -69,20 +75,18 @@ This shows the internal representation of your module.
 ### 2. Run Analysis
 
 ```bash
-sharp-opt toggle.mlir --sharp-infer-conflict-matrix
+sharp-opt toggle.mlir --sharp-primitive-gen --sharp-infer-conflict-matrix
 ```
 
-This infers conflicts between methods. Since `toggle` modifies state that `read` accesses, they conflict.
+This infers conflicts between methods. Both `toggle` and `default` modify state, so they conflict.
 
-### 3. Generate Simulation
+### 3. Convert to FIRRTL
 
 ```bash
-../../tools/generate-workspace.sh toggle.mlir toggle_sim
-cd toggle_sim
-mkdir build && cd build
-cmake .. && make
-./Toggle_sim --cycles 10 --verbose
+sharp-opt toggle.mlir --convert-txn-to-firrtl
 ```
+
+This converts your Sharp module to FIRRTL hardware description.
 
 ## Exercises
 

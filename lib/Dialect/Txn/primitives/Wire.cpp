@@ -50,11 +50,12 @@ namespace txn {
   auto readType = builder.getFunctionType({}, {dataType});
   auto writeType = builder.getFunctionType({dataType}, {});
   
-  // Create read method declaration (value method)
-  // The implementation would connect to the FIRRTL module's read_data port
-  auto readMethod = builder.create<::sharp::txn::FirValueMethodOp>(
+  // Create read method declaration (action method)
+  // For Wire, read is an action method to guarantee read SA write ordering
+  auto readMethod = builder.create<::sharp::txn::FirActionMethodOp>(
       loc, builder.getStringAttr("read"), TypeAttr::get(readType),
-      /*result=*/StringAttr(), /*prefix=*/StringAttr());
+      /*ready=*/StringAttr(), /*enable=*/StringAttr(), /*result=*/StringAttr(),
+      /*prefix=*/StringAttr(), /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
   readMethod->setAttr("firrtl.port", builder.getStringAttr("read_data"));
   
   // Create write method declaration (action method)

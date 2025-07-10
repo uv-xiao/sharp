@@ -74,16 +74,13 @@ namespace txn {
   primitive->setAttr("firrtl.impl", builder.getStringAttr(name.str() + "_impl"));
   
   // Create schedule with conflict matrix
-  // For Register: read CF write, write C write
+  // For Register: only action methods (write) are scheduled
+  // read is a value method and not included in the schedule
   auto conflictMatrix = builder.getDictionaryAttr({
-    builder.getNamedAttr("read,read", builder.getI32IntegerAttr(3)),    // CF
-    builder.getNamedAttr("read,write", builder.getI32IntegerAttr(3)),   // CF
-    builder.getNamedAttr("write,read", builder.getI32IntegerAttr(3)),   // CF
-    builder.getNamedAttr("write,write", builder.getI32IntegerAttr(2))   // C
+    builder.getNamedAttr("write,write", builder.getI32IntegerAttr(2))   // C - write conflicts with write
   });
   
   auto actions = builder.getArrayAttr({
-    SymbolRefAttr::get(builder.getContext(), "read"),
     SymbolRefAttr::get(builder.getContext(), "write")
   });
   

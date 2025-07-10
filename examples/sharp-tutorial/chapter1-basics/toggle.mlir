@@ -17,7 +17,12 @@ txn.module @Toggle {
     txn.call @state::@write(%new) : (i1) -> ()
     txn.yield
   }
+
+  txn.rule @default {
+    %current = txn.call @state::@read() : () -> i1
+    txn.call @state::@write(%current) : (i1) -> ()
+  }
   
   // Schedule declares all methods/rules
-  txn.schedule [@read, @toggle]
+  txn.schedule [@toggle, @default]
 }

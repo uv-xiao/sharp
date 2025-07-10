@@ -328,4 +328,44 @@ def InlineFunctions : Pass<"sharp-inline-functions", "mlir::ModuleOp"> {
   let dependentDialects = ["::sharp::txn::TxnDialect"];
 }
 
+def PrimitiveGen : Pass<"sharp-primitive-gen", "mlir::ModuleOp"> {
+  let summary = "Generate missing primitive definitions for referenced primitives";
+  let description = [{
+    This pass analyzes Sharp Txn modules to find all primitive instances and
+    automatically generates the corresponding primitive definitions if they
+    don't already exist. The generated primitives are created using the
+    constructor functions in lib/Dialect/Txn/primitives/.
+    
+    Supported primitives:
+    - Register<T>: Single-port register with read/write methods
+    - Wire<T>: Combinational wire with read/write methods  
+    - FIFO<T>: FIFO queue with enq/deq/first/notEmpty/notFull methods
+    - Memory<T>: Memory with read/write methods
+    - SpecFIFO<T>: Speculative FIFO for simulation
+    - SpecMemory<T>: Speculative memory for simulation
+    
+    The pass:
+    1. Scans all txn.instance operations to find primitive references
+    2. Checks if the referenced primitive module already exists
+    3. If not, generates it using the appropriate constructor function
+    4. Adds the generated primitive to the module
+    
+    This ensures that all referenced primitives have valid definitions
+    before conflict matrix inference runs, enabling proper conflict
+    analysis based on primitive method conflict matrices.
+    
+    Example:
+    ```mlir
+    txn.module @MyModule {
+      %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+      // Register<i32> primitive will be auto-generated if missing
+    }
+    ```
+  }];
+  
+  let constructor = "mlir::sharp::createPrimitiveGenPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
 #endif // SHARP_ANALYSIS_PASSES

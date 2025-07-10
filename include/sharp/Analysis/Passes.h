@@ -54,6 +54,9 @@ std::unique_ptr<mlir::Pass> createCollectPrimitiveActionsPass();
 /// Create a pass to inline txn.func calls within txn modules.
 std::unique_ptr<mlir::Pass> createInlineFunctionsPass();
 
+/// Create a pass to generate missing primitive definitions.
+std::unique_ptr<mlir::Pass> createPrimitiveGenPass();
+
 /// Generate the code for registering analysis passes.
 #define GEN_PASS_REGISTRATION
 #include "sharp/Analysis/Passes.h.inc"
