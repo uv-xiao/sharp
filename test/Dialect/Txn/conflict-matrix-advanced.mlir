@@ -1,5 +1,5 @@
-// RUN: sharp-opt %s --sharp-infer-conflict-matrix | FileCheck %s
-// RUN: sharp-opt %s --sharp-infer-conflict-matrix --sharp-validate-conflicts | FileCheck %s --check-prefix=VALIDATE
+// RUN: sharp-opt %s --sharp-infer-conflict-matrix -allow-unregistered-dialect | FileCheck %s
+// RUN: sharp-opt %s --sharp-infer-conflict-matrix --sharp-validate-conflicts -allow-unregistered-dialect | FileCheck %s --check-prefix=VALIDATE
 
 // Advanced conflict matrix test with all relation types and complex inference
 
@@ -34,6 +34,7 @@ txn.module @ConflictInferenceTest {
     %can_enq = txn.call @fifo::@canEnq() : () -> i1
     txn.if %can_enq {
       txn.call @fifo::@enq(%data) : (i32) -> ()
+      txn.yield
     } else {
       txn.abort  // Abort if FIFO full
     }
@@ -42,13 +43,14 @@ txn.module @ConflictInferenceTest {
   
   txn.action_method @dequeue_data() -> i32 {
     %can_deq = txn.call @fifo::@canDeq() : () -> i1
-    txn.if %can_deq {
+    %result = txn.if %can_deq -> i32 {
       %data = txn.call @fifo::@first() : () -> i32
       txn.call @fifo::@deq() : () -> ()
-      txn.return %data : i32
+      txn.yield %data : i32
     } else {
       txn.abort  // Abort if FIFO empty
     }
+    txn.return %result : i32
   }
   
   txn.rule @r4 {
@@ -62,8 +64,10 @@ txn.module @ConflictInferenceTest {
     %cond = arith.cmpi sgt, %sum, %c10 : i32
     txn.if %cond {
       txn.call @enqueue_data(%sum) : (i32) -> ()
+      txn.yield
     } else {
       txn.call @wire::@write(%sum) : (i32) -> ()
+      txn.yield
     }
     txn.yield
   }

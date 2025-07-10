@@ -17,6 +17,7 @@ txn.module @GuardTest {
     txn.if %cond {
       %c20 = arith.constant 20 : i32
       txn.call @reg::@write(%c20) : (i32) -> ()
+      txn.yield
     } else {
       txn.abort
     }

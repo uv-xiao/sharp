@@ -1,6 +1,6 @@
-# CLAUDE.md
+# GEMINI.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Gemini when working with code in this repository.
 
 ## Using Gemini CLI for Large Codebase Analysis
 
@@ -74,7 +74,6 @@ Important Notes
 - Paths in @ syntax are relative to your current working directory when invoking gemini
 - The CLI will include file contents directly in the context
 - No need for --yolo flag for read-only analysis
-- Use --yolo flag for any requests that need file updates
 - Gemini's context window can handle entire codebases that would overflow Claude's context
 - When checking implementations, be specific about what you're looking for to get accurate results
 

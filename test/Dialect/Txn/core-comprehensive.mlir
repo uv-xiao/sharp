@@ -57,12 +57,17 @@ txn.module @ProcessorCore {
           %b = txn.call @mem::@read(%rs2) : (i32) -> i32
           %sum = arith.addi %a, %b : i32
           txn.call @alu_result::@write(%sum) : (i32) -> ()
+          txn.yield
         } else {
           // Other opcodes not implemented
+          txn.yield
         }
+        txn.yield
       }
+      txn.yield
     } else {
       // Not enabled
+      txn.yield
     }
     txn.yield
   }
@@ -83,6 +88,7 @@ txn.module @ProcessorCore {
       %c4 = arith.constant 4 : i32
       %next_pc = arith.addi %pc_val, %c4 : i32
       txn.call @pc::@write(%next_pc) : (i32) -> ()
+      txn.yield
     } else {
       // Halt on invalid instruction
       txn.abort
@@ -129,8 +135,10 @@ txn.module @FIFONetwork {
       %old_status = txn.call @status::@read() : () -> i8
       %new_status = arith.addi %old_status, %c1 : i8
       txn.call @status::@write(%new_status) : (i8) -> ()
+      txn.yield
     } else {
       // Not ready
+      txn.yield
     }
     txn.yield
   }
@@ -138,15 +146,16 @@ txn.module @FIFONetwork {
   // Consumer with error handling
   txn.action_method @consume() -> i64 {
     %can_deq = txn.call @data_fifo::@canDeq() : () -> i1
-    txn.if %can_deq {
+    %result = txn.if %can_deq -> i64 {
       %data = txn.call @data_fifo::@first() : () -> i64
       txn.call @data_fifo::@deq() : () -> ()
-      txn.return %data : i64
+      txn.yield %data : i64
     } else {
       // Return error value if FIFO empty
       %error = arith.constant -1 : i64
-      txn.return %error : i64
+      txn.yield %error : i64
     }
+    txn.return %result : i64
   }
   
   txn.schedule [@producer, @consume] {
@@ -167,14 +176,13 @@ txn.module @ErrorCases {
   txn.value_method @invalid_abort() -> i32 {
     // expected-error@+1 {{abort not allowed in value method}}
     txn.abort
-    %c0 = arith.constant 0 : i32
-    txn.return %c0 : i32
   }
   
   // ERROR: txn.action_method @missing_yield
   txn.action_method @missing_yield() {
     %c0 = arith.constant 0 : i32
     // expected-error@+1 {{expected 'txn.yield' at end of action method}}
+    txn.yield
   }
   
   // ERROR: txn.schedule [@invalid_abort, @missing_yield]

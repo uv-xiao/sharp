@@ -7,7 +7,6 @@
 txn.module @WillFireModes {
   %reg1 = txn.instance @reg1 of @Register<i32> : !txn.module<"Register">
   %reg2 = txn.instance @reg2 of @Register<i32> : !txn.module<"Register">
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
   %wire = txn.instance @wire of @Wire<i1> : !txn.module<"Wire">
   
   // Action with conditional abort - tests reach_abort calculation
@@ -53,15 +52,15 @@ txn.module @WillFireModes {
   txn.rule @guardedRule {
     %val1 = txn.call @reg1::@read() : () -> i32
     %val2 = txn.call @reg2::@read() : () -> i32
-    %can_enq = txn.call @fifo::@canEnq() : () -> i1
+    %guard = txn.call @wire::@read() : () -> i1
     
     // Simple guard check
-    txn.if %can_enq {
-      %diff = arith.subi %val1, %val2 : i32
-      txn.call @fifo::@enq(%diff) : (i32) -> ()
+    txn.if %guard {
+      %sum = arith.addi %val1, %val2 : i32
+      txn.call @reg2::@write(%sum) : (i32) -> ()
       txn.yield
     } else {
-      // Do nothing if FIFO is full
+      // Do nothing if wire is false
       txn.yield
     }
     txn.yield
@@ -125,10 +124,12 @@ txn.module @WillFireModes {
       "conditionalAbort,writer2" = 2 : i32,     // Both access reg1
       "wireAbort,writer1" = 2 : i32,           // Both write reg1
       "wireAbort,writer2" = 2 : i32,           // Both write reg1
+      "wireAbort,guardedRule" = 2 : i32,       // wireAbort writes reg1, guardedRule reads reg1
       "guardedRule,writer1" = 2 : i32,          // guardedRule reads reg1
       "guardedRule,writer2" = 2 : i32,          // guardedRule reads reg1
       "abortingRule,writer1" = 2 : i32,         // Both access reg1
       "abortingRule,writer2" = 2 : i32,         // Both access reg1
+      "independentRule,guardedRule" = 2 : i32,  // Both access reg2
       
       // Sequential relationships
       "writer1,guardedRule" = 0 : i32,          // writer1 before guardedRule
@@ -138,7 +139,6 @@ txn.module @WillFireModes {
       "independentRule,writer1" = 3 : i32,      // Different registers
       "independentRule,writer2" = 3 : i32,      // Different registers
       "independentRule,wireAbort" = 3 : i32,    // Different resources
-      "independentRule,guardedRule" = 3 : i32,  // guardedRule uses reg1/fifo, independent uses reg2
       "conditionalAbort,independentRule" = 3 : i32  // conditionalAbort uses reg1/reg2, but CF
     }
   }

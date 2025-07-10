@@ -76,6 +76,7 @@ txn.module @AllPrimitives {
         // No clear needed
         txn.yield
       }
+      txn.yield
     } else {
       // Not ready
       txn.yield
@@ -156,6 +157,7 @@ txn.module @AllPrimitives {
         txn.call @spec_mem::@abort(%write_token) : (i32) -> ()
         txn.yield
       }
+      txn.yield
     } else {
       // Spec operations disabled
       txn.yield

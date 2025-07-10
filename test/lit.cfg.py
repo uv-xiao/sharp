@@ -18,8 +18,6 @@ from lit.llvm.subst import FindTool
 # name: The name of this test suite.
 config.name = 'SHARP'
 
-config.test_format = lit.formats.ShTest(not llvm_config.use_lit_shell)
-
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = ['.mlir']
 
@@ -35,6 +33,9 @@ config.substitutions.append(('%shlibext', config.llvm_shlib_ext))
 llvm_config.with_system_environment(['HOME', 'INCLUDE', 'LIB', 'TMP', 'TEMP'])
 
 llvm_config.use_default_substitutions()
+
+# Set test format after llvm_config is initialized
+config.test_format = lit.formats.ShTest(not llvm_config.use_lit_shell)
 
 # excludes: A list of directories to exclude from the testsuite.
 config.excludes = ['Inputs', 'Examples', 'CMakeLists.txt', 'README.txt', 'LICENSE.txt']

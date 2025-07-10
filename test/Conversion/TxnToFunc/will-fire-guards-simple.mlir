@@ -28,10 +28,10 @@ txn.module @GuardTest {
 }
 
 // CHECK-LABEL: func.func @GuardTest_rule_conditionalRule() -> i1
-// CHECK: %[[VAL:.*]] = func.call @GuardTest_getValue() : () -> i32
+// CHECK: %[[VAL:.*]] = call @GuardTest_getValue() : () -> i32
 // CHECK: %[[C10:.*]] = arith.constant 10 : i32
 // CHECK: %[[COND:.*]] = arith.cmpi ult, %[[VAL]], %[[C10]] : i32
-// CHECK: func.call @GuardTest_setValue() : () -> i1
+// CHECK: call @GuardTest_setValue() : () -> i1
 // CHECK: %[[FALSE:.*]] = arith.constant false
 // CHECK: return %[[FALSE]] : i1
 

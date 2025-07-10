@@ -3,10 +3,56 @@
 
 // Comprehensive test for abort propagation through multiple levels
 
+// Define primitives used in tests
+txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+  txn.fir_value_method @read() : () -> i32
+  txn.fir_action_method @write() : (i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Register_impl"}
+
+txn.primitive @FIFO type = "hw" interface = !txn.module<"FIFO"> {
+  txn.fir_value_method @canEnq() : () -> i1
+  txn.fir_action_method @enq() : (i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@enq] {
+    conflict_matrix = {
+      "canEnq,canEnq" = 3 : i32,
+      "canEnq,enq" = 3 : i32,
+      "enq,canEnq" = 3 : i32,
+      "enq,enq" = 2 : i32
+    }
+  }
+} {firrtl.impl = "FIFO_impl"}
+
+txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
+  txn.fir_value_method @read() : (i32) -> i32
+  txn.fir_action_method @write() : (i32, i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Memory_impl"}
+
 txn.module @AbortPropagation {
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
-  %mem = txn.instance @mem of @Memory<i32> : !txn.module<"Memory">
+  %reg2 = txn.instance @reg2 of @Register<i32> : !txn.module<"Register">
+  %wire = txn.instance @wire of @Wire<i32> : !txn.module<"Wire">
   
   // Deepest level - multiple abort conditions
   txn.action_method @level3(%x: i32, %y: i32) -> i32 {
@@ -48,33 +94,35 @@ txn.module @AbortPropagation {
     %c10 = arith.constant 10 : i32
     %is_small = arith.cmpi slt, %a, %c10 : i32
     
-    txn.if %is_small {
+    %result = txn.if %is_small -> i32 {
       // Path 1: might abort through level3
       %c2 = arith.constant 2 : i32
       %result = txn.call @level3(%a, %c2) : (i32, i32) -> i32
-      txn.return %result : i32
+      txn.yield %result : i32
     } else {
       // Path 2: different parameters to level3
       %c20 = arith.constant 20 : i32
       %is_medium = arith.cmpi slt, %a, %c20 : i32
       
-      txn.if %is_medium {
+      %result = txn.if %is_medium -> i32 {
         %result = txn.call @level3(%c20, %a) : (i32, i32) -> i32
-        txn.return %result : i32
+        txn.yield %result : i32
       } else {
         // Path 3: direct abort
         txn.abort
       }
+      txn.yield %result : i32
     }
+    txn.return %result : i32
   }
   
   // Top level - multiple paths with different abort conditions
   txn.action_method @level1(%input: i32) {
-    // Check FIFO status first
-    %can_enq = txn.call @fifo::@canEnq() : () -> i1
+    // Check wire status first
+    %can_enq = txn.call @wire::@read() : () -> i1
     %not_can_enq = arith.xori %can_enq, %can_enq : i1
     txn.if %not_can_enq {
-      txn.abort  // Abort if FIFO full
+      txn.abort  // Abort if wire is false
     } else {
       // Continue
     }
@@ -92,19 +140,24 @@ txn.module @AbortPropagation {
       %is_small = arith.cmpi slt, %input, %c5 : i32
       txn.if %is_small {
         // Small values - process directly
-        txn.call @fifo::@enq(%input) : (i32) -> ()
+        txn.call @reg2::@write(%input) : (i32) -> ()
+        txn.yield
       } else {
         %is_medium = arith.cmpi slt, %input, %c15 : i32
         txn.if %is_medium {
           // Medium values - call level2 (might abort)
           %result = txn.call @level2(%input) : (i32) -> i32
-          txn.call @fifo::@enq(%result) : (i32) -> ()
+          txn.call @reg2::@write(%result) : (i32) -> ()
+          txn.yield
         } else {
           // Large values - complex processing
           %processed = txn.call @complexProcess(%input) : (i32) -> i32
-          txn.call @fifo::@enq(%processed) : (i32) -> ()
+          txn.call @reg2::@write(%processed) : (i32) -> ()
+          txn.yield
         }
+        txn.yield
       }
+      txn.yield
     }
     txn.yield
   }
@@ -118,9 +171,10 @@ txn.module @AbortPropagation {
     // Base case
     %is_zero = arith.cmpi eq, %n, %c0 : i32
     txn.if %is_zero {
-      txn.return %c0 : i32
+      txn.abort
     } else {
       // Continue
+      txn.yield
     }
     
     // Check bounds
@@ -129,6 +183,7 @@ txn.module @AbortPropagation {
       txn.abort  // Abort on overflow
     } else {
       // Continue
+      txn.yield
     }
     
     // Recursive call
@@ -143,6 +198,7 @@ txn.module @AbortPropagation {
       txn.abort  // Abort on sum overflow
     } else {
       // Continue
+      txn.yield
     }
     
     txn.return %sum : i32
@@ -153,11 +209,11 @@ txn.module @AbortPropagation {
     // Read from memory
     %c0 = arith.constant 0 : i32
     %addr = arith.andi %val, %c0 : i32
-    %mem_val = txn.call @mem::@read(%addr) : (i32) -> i32
+    %mem_val = txn.call @wire::@read() : () -> i32
     
     // Check memory value
     %mem_valid = arith.cmpi ne, %mem_val, %c0 : i32
-    txn.if %mem_valid {
+    %result = txn.if %mem_valid -> i32 {
       // Try recursive processing
       %c5 = arith.constant 5 : i32
       %small_val = arith.remsi %val, %c5 : i32
@@ -171,12 +227,14 @@ txn.module @AbortPropagation {
         txn.abort  // Abort if not multiple of 3
       } else {
         // Continue
+        txn.yield
       }
       
-      txn.return %result : i32
+      txn.yield %result : i32
     } else {
       txn.abort  // Abort on invalid memory
     }
+    txn.return %result : i32
   }
   
   // Rule that calls methods with abort
@@ -198,8 +256,10 @@ txn.module @AbortPropagation {
       %c1 = arith.constant 1 : i32
       %inc = arith.addi %reg_val, %c1 : i32
       txn.call @reg::@write(%inc) : (i32) -> ()
+      txn.yield
     } else {
       // Continue
+      txn.yield
     }
     txn.yield
   }

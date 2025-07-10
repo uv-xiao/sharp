@@ -3,6 +3,78 @@
 
 // Comprehensive test for TxnToFIRRTL conversion covering all features
 
+// Define primitives used in tests
+txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+  txn.fir_value_method @read() : () -> i32
+  txn.fir_action_method @write() : (i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Register_impl"}
+
+txn.primitive @Wire type = "hw" interface = !txn.module<"Wire"> {
+  txn.fir_value_method @read() : () -> i1
+  txn.fir_action_method @write() : (i1) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Wire_impl"}
+
+txn.primitive @FIFO type = "hw" interface = !txn.module<"FIFO"> {
+  txn.fir_value_method @canEnq() : () -> i1
+  txn.fir_value_method @canDeq() : () -> i1
+  txn.fir_value_method @first() : () -> i32
+  txn.fir_action_method @enq() : (i32) -> ()
+  txn.fir_action_method @deq() : () -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@enq, @deq] {
+    conflict_matrix = {
+      "canEnq,canEnq" = 3 : i32,
+      "canEnq,enq" = 3 : i32,
+      "canEnq,deq" = 3 : i32,
+      "canDeq,canDeq" = 3 : i32,
+      "canDeq,enq" = 3 : i32,
+      "canDeq,deq" = 3 : i32,
+      "first,first" = 3 : i32,
+      "first,enq" = 3 : i32,
+      "first,deq" = 3 : i32,
+      "enq,enq" = 2 : i32,
+      "enq,deq" = 2 : i32,
+      "deq,deq" = 2 : i32
+    }
+  }
+} {firrtl.impl = "FIFO_impl"}
+
+txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
+  txn.fir_value_method @read() : (i32) -> i32
+  txn.fir_action_method @write() : (i32, i32) -> ()
+  txn.clock_by @clk
+  txn.reset_by @rst
+  txn.schedule [@write] {
+    conflict_matrix = {
+      "read,read" = 3 : i32,
+      "read,write" = 3 : i32,
+      "write,read" = 3 : i32,
+      "write,write" = 2 : i32
+    }
+  }
+} {firrtl.impl = "Memory_impl"}
+
 // CHECK-LABEL: firrtl.circuit "CompleteTxnToFIRRTL"
 txn.module @CompleteTxnToFIRRTL {
   // Various primitive instances with different types
@@ -64,25 +136,27 @@ txn.module @CompleteTxnToFIRRTL {
     %c1_i8 = arith.constant 1 : i8
     %is_mode1 = arith.cmpi eq, %ctrl_val, %c1_i8 : i8
     
-    txn.if %is_mode1 {
+    %result = txn.if %is_mode1 -> i32 {
       // Mode 1: FIFO operation
       %can_enq = txn.call @fifo::@canEnq() : () -> i1
-      txn.if %can_enq {
+      %result = txn.if %can_enq -> i32 {
         txn.call @fifo::@enq(%value) : (i32) -> ()
-        txn.return %value : i32
+        txn.yield %value : i32
       } else {
         // FIFO full, try memory
         %c0_addr = arith.constant 0 : i32
         txn.call @mem::@write(%c0_addr, %value) : (i32, i32) -> ()
         %negated = arith.subi %c0, %value : i32
-        txn.return %negated : i32
+        txn.yield %negated : i32
       }
+      txn.yield %result : i32
     } else {
       // Mode 0: Direct register write
       %extended = arith.extsi %value : i32 to i64
       txn.call @data::@write(%extended) : (i64) -> ()
-      txn.return %value : i32
+      txn.yield %value : i32
     }
+    txn.return %result : i32
   }
   
   // Rule with complex guard and nested calls
@@ -117,6 +191,9 @@ txn.module @CompleteTxnToFIRRTL {
       // Update status
       %c_true = arith.constant true
       txn.call @status::@write(%c_true) : (i1) -> ()
+      txn.yield
+    } else {
+      txn.yield
     }
     txn.yield
   }
@@ -139,6 +216,9 @@ txn.module @CompleteTxnToFIRRTL {
     txn.if %is_ready {
       %c_false = arith.constant false
       txn.call @status::@write(%c_false) : (i1) -> ()
+      txn.yield
+    } else {
+      txn.yield
     }
     txn.yield
   }

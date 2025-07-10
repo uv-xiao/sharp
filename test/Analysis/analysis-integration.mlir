@@ -1,5 +1,5 @@
-// RUN: sharp-opt %s --sharp-infer-conflict-matrix --sharp-reachability-analysis --sharp-validate-method-attributes --sharp-pre-synthesis-check | FileCheck %s
-// RUN: sharp-opt %s --sharp-infer-conflict-matrix --sharp-reachability-analysis --convert-txn-to-firrtl | FileCheck %s --check-prefix=FIRRTL
+// RUN: sharp-opt %s --sharp-infer-conflict-matrix --sharp-reachability-analysis --sharp-validate-method-attributes --sharp-pre-synthesis-check -allow-unregistered-dialect | FileCheck %s
+// RUN: sharp-opt %s --sharp-infer-conflict-matrix --sharp-reachability-analysis --convert-txn-to-firrtl -allow-unregistered-dialect | FileCheck %s --check-prefix=FIRRTL
 
 // Comprehensive test for all analysis passes working together
 
@@ -43,9 +43,11 @@ txn.module @IntegratedAnalysis {
       %can_enq = txn.call @fifo1::@canEnq() : () -> i1
       txn.if %can_enq {
         txn.call @fifo1::@enq(%value) : (i32) -> ()
+        txn.yield
       } else {
         txn.abort  // Abort if FIFO1 full
       }
+      txn.yield
     } else {
       txn.if %is_mode1 {
         // Mode 1: Write to FIFO2 with transformation
@@ -54,25 +56,32 @@ txn.module @IntegratedAnalysis {
         %can_enq = txn.call @fifo2::@canEnq() : () -> i1
         txn.if %can_enq {
           txn.call @fifo2::@enq(%doubled) : (i32) -> ()
+          txn.yield
         } else {
           // Fallback to memory
           %c0_i32 = arith.constant 0 : i32
           txn.call @mem::@write(%c0_i32, %doubled) : (i32, i32) -> ()
+          txn.yield
         }
+        txn.yield
       } else {
         txn.if %is_mode2 {
           // Mode 2: Complex interaction
           %flag = txn.call @wire::@read() : () -> i1
           txn.if %flag {
             txn.call @data::@write(%value) : (i32) -> ()
+            txn.yield
           } else {
             txn.abort  // Abort if flag not set
           }
+          txn.yield
         } else {
           // Invalid mode
           txn.abort
         }
+        txn.yield
       }
+      txn.yield
     }
     txn.yield
   }
@@ -87,7 +96,7 @@ txn.module @IntegratedAnalysis {
     
     %both_ready = arith.andi %can_deq1, %can_enq2 : i1
     
-    txn.if %both_ready {
+    %result = txn.if %both_ready -> i32 {
       // Transfer from FIFO1 to FIFO2
       %fifo_data = txn.call @fifo1::@first() : () -> i32
       txn.call @fifo1::@deq() : () -> ()
@@ -97,19 +106,21 @@ txn.module @IntegratedAnalysis {
       %processed = arith.addi %fifo_data, %c10 : i32
       
       txn.call @fifo2::@enq(%processed) : (i32) -> ()
-      txn.return %processed : i32
+      txn.yield %processed : i32
     } else {
       // Try direct read from data register
       %reg_data = txn.call @data::@read() : () -> i32
       %c0 = arith.constant 0 : i32
       %is_valid = arith.cmpi ne, %reg_data, %c0 : i32
       
-      txn.if %is_valid {
-        txn.return %reg_data : i32
+      %result = txn.if %is_valid -> i32 {
+        txn.yield %reg_data : i32
       } else {
         txn.abort  // No valid data available
       }
+      txn.yield %result : i32
     }
+    txn.return %result : i32
   }
   
   // Rule that calls other methods
@@ -127,8 +138,10 @@ txn.module @IntegratedAnalysis {
       // Store result
       %addr = txn.call @computeAddress(%result, %c42) : (i32, i32) -> i32
       txn.call @mem::@write(%addr, %result) : (i32, i32) -> ()
+      txn.yield
     } else {
       // Flag not set
+      txn.yield
     }
     txn.yield
   }

@@ -30,9 +30,9 @@ txn.module @WiderTypes {
   }
 }
 
-// CHECK: out %get8bitOUT: !firrtl.sint<8>
-// CHECK: in %process16bitOUT: !firrtl.sint<16>
-// CHECK: %c42_si8 = firrtl.constant 42 : !firrtl.sint<8>
-// CHECK: %c1_si64 = firrtl.constant 1 : !firrtl.sint<64>
-// CHECK: %c2_si64 = firrtl.constant 2 : !firrtl.sint<64>
-// CHECK: firrtl.add %{{.*}}, %{{.*}} : (!firrtl.sint<64>, !firrtl.sint<64>) -> !firrtl.sint<65>
+// CHECK: out %get8bitOUT: !firrtl.uint<8>
+// CHECK: in %process16bitOUT: !firrtl.uint<16>
+// CHECK: %c42_ui8 = firrtl.constant 42 : !firrtl.uint<8>
+// CHECK: %c1_ui64 = firrtl.constant 1 : !firrtl.uint<64>
+// CHECK: %c2_ui64 = firrtl.constant 2 : !firrtl.uint<64>
+// CHECK: firrtl.add %{{.*}}, %{{.*}} : (!firrtl.uint<64>, !firrtl.uint<64>) -> !firrtl.uint<65>

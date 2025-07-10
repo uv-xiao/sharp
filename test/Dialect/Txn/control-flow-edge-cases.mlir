@@ -32,11 +32,12 @@ txn.module @NestedControlFlow {
           %in_bounds = arith.cmpi slt, %result, %c100 : i32
           txn.if %in_bounds {
             txn.call @reg::@write(%result) : (i32) -> ()
-            txn.return %result : i32
+            txn.yield
           } else {
             // Overflow abort
             txn.abort
           }
+          txn.return %result : i32
         } else {
           // Division by zero abort
           txn.abort
@@ -83,6 +84,7 @@ txn.module @NestedControlFlow {
           %data = txn.call @fifo::@first() : () -> i32
           txn.call @fifo::@deq() : () -> ()
           txn.call @wire::@write(%data) : (i32) -> ()
+          txn.yield
         } else {
           txn.abort  // Abort if can't recover
         }
@@ -128,10 +130,11 @@ txn.module @NestedControlFlow {
       %val = txn.call @reg::@read() : () -> i32
       %is_valid = arith.cmpi sgt, %val, %c0 : i32
       txn.if %is_valid {
-        txn.return %val : i32
+        txn.yield
       } else {
         txn.abort
       }
+      txn.return %val : i32
     } else {
       // Recursive case
       %next_depth = arith.subi %depth, %c1 : i32
@@ -144,11 +147,10 @@ txn.module @NestedControlFlow {
         txn.abort
       } else {
         %incremented = arith.addi %result, %c1 : i32
-        txn.return %incremented : i32
+        txn.yield
       }
-    }
-    } else {
-      // Continue execution
+      %incremented = arith.addi %result, %c1 : i32
+      txn.return %incremented : i32
     }
   }
   
@@ -173,10 +175,12 @@ txn.module @NestedControlFlow {
         txn.call @fifo::@deq() : () -> ()
         %new_val = arith.addi %v1, %data : i32
         txn.call @reg::@write(%new_val) : (i32) -> ()
+        txn.yield
       } else {
         // Alternative path
         %diff = arith.subi %v1, %v2 : i32
         txn.call @wire::@write(%diff) : (i32) -> ()
+        txn.yield
       }
     } else {
       // Guard not satisfied
@@ -216,8 +220,12 @@ txn.module @ControlFlowErrors {
     txn.if %cond {
       %c1 = arith.constant 1 : i32
       txn.return %c1 : i32
+    } else {
+      txn.yield
     }
     // expected-error@+1 {{action method must return or abort on all paths}}
+    %dummy = arith.constant 0 : i32
+    txn.return %dummy : i32
   }
   
   // ERROR: txn.rule @abortInRule
@@ -226,4 +234,7 @@ txn.module @ControlFlowErrors {
     // expected-error@+1 {{rules cannot use abort}}
     txn.abort
   }
+  
+  // Add empty schedule to satisfy module requirements
+  txn.schedule []
 }

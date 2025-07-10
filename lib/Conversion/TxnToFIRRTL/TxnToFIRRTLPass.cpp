@@ -90,12 +90,13 @@ static FIRRTLType convertType(Type type) {
   
   // Handle integer types
   if (auto intType = dyn_cast<IntegerType>(type)) {
-    // Check if it's signed or unsigned
-    // For now, treat i1 as unsigned (boolean), others as signed
-    if (intType.getWidth() == 1) {
-      return UIntType::get(ctx, 1);
-    } else {
+    // MLIR ui/i types -> FIRRTL uint
+    // MLIR si types -> FIRRTL sint
+    if (intType.isSigned()) {
       return SIntType::get(ctx, intType.getWidth());
+    } else {
+      // Treat signless integers as unsigned
+      return UIntType::get(ctx, intType.getWidth());
     }
   }
   
@@ -318,7 +319,6 @@ static Value calculateReachAbort(Operation *action, ConversionContext &ctx,
           // Check if the called method can abort
           // For instance method calls, check the method type
           if (callOp.getCallee().getNestedReferences().size() == 1) {
-            StringRef instanceName = callOp.getCallee().getRootReference().getValue();
             StringRef methodName = callOp.getCallee().getNestedReferences()[0].getValue();
             
             // For primitive methods, we know their abort behavior
@@ -1254,6 +1254,28 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
       Value lhs = ctx.txnToFirrtl.lookup(addOp.getLhs());
       Value rhs = ctx.txnToFirrtl.lookup(addOp.getRhs());
       if (lhs && rhs) {
+        auto lhsType = dyn_cast<IntType>(lhs.getType());
+        auto rhsType = dyn_cast<IntType>(rhs.getType());
+
+        // Unify signedness of operands before the operation.
+        if (lhsType && rhsType && lhsType.isSigned() != rhsType.isSigned()) {
+          // The result type of addi dictates the target signedness.
+          auto resultType = convertType(addOp.getType());
+          bool targetIsSigned = isa<SIntType>(resultType);
+
+          if (targetIsSigned) {
+            if (!isa<SIntType>(lhsType))
+              lhs = ctx.firrtlBuilder.create<AsSIntPrimOp>(addOp.getLoc(), lhs);
+            if (!isa<SIntType>(rhsType))
+              rhs = ctx.firrtlBuilder.create<AsSIntPrimOp>(addOp.getLoc(), rhs);
+          } else { // target is unsigned
+            if (isa<SIntType>(lhsType))
+              lhs = ctx.firrtlBuilder.create<AsUIntPrimOp>(addOp.getLoc(), lhs);
+            if (isa<SIntType>(rhsType))
+              rhs = ctx.firrtlBuilder.create<AsUIntPrimOp>(addOp.getLoc(), rhs);
+          }
+        }
+
         auto sum = ctx.firrtlBuilder.create<AddPrimOp>(addOp.getLoc(), lhs, rhs);
         // FIRRTL add increases bit width by 1, so we need to truncate
         auto targetType = convertType(addOp.getType());
