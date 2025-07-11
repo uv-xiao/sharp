@@ -80,27 +80,9 @@ sharp-opt toggle.mlir --sharp-primitive-gen --sharp-infer-conflict-matrix
 
 This infers conflicts between methods. Both `toggle` and `default` modify state, so they conflict.
 
-### 3. Convert to FIRRTL
-
-```bash
-sharp-opt toggle.mlir --convert-txn-to-firrtl
-```
-
-This converts your Sharp module to FIRRTL hardware description.
-
-## Exercises
-
-1. **Add a reset method**: Create an action method that sets the state to 0
-2. **Add a set method**: Create an action method that sets the state to a given value
-3. **Experiment with conflicts**: What happens if two methods try to write different values?
-
 ## Key Takeaways
 
 - Sharp modules encapsulate state and behavior
 - Methods provide atomic operations on that state
 - The transaction model ensures predictable hardware behavior
 - Conflict analysis helps verify correct concurrent execution
-
-## Next Chapter
-
-In Chapter 2, we'll explore more complex modules with multiple methods and learn about scheduling constraints.

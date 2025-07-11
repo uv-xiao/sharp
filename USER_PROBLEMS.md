@@ -22,11 +22,12 @@ module {
       %true = arith.constant true
       %2 = arith.xori %1, %true : i1
       txn.call @state::@write(%2) : (i1) -> ()
-      txn.yield
+      txn.return
     }
     txn.rule @default {
       %1 = txn.call @state::@read() : () -> i1
       txn.call @state::@write(%1) : (i1) -> ()
+      txn.return
     }
     txn.schedule [@toggle, @default] {conflict_matrix = {"default,default" = 2 : i32, "default,toggle" = 3 : i32, "toggle,default" = 3 : i32, "toggle,toggle" = 2 : i32}}
   }

@@ -39,7 +39,7 @@ txn.module @Counter {
     %one = arith.constant 1 : i32
     %next = arith.addi %val, %one : i32
     txn.call @count::@write(%next) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   txn.schedule [@increment]

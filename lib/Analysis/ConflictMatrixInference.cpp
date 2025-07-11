@@ -186,30 +186,55 @@ void ConflictMatrixInferencePass::applyInferenceRules(
     cm[action + "," + action] = ConflictRelation::C;
   }
   
-  // Rule 2: If action A is SA to B and B is SB to A, they conflict
-  // This means if we have A->B = SA (1) and B->A = SB (0), both should be C (2)
+  // Rule 2: Apply symmetry rules first
   for (size_t i = 0; i < actions.size(); ++i) {
     for (size_t j = 0; j < actions.size(); ++j) {
-      if (i == j) continue;
-      
-      auto key_ij = actions[i] + "," + actions[j];
-      auto key_ji = actions[j] + "," + actions[i];
-      
-      auto it_ij = cm.find(key_ij);
-      auto it_ji = cm.find(key_ji);
-      
-      if (it_ij != cm.end() && it_ji != cm.end()) {
-        // Check if i SA j (1) and j SB i (0), which means cyclic dependency
-        if (it_ij->second == ConflictRelation::SA && 
-            it_ji->second == ConflictRelation::SB) {
-          cm[key_ij] = ConflictRelation::C;
-          cm[key_ji] = ConflictRelation::C;
+      if (i != j) {
+        auto key_ij = actions[i] + "," + actions[j];
+        auto key_ji = actions[j] + "," + actions[i];
+        
+        auto it_ij = cm.find(key_ij);
+        auto it_ji = cm.find(key_ji);
+        
+        // If one direction is known, apply symmetry rules
+        if (it_ij != cm.end() && it_ji == cm.end()) {
+          // Apply symmetry: CF->CF, C->C, SA->SB, SB->SA
+          if (it_ij->second == ConflictRelation::CF) {
+            cm[key_ji] = ConflictRelation::CF;
+          } else if (it_ij->second == ConflictRelation::C) {
+            cm[key_ji] = ConflictRelation::C;
+          } else if (it_ij->second == ConflictRelation::SA) {
+            cm[key_ji] = ConflictRelation::SB;
+          } else if (it_ij->second == ConflictRelation::SB) {
+            cm[key_ji] = ConflictRelation::SA;
+          }
+        } else if (it_ji != cm.end() && it_ij == cm.end()) {
+          // Apply symmetry in reverse direction
+          if (it_ji->second == ConflictRelation::CF) {
+            cm[key_ij] = ConflictRelation::CF;
+          } else if (it_ji->second == ConflictRelation::C) {
+            cm[key_ij] = ConflictRelation::C;
+          } else if (it_ji->second == ConflictRelation::SA) {
+            cm[key_ij] = ConflictRelation::SB;
+          } else if (it_ji->second == ConflictRelation::SB) {
+            cm[key_ij] = ConflictRelation::SA;
+          }
+        } else if (it_ij != cm.end() && it_ji != cm.end()) {
+          if (it_ij->second == ConflictRelation::CF) {
+            assert(it_ji->second == ConflictRelation::CF);
+          } else if (it_ij->second == ConflictRelation::C) {
+            assert(it_ji->second == ConflictRelation::C);
+          } else if (it_ij->second == ConflictRelation::SA) {
+            assert(it_ji->second == ConflictRelation::SB);
+          } else if (it_ij->second == ConflictRelation::SB) {
+            assert(it_ji->second == ConflictRelation::SA);
+          }
         }
       }
     }
   }
   
-  // Rule 3: Method-based inference - propagate conflicts from primitive methods to actions
+  // Rule 3: Method-based inference
   for (size_t i = 0; i < actions.size(); ++i) {
     for (size_t j = 0; j < actions.size(); ++j) {
       if (i == j) continue;
@@ -217,7 +242,7 @@ void ConflictMatrixInferencePass::applyInferenceRules(
       auto key_ij = actions[i] + "," + actions[j];
       
       // Skip if already determined and cannot be overridden
-      // We can only override UNK (4), CF (3) is user-provided and preserved
+      // We can only override UNK (4)
       auto existing = cm.find(key_ij);
       if (existing != cm.end() && existing->second != ConflictRelation::UNK) continue;
       
@@ -245,6 +270,9 @@ void ConflictMatrixInferencePass::applyInferenceRules(
           if (methodConflict) {
             LLVM_DEBUG(llvm::dbgs() << "  Found method conflict: " << call_i << " vs " << call_j << " = " << static_cast<int>(*methodConflict) << "\n");
             // Update strongest conflict (C > SA/SB > CF)
+            if (strongestConflict == ConflictRelation::SA && *methodConflict == ConflictRelation::SB) {
+              *methodConflict = ConflictRelation::C;
+            }
             if (!strongestConflict || 
                 (*methodConflict == ConflictRelation::C) ||
                 (*strongestConflict == ConflictRelation::CF && *methodConflict != ConflictRelation::CF)) {
@@ -263,18 +291,22 @@ void ConflictMatrixInferencePass::applyInferenceRules(
     }
   }
   
-  // Rule 4: Propagate conflicts through method calls
-  // TODO: Implement method call analysis and propagation
-  
-  // Rule 5: Default to unknown if not determined
+  // Rule 6: Default unknown relationships to CF
   for (size_t i = 0; i < actions.size(); ++i) {
     for (size_t j = 0; j < actions.size(); ++j) {
       if (i != j) {
         std::string key = actions[i] + "," + actions[j];
         if (cm.find(key) == cm.end()) {
-          cm[key] = ConflictRelation::UNK;
+          cm[key] = ConflictRelation::CF;
         }
       }
+    }
+  }
+  
+  // Rule 7: Convert any remaining UNK to CF
+  for (auto &entry : cm) {
+    if (entry.second == ConflictRelation::UNK) {
+      entry.second = ConflictRelation::CF;
     }
   }
 }
@@ -510,29 +542,8 @@ std::optional<ConflictRelation> ConflictMatrixInferencePass::getMethodConflict(
   
   LLVM_DEBUG(llvm::dbgs() << "    Found instance: " << instance1 << "\n");
   
-  // Find the primitive/module definition
-  // Reconstruct the full primitive name for parametric primitives
-  auto moduleNameAttr = instanceOp.getModuleNameAttr();
-  auto baseName = moduleNameAttr.getValue().str();
-  auto typeArgs = instanceOp.getTypeArguments();
-  
-  std::string moduleName = baseName;
-  if (typeArgs && !typeArgs->empty()) {
-    // Reconstruct the full primitive name like "Register<i1>"
-    moduleName = baseName + "<";
-    for (size_t i = 0; i < typeArgs->size(); ++i) {
-      if (i > 0) moduleName += ",";
-      if (auto typeAttr = dyn_cast<TypeAttr>((*typeArgs)[i])) {
-        auto type = typeAttr.getValue();
-        if (auto intType = dyn_cast<IntegerType>(type)) {
-          moduleName += "i" + std::to_string(intType.getWidth());
-        } else {
-          moduleName += "unknown";
-        }
-      }
-    }
-    moduleName += ">";
-  }
+  // Find the primitive/module definition using the instance's full module name
+  std::string moduleName = instanceOp.getFullModuleName();
   
   LLVM_DEBUG(llvm::dbgs() << "    Looking for module: " << moduleName << "\n");
   ::sharp::txn::PrimitiveOp primitiveOp = nullptr;

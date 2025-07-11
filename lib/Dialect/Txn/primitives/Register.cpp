@@ -30,16 +30,23 @@ namespace txn {
 
 ::sharp::txn::PrimitiveOp createRegisterPrimitive(OpBuilder &builder, Location loc,
                                                  StringRef name, Type dataType) {
+  llvm::dbgs() << "DEBUG: Creating Register primitive: " << name 
+               << " with dataType: " << (dataType ? "valid" : "null") << "\n";
+  
   // Create interface type for the primitive
   auto moduleType = ::sharp::txn::ModuleType::get(builder.getContext(), 
                                                   StringAttr::get(builder.getContext(), name));
   
-  // Create the primitive operation
+  // Create the primitive operation with dataType as type parameter
+  auto typeParams = builder.getArrayAttr({
+    TypeAttr::get(dataType)
+  });
+  
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
                                                             StringAttr::get(builder.getContext(), name),
                                                             builder.getStringAttr("hw"), 
                                                             TypeAttr::get(moduleType),
-                                                            /*type_parameters=*/ArrayAttr());
+                                                            /*type_parameters=*/typeParams);
   
   // Create a new builder for the primitive body
   OpBuilder::InsertionGuard guard(builder);
@@ -86,6 +93,8 @@ namespace txn {
   
   // Schedule must be the last operation in the block
   builder.create<::sharp::txn::ScheduleOp>(loc, actions, conflictMatrix);
+  
+  llvm::dbgs() << "DEBUG: Created Register primitive successfully\n";
   
   return primitive;
 }

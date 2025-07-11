@@ -49,6 +49,10 @@ class ScheduleOp;
 class ValueMethodOp;
 class YieldOp;
 
+/// Utility function to create module name with type arguments
+/// e.g., module_name_with_type_args("Register", typeArgs) -> "Register<!firrtl.uint<32>>"
+std::string module_name_with_type_args(mlir::StringRef baseName, mlir::ArrayAttr typeArgs);
+
 } // namespace txn
 } // namespace sharp
 

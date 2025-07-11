@@ -1168,7 +1168,7 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
             
             if (outputPort != instPorts->second.end()) {
               // Enable the method
-              auto enablePortName = (methodName + "_EN").str();
+              auto enablePortName = (methodName + "EN").str();
               auto enablePort = instPorts->second.find(enablePortName);
               if (enablePort != instPorts->second.end()) {
                 auto intTy = IntType::get(ctx.firrtlBuilder.getContext(), false, 1);
@@ -1608,7 +1608,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       }
       
       // Add enable input port for value methods
-      StringRef enablePostfix = "_EN";
+      StringRef enablePostfix = "EN";
       ports.push_back({builder.getStringAttr((prefix + enablePostfix).str()),
                       UIntType::get(mlirCtx, 1), Direction::In});
       
@@ -2141,7 +2141,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   txnModule.walk([&](ValueMethodOp valueMethod) {
     StringRef prefix = valueMethod.getPrefix().value_or(valueMethod.getSymName());
     StringRef resultPostfix = valueMethod.getResult().value_or("OUT");
-    StringRef enablePostfix = "_EN";
+    StringRef enablePostfix = "EN";
     
     // Find the output port
     Value outputPort;

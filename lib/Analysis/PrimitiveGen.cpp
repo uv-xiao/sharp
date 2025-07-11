@@ -15,11 +15,13 @@
 #include "sharp/Dialect/Txn/TxnOps.h"
 #include "sharp/Dialect/Txn/TxnPrimitives.h"
 
+#include "circt/Dialect/FIRRTL/FIRRTLTypes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Debug.h"
 #include <set>
+#include <map>
 
 #define DEBUG_TYPE "sharp-primitive-gen"
 
@@ -42,10 +44,10 @@ private:
   void generateMissingPrimitives(ModuleOp module);
   
   /// Check if a primitive already exists
-  bool primitiveExists(ModuleOp module, StringRef primitiveName);
+  bool primitiveExists(ModuleOp module, StringRef fullName);
   
-  /// Generate a primitive based on its name and type
-  void generatePrimitive(ModuleOp module, StringRef primitiveName, Type dataType);
+  /// Generate a primitive based on its base name and type arguments
+  void generatePrimitive(ModuleOp module, StringRef baseName, ArrayAttr typeArgs);
   
   /// Parse primitive name to extract base name and type
   std::pair<std::string, Type> parsePrimitiveName(StringRef primitiveName, MLIRContext *ctx);
@@ -57,15 +59,21 @@ void PrimitiveGenPass::runOnOperation() {
 }
 
 void PrimitiveGenPass::generateMissingPrimitives(ModuleOp module) {
-  std::set<std::string> neededPrimitives;
+  struct PrimitiveRequest {
+    std::string baseName;
+    ArrayAttr typeArgs;
+    std::string fullName;
+  };
+  
+  std::map<std::string, PrimitiveRequest> neededPrimitives; // Use map to deduplicate
   
   // Collect all primitive instances
   module.walk([&](::sharp::txn::InstanceOp instanceOp) {
     auto moduleNameAttr = instanceOp.getModuleNameAttr();
-    auto moduleName = moduleNameAttr.getValue();
+    auto baseName = moduleNameAttr.getValue().str();
     auto typeArgs = instanceOp.getTypeArguments();
     
-    LLVM_DEBUG(llvm::dbgs() << "Found instance: " << moduleName);
+    LLVM_DEBUG(llvm::dbgs() << "Found instance: " << baseName);
     if (typeArgs) {
       LLVM_DEBUG(llvm::dbgs() << " with type args");
     }
@@ -73,44 +81,30 @@ void PrimitiveGenPass::generateMissingPrimitives(ModuleOp module) {
     
     // Check if this is a parametric primitive (has type arguments)
     if (typeArgs && !typeArgs->empty()) {
-      // Reconstruct the full primitive name like "Register<i1>"
-      std::string fullName = moduleName.str() + "<";
-      for (size_t i = 0; i < typeArgs->size(); ++i) {
-        if (i > 0) fullName += ",";
-        if (auto typeAttr = dyn_cast<TypeAttr>((*typeArgs)[i])) {
-          // Simple type name extraction - could be improved
-          auto type = typeAttr.getValue();
-          if (auto intType = dyn_cast<IntegerType>(type)) {
-            fullName += "i" + std::to_string(intType.getWidth());
-          } else {
-            fullName += "unknown";
-          }
-        }
-      }
-      fullName += ">";
+      // Generate full name for checking existence
+      std::string fullName = module_name_with_type_args(baseName, typeArgs.value());
       
       LLVM_DEBUG(llvm::dbgs() << "Adding parametric primitive: " << fullName << "\n");
-      neededPrimitives.insert(fullName);
+      neededPrimitives[fullName] = {baseName, typeArgs.value(), fullName};
     }
   });
   
   // Generate missing primitives
-  for (const auto &primitiveName : neededPrimitives) {
-    if (!primitiveExists(module, primitiveName)) {
-      LLVM_DEBUG(llvm::dbgs() << "Generating primitive: " << primitiveName << "\n");
-      
-      auto [baseName, dataType] = parsePrimitiveName(primitiveName, module.getContext());
-      if (dataType) {
-        generatePrimitive(module, primitiveName, dataType);
-      }
+  for (const auto &[fullName, request] : neededPrimitives) {
+    LLVM_DEBUG(llvm::dbgs() << "Checking if primitive exists: " << request.fullName << "\n");
+    if (!primitiveExists(module, request.fullName)) {
+      LLVM_DEBUG(llvm::dbgs() << "Generating primitive: " << request.fullName << "\n");
+      generatePrimitive(module, request.baseName, request.typeArgs);
+    } else {
+      LLVM_DEBUG(llvm::dbgs() << "Primitive already exists: " << request.fullName << "\n");
     }
   }
 }
 
-bool PrimitiveGenPass::primitiveExists(ModuleOp module, StringRef primitiveName) {
+bool PrimitiveGenPass::primitiveExists(ModuleOp module, StringRef fullName) {
   bool exists = false;
   module.walk([&](::sharp::txn::ModuleOp txnModule) {
-    if (txnModule.getName() == primitiveName) {
+    if (txnModule.getFullName() == fullName) {
       exists = true;
       return WalkResult::interrupt();
     }
@@ -119,7 +113,7 @@ bool PrimitiveGenPass::primitiveExists(ModuleOp module, StringRef primitiveName)
   
   // Also check for primitive operations
   module.walk([&](::sharp::txn::PrimitiveOp primitiveOp) {
-    if (primitiveOp.getName() == primitiveName) {
+    if (primitiveOp.getFullName() == fullName) {
       exists = true;
       return WalkResult::interrupt();
     }
@@ -129,26 +123,38 @@ bool PrimitiveGenPass::primitiveExists(ModuleOp module, StringRef primitiveName)
   return exists;
 }
 
-void PrimitiveGenPass::generatePrimitive(ModuleOp module, StringRef primitiveName, Type dataType) {
-  auto [baseName, _] = parsePrimitiveName(primitiveName, module.getContext());
+void PrimitiveGenPass::generatePrimitive(ModuleOp module, StringRef baseName, ArrayAttr typeArgs) {
+  LLVM_DEBUG(llvm::dbgs() << "Generating primitive: base=" << baseName << "\n");
   
   OpBuilder builder(module.getContext());
   builder.setInsertionPointToEnd(module.getBody());
   
   auto loc = module.getLoc();
   
+  // Extract the primary type argument (first type for single-type primitives)
+  Type dataType = nullptr;
+  if (typeArgs && !typeArgs.empty()) {
+    if (auto typeAttr = dyn_cast<TypeAttr>(typeArgs[0])) {
+      dataType = typeAttr.getValue();
+    }
+  }
+  
+  // Generate full name for the primitive
+  std::string fullName = module_name_with_type_args(baseName, typeArgs);
+  
   if (baseName == "Register") {
-    txn::createRegisterPrimitive(builder, loc, primitiveName, dataType);
+    LLVM_DEBUG(llvm::dbgs() << "Creating Register primitive with type: " << (dataType ? "valid" : "null") << "\n");
+    txn::createRegisterPrimitive(builder, loc, fullName, dataType);
   } else if (baseName == "Wire") {
-    txn::createWirePrimitive(builder, loc, primitiveName, dataType);
+    txn::createWirePrimitive(builder, loc, fullName, dataType);
   } else if (baseName == "FIFO") {
-    txn::createFIFOPrimitive(builder, loc, primitiveName, dataType);
+    txn::createFIFOPrimitive(builder, loc, fullName, dataType);
   } else if (baseName == "Memory") {
-    txn::createMemoryPrimitive(builder, loc, primitiveName, dataType);
+    txn::createMemoryPrimitive(builder, loc, fullName, dataType);
   } else if (baseName == "SpecFIFO") {
-    txn::createSpecFIFOPrimitive(builder, loc, primitiveName, dataType);
+    txn::createSpecFIFOPrimitive(builder, loc, fullName, dataType);
   } else if (baseName == "SpecMemory") {
-    txn::createSpecMemoryPrimitive(builder, loc, primitiveName, dataType);
+    txn::createSpecMemoryPrimitive(builder, loc, fullName, dataType);
   } else {
     LLVM_DEBUG(llvm::dbgs() << "Unknown primitive type: " << baseName << "\n");
   }
@@ -183,6 +189,20 @@ std::pair<std::string, Type> PrimitiveGenPass::parsePrimitiveName(StringRef prim
     dataType = IntegerType::get(ctx, 32);
   } else if (typeStr == "i64") {
     dataType = IntegerType::get(ctx, 64);
+  } else if (typeStr.starts_with("!firrtl.uint<") && typeStr.ends_with(">")) {
+    // Parse FIRRTL uint types like "!firrtl.uint<32>"
+    StringRef widthStr = typeStr.substr(13, typeStr.size() - 14); // Remove "!firrtl.uint<" and ">"
+    unsigned width;
+    if (!widthStr.getAsInteger(10, width)) {
+      dataType = circt::firrtl::UIntType::get(ctx, width);
+    }
+  } else if (typeStr.starts_with("!firrtl.sint<") && typeStr.ends_with(">")) {
+    // Parse FIRRTL sint types like "!firrtl.sint<32>"
+    StringRef widthStr = typeStr.substr(13, typeStr.size() - 14); // Remove "!firrtl.sint<" and ">"
+    unsigned width;
+    if (!widthStr.getAsInteger(10, width)) {
+      dataType = circt::firrtl::SIntType::get(ctx, width);
+    }
   } else if (typeStr.starts_with("i")) {
     // Try to parse as integer width
     unsigned width;

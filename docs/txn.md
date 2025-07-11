@@ -28,7 +28,7 @@ txn.module @Counter {
     %one = arith.constant 1 : i32
     %next = arith.addi %val, %one : i32
     txn.call @count::@write(%next) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   txn.schedule [@increment] {
@@ -39,7 +39,9 @@ txn.module @Counter {
 
 ### Method Types
 
-**Value Methods** - Pure, read-only:
+> **IMPORTANT**: All rules and value methods must end with `txn.return` (with optional arguments for value methods). Action methods may also end with `txn.return` or may abort with `txn.abort`.
+
+**Value Methods** - Pure, read-only (must end with `txn.return`):
 ```mlir
 txn.value_method @getValue() -> i32 {
   %val = txn.call @reg::@read() : () -> i32
@@ -47,7 +49,7 @@ txn.value_method @getValue() -> i32 {
 }
 ```
 
-**Action Methods** - Can modify state or abort:
+**Action Methods** - Can modify state or abort (must end with `txn.return`):
 ```mlir
 txn.action_method @setValue(%arg: i32) {
   txn.call @reg::@write(%arg) : (i32) -> ()
@@ -55,13 +57,13 @@ txn.action_method @setValue(%arg: i32) {
 }
 ```
 
-**Rules** - Spontaneous actions:
+**Rules** - Spontaneous actions (must end with `txn.return`):
 ```mlir
 txn.rule @autoIncrement {
   %cond = arith.cmpi slt, %counter, %limit : i32
   txn.if %cond {
     txn.call @increment() : () -> ()
-    txn.yield
+    txn.return
   } else {
     txn.abort
   }

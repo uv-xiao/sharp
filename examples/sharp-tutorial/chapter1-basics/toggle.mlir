@@ -15,12 +15,13 @@ txn.module @Toggle {
     %one = arith.constant 1 : i1
     %new = arith.xori %current, %one : i1
     txn.call @state::@write(%new) : (i1) -> ()
-    txn.yield
+    txn.return
   }
 
   txn.rule @default {
     %current = txn.call @state::@read() : () -> i1
     txn.call @state::@write(%current) : (i1) -> ()
+    txn.return
   }
   
   // Schedule declares all methods/rules

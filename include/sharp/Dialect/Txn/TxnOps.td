@@ -26,12 +26,20 @@ def ModuleOp : TxnOp<"module", [
     and a schedule that defines the module's behavior.
   }];
 
-  let arguments = (ins SymbolNameAttr:$sym_name);
+  let arguments = (ins 
+    SymbolNameAttr:$sym_name,
+    OptionalAttr<ArrayAttr>:$type_parameters  // Array of TypeAttr for parametric modules
+  );
   let regions = (region SizedRegion<1>:$body);
 
   let extraClassDeclaration = [{
     /// Returns the entry block of the module.
     ::mlir::Block *getBodyBlock() { return &getBody().front(); }
+    
+    /// Returns the full name including type parameters (e.g., "Register<!firrtl.uint<32>>")
+    std::string getFullName() {
+      return ::sharp::txn::module_name_with_type_args(getName(), getTypeParameters().value_or(::mlir::ArrayAttr()));
+    }
   }];
 
   let assemblyFormat = [{
@@ -60,6 +68,13 @@ def PrimitiveOp : TxnOp<"primitive", [
   );
   let regions = (region SizedRegion<1>:$body);
 
+  let extraClassDeclaration = [{
+    /// Returns the full name including type parameters (e.g., "Register<!firrtl.uint<32>>")
+    std::string getFullName() {
+      return ::sharp::txn::module_name_with_type_args(getName(), getTypeParameters().value_or(::mlir::ArrayAttr()));
+    }
+  }];
+
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
 }
@@ -80,6 +95,13 @@ def InstanceOp : TxnOp<"instance", [Symbol]> {
     OptionalAttr<ArrayAttr>:$type_arguments  // Array of TypeAttr for instantiating parametric modules
   );
   let results = (outs Txn_ModuleType:$result);
+
+  let extraClassDeclaration = [{
+    /// Returns the full module name including type arguments (e.g., "Register<!firrtl.uint<32>>")
+    std::string getFullModuleName() {
+      return ::sharp::txn::module_name_with_type_args(getModuleName(), getTypeArguments().value_or(::mlir::ArrayAttr()));
+    }
+  }];
 
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;

@@ -6,19 +6,19 @@ txn.module @TrafficLight {
   // Action to change to red
   txn.action_method @goRed() {
     %c0 = arith.constant 0 : i32
-    txn.yield
+    txn.return
   }
   
   // Action to change to yellow  
   txn.action_method @goYellow() {
     %c1 = arith.constant 1 : i32
-    txn.yield
+    txn.return
   }
   
   // Action to change to green
   txn.action_method @goGreen() {
     %c2 = arith.constant 2 : i32
-    txn.yield
+    txn.return
   }
   
   // Value method to check if red

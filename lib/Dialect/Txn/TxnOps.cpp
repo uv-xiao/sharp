@@ -13,6 +13,9 @@ using namespace mlir;
 using namespace sharp;
 using namespace sharp::txn;
 
+namespace sharp {
+namespace txn {
+
 //===----------------------------------------------------------------------===//
 // ModuleOp
 //===----------------------------------------------------------------------===//
@@ -36,6 +39,7 @@ LogicalResult ModuleOp::verify() {
   
   return success();
 }
+
 
 //===----------------------------------------------------------------------===//
 // PrimitiveOp
@@ -140,6 +144,7 @@ LogicalResult PrimitiveOp::verify() {
   
   return success();
 }
+
 
 //===----------------------------------------------------------------------===//
 // InstanceOp
@@ -566,6 +571,33 @@ ArrayRef<Type> FuncOp::getCallableResults() {
 //===----------------------------------------------------------------------===//
 // Operation definitions
 //===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
+// Utility Functions
+//===----------------------------------------------------------------------===//
+
+std::string module_name_with_type_args(mlir::StringRef baseName, mlir::ArrayAttr typeArgs) {
+  std::string fullName = baseName.str();
+  
+  if (typeArgs && !typeArgs.empty()) {
+    fullName += "<";
+    for (size_t i = 0; i < typeArgs.size(); ++i) {
+      if (i > 0) fullName += ",";
+      if (auto typeAttr = dyn_cast<TypeAttr>(typeArgs[i])) {
+        std::string typeStr;
+        llvm::raw_string_ostream stream(typeStr);
+        typeAttr.getValue().print(stream);
+        fullName += typeStr;
+      }
+    }
+    fullName += ">";
+  }
+  
+  return fullName;
+}
+
+} // namespace txn
+} // namespace sharp
 
 #define GET_OP_CLASSES
 #include "sharp/Dialect/Txn/Txn.cpp.inc"

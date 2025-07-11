@@ -12,10 +12,6 @@ echo ""
 
 echo "2. Running conflict matrix inference:"
 echo "----------------------------------------"
-$SHARP_OPT toggle.mlir --sharp-infer-conflict-matrix | grep -A 20 "schedule"
-echo ""
-
-echo "3. Converting to FIRRTL:"
-echo "----------------------------------------"
-$SHARP_OPT toggle.mlir --convert-txn-to-firrtl | head -20
 echo "..."
+$SHARP_OPT toggle.mlir --sharp-primitive-gen --sharp-infer-conflict-matrix | grep -A 20 "schedule"
+echo ""

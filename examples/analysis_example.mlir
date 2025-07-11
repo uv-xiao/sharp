@@ -4,17 +4,17 @@ txn.module @AnalysisExample {
   // Action methods with different relationships
   txn.action_method @action1() {
     %c1 = arith.constant 1 : i32
-    txn.yield
+    txn.return
   }
   
   txn.action_method @action2() {
     %c2 = arith.constant 2 : i32
-    txn.yield
+    txn.return
   }
   
   txn.action_method @action3() {
     %c3 = arith.constant 3 : i32
-    txn.yield
+    txn.return
   }
   
   // Value method
