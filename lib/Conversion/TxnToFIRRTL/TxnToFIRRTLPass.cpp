@@ -1127,9 +1127,12 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
           });
           
           if (isCallerAction && isCalleeAction) {
-            return callOp.emitError("Action cannot call another action '") << methodName 
-                   << "' in the same module. Actions can only call value methods in the same module "
-                   << "or methods of child module instances.";
+            return callOp.emitError("[TxnToFIRRTL] Pass failed - invalid call")
+                   << ": Action cannot call another action '" << methodName 
+                   << "' in the same module at " << callOp.getLoc() << ". "
+                   << "Reason: The Sharp execution model prohibits actions from calling other actions within the same module "
+                   << "to prevent recursion and undefined behavior. "
+                   << "Solution: Refactor the code to have the action call a value method or a method of a child instance instead.";
           }
         }
         
@@ -1209,14 +1212,49 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
           }
         }
         
-        // For action methods with arguments (like write)
-        if (callOp.getArgs().size() > 0 && methodName == "write") {
+        // Handle primitive method calls with proper port connections
+        if (methodName == "write" && callOp.getArgs().size() > 0) {
           // Convert the argument
           Value arg = callOp.getArgs()[0];
           Value firrtlArg = ctx.txnToFirrtl.lookup(arg);
           if (firrtlArg) {
-            // In a real implementation, this would connect to the instance's input port
-            // For now, just track that we have the converted argument
+            // Connect to write_data port
+            auto writeDataPortName = "write_data";
+            auto writeDataPort = instPorts->second.find(writeDataPortName);
+            if (writeDataPort != instPorts->second.end()) {
+              ctx.firrtlBuilder.create<ConnectOp>(callOp.getLoc(),
+                                                 writeDataPort->second, firrtlArg);
+            }
+            
+            // Enable the write
+            auto writeEnablePortName = "write_enable";
+            auto writeEnablePort = instPorts->second.find(writeEnablePortName);
+            if (writeEnablePort != instPorts->second.end()) {
+              auto intTy = IntType::get(ctx.firrtlBuilder.getContext(), false, 1);
+              auto trueVal = ctx.firrtlBuilder.create<ConstantOp>(
+                  callOp.getLoc(), Type(intTy), APSInt(APInt(1, 1), true));
+              ctx.firrtlBuilder.create<ConnectOp>(callOp.getLoc(),
+                                                 writeEnablePort->second, trueVal);
+            }
+          }
+        } else if (methodName == "read" && callOp.getNumResults() > 0) {
+          // Connect read result
+          auto readDataPortName = "read_data";
+          auto readDataPort = instPorts->second.find(readDataPortName);
+          if (readDataPort != instPorts->second.end()) {
+            // Map the result to the read_data port
+            ctx.txnToFirrtl[callOp.getResult(0)] = readDataPort->second;
+            
+            // Enable the read
+            auto readEnablePortName = "read_enable";
+            auto readEnablePort = instPorts->second.find(readEnablePortName);
+            if (readEnablePort != instPorts->second.end()) {
+              auto intTy = IntType::get(ctx.firrtlBuilder.getContext(), false, 1);
+              auto trueVal = ctx.firrtlBuilder.create<ConstantOp>(
+                  callOp.getLoc(), Type(intTy), APSInt(APInt(1, 1), true));
+              ctx.firrtlBuilder.create<ConnectOp>(callOp.getLoc(),
+                                                 readEnablePort->second, trueVal);
+            }
           }
         }
       }
@@ -1410,9 +1448,17 @@ static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx) {
         ctx.txnToFirrtl[xorOp.getResult()] = result;
       }
     } else if (auto futureOp = dyn_cast<FutureOp>(&op)) {
-      return futureOp.emitError("error: future operations are not yet supported in FIRRTL conversion. Multi-cycle execution requires additional synthesis infrastructure.");
+      return futureOp.emitError("[TxnToFIRRTL] Pass failed - unsupported operation")
+             << ": txn.future operations are not yet supported in FIRRTL conversion at "
+             << futureOp.getLoc() << ". "
+             << "Reason: Multi-cycle operations require a more complex state machine and are not yet implemented in the FIRRTL backend. "
+             << "Solution: Please refactor the design to use single-cycle operations or implement the required state machine manually in a separate module.";
     } else if (auto launchOp = dyn_cast<LaunchOp>(&op)) {
-      return launchOp.emitError("error: future operations are not yet supported in FIRRTL conversion. Multi-cycle execution requires additional synthesis infrastructure.");
+      return launchOp.emitError("[TxnToFIRRTL] Pass failed - unsupported operation")
+             << ": txn.launch operations are not yet supported in FIRRTL conversion at "
+             << launchOp.getLoc() << ". "
+             << "Reason: Multi-cycle operations require a more complex state machine and are not yet implemented in the FIRRTL backend. "
+             << "Solution: Please refactor the design to use single-cycle operations or implement the required state machine manually in a separate module.";
     }
     // Add more operation conversions as needed
   }
@@ -1480,23 +1526,29 @@ static LogicalResult convertOp(Operation *op, ConversionContext &ctx) {
         auto instPorts = ctx.instancePorts.find(instName);
         if (instPorts != ctx.instancePorts.end()) {
           // Find the output port for this method
-          auto outputPortName = (methodName + "_data").str();
-          auto outputPort = instPorts->second.find(outputPortName);
+          // Try different port naming patterns
+          std::vector<std::string> portNameCandidates = {
+            (methodName + "_result").str(),  // For action methods with return values
+            (methodName + "_data").str(),    // For value methods
+            methodName.str()                 // Fallback
+          };
           
-          if (outputPort != instPorts->second.end()) {
-            // Map the result to the output port
-            ctx.txnToFirrtl[callOp.getResult(0)] = outputPort->second;
-          } else {
-            // If the port wasn't found with _data suffix, try without
-            outputPortName = methodName.str();
-            outputPort = instPorts->second.find(outputPortName);
-            if (outputPort != instPorts->second.end()) {
-              ctx.txnToFirrtl[callOp.getResult(0)] = outputPort->second;
-            } else {
-              // Port not found - this is an error
-              return callOp.emitError("Could not find output port for instance method: ") 
-                     << instName << "::" << methodName;
+          Value outputPort;
+          for (const auto& candidateName : portNameCandidates) {
+            auto portIt = instPorts->second.find(candidateName);
+            if (portIt != instPorts->second.end()) {
+              outputPort = portIt->second;
+              break;
             }
+          }
+          
+          if (outputPort) {
+            // Map the result to the output port
+            ctx.txnToFirrtl[callOp.getResult(0)] = outputPort;
+          } else {
+            // Port not found - this is an error
+            return callOp.emitError("Could not find output port for instance method: ") 
+                   << instName << "::" << methodName;
           }
         } else {
           return callOp.emitError("Instance not found in ports map: ") << instName;
@@ -1564,7 +1616,8 @@ static LogicalResult convertOp(Operation *op, ConversionContext &ctx) {
 static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule, 
                                  ConversionContext &ctx,
                                  ::circt::firrtl::CircuitOp circuit,
-                                 const std::string &willFireMode = "static") {
+                                 const std::string &willFireMode = "static",
+                                 bool isTopLevel = false) {
   MLIRContext *mlirCtx = txnModule->getContext();
   OpBuilder builder(mlirCtx);
   
@@ -1579,7 +1632,11 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   });
   
   if (!schedule) {
-    return txnModule.emitError("Txn module missing schedule operation");
+    return txnModule.emitError("[TxnToFIRRTL] Pass failed - missing schedule")
+           << ": The txn.module '" << txnModule.getName() << "' does not contain a txn.schedule operation at "
+           << txnModule.getLoc() << ". "
+           << "Reason: A schedule is required to determine the execution order of actions for FIRRTL conversion. "
+           << "Solution: Please run the sharp-action-scheduling pass to generate a schedule before converting to FIRRTL.";
   }
   
   populateConflictMatrix(schedule, ctx);
@@ -1645,21 +1702,35 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
         ports.push_back({builder.getStringAttr((prefix + readyPostfix).str()),
                         UIntType::get(mlirCtx, 1), Direction::Out});
       }
+      
+      // Add output port for return value if action method has results
+      if (funcType.getNumResults() > 0) {
+        if (auto firrtlType = convertType(funcType.getResult(0))) {
+          std::string resultPortName = (prefix + "_result").str();
+          ports.push_back({builder.getStringAttr(resultPortName),
+                          firrtlType, Direction::Out});
+        }
+      }
     }
   });
   
   // Create FIRRTL module
   builder.setInsertionPointToEnd(circuit.getBodyBlock());
-  auto moduleName = txnModule.getSymName();
-  if (moduleName.empty()) {
+  auto originalModuleName = txnModule.getSymName();
+  if (originalModuleName.empty()) {
     return txnModule.emitError("Txn module missing symbol name");
   }
+  
+  // Use original module name to match circuit name for toolchain compatibility
+  StringRef moduleName = originalModuleName;
   
   auto firrtlModule = builder.create<FModuleOp>(
       txnModule.getLoc(), 
       builder.getStringAttr(moduleName),
       ConventionAttr::get(mlirCtx, Convention::Internal),
       ports);
+  
+  // No longer need annotations since we're using original module name
   
   // Set up conversion context
   ctx.currentFIRRTLModule = firrtlModule;
@@ -1752,6 +1823,61 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   
   // Store instance ports in context for method call connections
   ctx.instancePorts = instancePorts;
+  
+  // Add default connections for primitive instance input ports to avoid "sink not fully initialized" errors
+  for (auto& [instName, ports] : instancePorts) {
+    // For Register primitives, we need to provide default values for write_data and write_enable
+    if (ports.count("write_data") && ports.count("write_enable")) {
+      // Default write_enable to false (disable writing by default)
+      auto falseVal = ctx.firrtlBuilder.create<ConstantOp>(
+          txnModule.getLoc(), 
+          ports["write_enable"].getType(),
+          APSInt(APInt(1, 0), true));
+      ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(), 
+                                         ports["write_enable"], falseVal);
+      
+      // Default write_data to zero (value doesn't matter when write_enable is false)
+      if (auto writeDataType = dyn_cast<UIntType>(ports["write_data"].getType())) {
+        auto zeroVal = ctx.firrtlBuilder.create<ConstantOp>(
+            txnModule.getLoc(),
+            ports["write_data"].getType(),
+            APSInt(APInt(writeDataType.getWidth().value_or(32), 0), true));
+        ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
+                                           ports["write_data"], zeroVal);
+      }
+    }
+    
+    // For other primitives, add similar default connections as needed
+    // FIFO enqueue ports
+    if (ports.count("enqueueEN")) {
+      auto falseVal = ctx.firrtlBuilder.create<ConstantOp>(
+          txnModule.getLoc(),
+          ports["enqueueEN"].getType(), 
+          APSInt(APInt(1, 0), true));
+      ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
+                                         ports["enqueueEN"], falseVal);
+    }
+    if (ports.count("enqueueOUT")) {
+      if (auto enqueueDataType = dyn_cast<UIntType>(ports["enqueueOUT"].getType())) {
+        auto zeroVal = ctx.firrtlBuilder.create<ConstantOp>(
+            txnModule.getLoc(),
+            ports["enqueueOUT"].getType(),
+            APSInt(APInt(enqueueDataType.getWidth().value_or(32), 0), true));
+        ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
+                                           ports["enqueueOUT"], zeroVal);
+      }
+    }
+    
+    // FIFO dequeue ports  
+    if (ports.count("dequeueEN")) {
+      auto falseVal = ctx.firrtlBuilder.create<ConstantOp>(
+          txnModule.getLoc(),
+          ports["dequeueEN"].getType(),
+          APSInt(APInt(1, 0), true));
+      ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
+                                         ports["dequeueEN"], falseVal);
+    }
+  }
   
   // First step: Map all block arguments to FIRRTL ports for all action methods
   txnModule.walk([&](ActionMethodOp actionMethod) {
@@ -2310,6 +2436,45 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
         }
       });
     }
+    
+    // Handle return value if action method has results
+    auto funcType = actionMethod.getFunctionType();
+    if (funcType.getNumResults() > 0) {
+      // Find the return value in the method body
+      Value returnValue;
+      actionMethod.walk([&](ReturnOp ret) {
+        if (ret.getNumOperands() > 0) {
+          returnValue = ctx.txnToFirrtl.lookup(ret.getOperand(0));
+        }
+      });
+      
+      if (returnValue) {
+        // Find the result output port
+        std::string resultPortName = (prefix + "_result").str();
+        auto portNames = firrtlModule.getPortNames();
+        auto blockArgs = firrtlModule.getBodyBlock()->getArguments();
+        for (size_t i = 0; i < portNames.size(); ++i) {
+          if (cast<StringAttr>(portNames[i]).getValue() == resultPortName) {
+            // Create wire to hold the result
+            auto resultWire = ctx.firrtlBuilder.create<WireOp>(
+                actionMethod.getLoc(), 
+                blockArgs[i].getType(),
+                (prefix + "_result_wire").str());
+                
+            // Connect return value to wire when method fires
+            ctx.firrtlBuilder.create<WhenOp>(actionMethod.getLoc(), wf, false, [&]() {
+              ctx.firrtlBuilder.create<ConnectOp>(actionMethod.getLoc(), 
+                                                 resultWire.getResult(), returnValue);
+            });
+            
+            // Always connect wire to output port
+            ctx.firrtlBuilder.create<ConnectOp>(actionMethod.getLoc(), 
+                                               blockArgs[i], resultWire.getResult());
+            break;
+          }
+        }
+      }
+    }
   });
   
   // Third pass: Convert rules
@@ -2484,6 +2649,7 @@ struct TxnToFIRRTLConversionPass
       topModuleName = sortedModules.back().getName();
     }
     
+    // Use top module name as circuit name for FIRRTL toolchain compatibility
     auto firrtlCircuit = builder.create<::circt::firrtl::CircuitOp>(
         module.getLoc(), builder.getStringAttr(topModuleName));
     
@@ -2493,7 +2659,10 @@ struct TxnToFIRRTLConversionPass
       if (!isa<::sharp::txn::ModuleOp>(txnModule)) continue;
       if (txnModule.getName() == "firrtl_generated") continue;
       
-      if (failed(convertModule(txnModule, convCtx, firrtlCircuit, willFireMode))) {
+      // Check if this is the top-level module
+      bool isTopLevel = (txnModule.getName() == topModuleName);
+      
+      if (failed(convertModule(txnModule, convCtx, firrtlCircuit, willFireMode, isTopLevel))) {
         signalPassFailure();
         return;
       }

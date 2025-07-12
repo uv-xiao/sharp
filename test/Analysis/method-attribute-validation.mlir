@@ -1,4 +1,4 @@
-// RUN: sharp-opt --sharp-validate-method-attributes --split-input-file --verify-diagnostics %s
+// RUN: sharp-opt --sharp-primitive-gen --sharp-infer-conflict-matrix --sharp-reachability-analysis --sharp-general-check --sharp-pre-synthesis-check --split-input-file --verify-diagnostics %s
 
 // Test method attribute validation
 

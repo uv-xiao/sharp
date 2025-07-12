@@ -1,4 +1,4 @@
-// RUN: sharp-opt %s -sharp-check-value-method-conflicts -split-input-file -verify-diagnostics
+// RUN: sharp-opt %s --sharp-primitive-gen --sharp-infer-conflict-matrix --sharp-reachability-analysis --sharp-general-check -split-input-file -verify-diagnostics
 
 // Test 1: Valid value method with no conflicts
 txn.module @ValidValueMethod {

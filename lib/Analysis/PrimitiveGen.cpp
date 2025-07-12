@@ -55,7 +55,17 @@ private:
 
 void PrimitiveGenPass::runOnOperation() {
   ModuleOp module = getOperation();
+  
+  // Report pass execution
+  LLVM_DEBUG(llvm::dbgs() << "[PrimitiveGen] Starting primitive generation pass\n");
+  
   generateMissingPrimitives(module);
+  
+  // Mark module as having completed primitive generation
+  module->setAttr("sharp.primitive_gen_complete", 
+                  UnitAttr::get(module.getContext()));
+  
+  LLVM_DEBUG(llvm::dbgs() << "[PrimitiveGen] Primitive generation completed successfully\n");
 }
 
 void PrimitiveGenPass::generateMissingPrimitives(ModuleOp module) {

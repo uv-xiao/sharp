@@ -107,15 +107,23 @@ LogicalResult InlineFunctionsPass::inlineCall(::sharp::txn::FuncCallOp callOp) {
   // Get the parent module
   auto moduleOp = callOp->getParentOfType<::sharp::txn::ModuleOp>();
   if (!moduleOp) {
-    return callOp.emitError("func_call must be inside a txn.module");
+    return callOp.emitError("[InlineFunctions] Pass failed - invalid context")
+           << ": txn.func_call operation must be nested inside a txn.module operation at "
+           << callOp.getLoc() << ". "
+           << "Reason: Function inlining is only supported within the scope of a transaction module. "
+           << "Solution: Ensure that all txn.func_call operations are placed within a txn.module.";
   }
   
   // Look up the function
   auto funcName = callOp.getCallee();
   auto funcOp = moduleOp.lookupSymbol<::sharp::txn::FuncOp>(funcName);
   if (!funcOp) {
-    return callOp.emitError("cannot find function '")
-           << funcName << "' in module";
+    return callOp.emitError("[InlineFunctions] Pass failed - unresolved symbol")
+           << ": Cannot find function '" << funcName << "' in module '" 
+           << moduleOp.getName() << "' at " << callOp.getLoc() << ". "
+           << "Reason: The specified function is not defined within the current txn.module. "
+           << "Solution: Please ensure that the function is defined within the same module "
+           << "or that the function name is spelled correctly.";
   }
   
   // Check if we can inline this function
@@ -125,14 +133,21 @@ LogicalResult InlineFunctionsPass::inlineCall(::sharp::txn::FuncCallOp callOp) {
   
   // Check argument count matches
   if (callOp.getOperands().size() != funcOp.getArgumentTypes().size()) {
-    return callOp.emitError("argument count mismatch: call has ")
-           << callOp.getOperands().size() << " arguments but function expects "
-           << funcOp.getArgumentTypes().size();
+    return callOp.emitError("[InlineFunctions] Pass failed - argument mismatch")
+           << ": Call to function '" << funcName << "' has " << callOp.getOperands().size() 
+           << " arguments, but function expects " << funcOp.getArgumentTypes().size() 
+           << " arguments at " << callOp.getLoc() << ". "
+           << "Reason: The number of arguments in the function call does not match the function definition. "
+           << "Solution: Please provide the correct number of arguments for the function call.";
   }
   
   // Check that the function has exactly one block
   if (!funcOp.getBody().hasOneBlock()) {
-    return funcOp.emitError("function must have exactly one block for inlining");
+    return funcOp.emitError("[InlineFunctions] Pass failed - unsupported structure")
+           << ": Function '" << funcOp.getSymName() << "' must have exactly one block for inlining at "
+           << funcOp.getLoc() << ". "
+           << "Reason: The inliner currently only supports functions with a single basic block. "
+           << "Solution: Please refactor the function to use a single block or avoid inlining it.";
   }
   
   auto &funcBlock = funcOp.getBody().front();
@@ -160,7 +175,11 @@ LogicalResult InlineFunctionsPass::inlineCall(::sharp::txn::FuncCallOp callOp) {
   // Handle the terminator (txn.return)
   auto returnOp = dyn_cast<::sharp::txn::ReturnOp>(funcBlock.getTerminator());
   if (!returnOp) {
-    return funcOp.emitError("function must be terminated with txn.return");
+    return funcOp.emitError("[InlineFunctions] Pass failed - invalid terminator")
+           << ": Function '" << funcOp.getSymName() << "' must be terminated with a txn.return operation at "
+           << funcOp.getLoc() << ". "
+           << "Reason: The inliner requires a txn.return to correctly map the function's results. "
+           << "Solution: Please ensure the function body ends with a txn.return operation.";
   }
   
   // Map the return values

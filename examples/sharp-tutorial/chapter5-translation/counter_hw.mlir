@@ -33,14 +33,8 @@ txn.module @HardwareCounter {
     txn.yield
   }
   
-  txn.schedule [@getCount, @increment, @decrement, @reset] {
+  txn.schedule [@increment, @decrement, @reset] {
     conflict_matrix = {
-      // Value method doesn't conflict
-      "getCount,getCount" = 3 : i32,       // CF
-      "getCount,increment" = 3 : i32,      // CF
-      "getCount,decrement" = 3 : i32,      // CF
-      "getCount,reset" = 3 : i32,          // CF
-      
       // Actions conflict with each other
       "increment,increment" = 2 : i32,     // C
       "increment,decrement" = 2 : i32,     // C

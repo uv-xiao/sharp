@@ -13,6 +13,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 
 namespace mlir {
 namespace sharp {
@@ -47,40 +48,68 @@ namespace txn {
   auto clearType = builder.getFunctionType({}, {});
   
   // Create read method (value method with dynamic timing)
-  builder.create<::sharp::txn::ValueMethodOp>(
+  auto readMethod = builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("read"), TypeAttr::get(readType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr());
+  Block *readBody = &readMethod.getBody().emplaceBlock();
+  readBody->addArgument(addrType, loc);  // Add address argument
+  builder.setInsertionPointToEnd(readBody);
+  auto dummyRead = builder.create<arith::ConstantOp>(loc, dataType, builder.getIntegerAttr(dataType, 0));
+  builder.create<::sharp::txn::ReturnOp>(loc, dummyRead.getResult());
   
   // Create write method (action method)
-  builder.create<::sharp::txn::ActionMethodOp>(
+  builder.setInsertionPointAfter(readMethod);
+  auto writeMethod = builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("write"), TypeAttr::get(writeType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
+  Block *writeBody = &writeMethod.getBody().emplaceBlock();
+  writeBody->addArgument(addrType, loc);  // Add address argument
+  writeBody->addArgument(dataType, loc);  // Add data argument
+  builder.setInsertionPointToEnd(writeBody);
+  builder.create<::sharp::txn::YieldOp>(loc);
   
   // Create setLatency method (action method)
-  builder.create<::sharp::txn::ActionMethodOp>(
+  builder.setInsertionPointAfter(writeMethod);
+  auto setLatencyMethod = builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("setLatency"), TypeAttr::get(setLatencyType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
+  Block *setLatencyBody = &setLatencyMethod.getBody().emplaceBlock();
+  setLatencyBody->addArgument(builder.getI32Type(), loc);  // Add latency argument
+  builder.setInsertionPointToEnd(setLatencyBody);
+  builder.create<::sharp::txn::YieldOp>(loc);
   
   // Create getLatency method (value method)
-  builder.create<::sharp::txn::ValueMethodOp>(
+  builder.setInsertionPointAfter(setLatencyMethod);
+  auto getLatencyMethod = builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("getLatency"), TypeAttr::get(getLatencyType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr());
+  Block *getLatencyBody = &getLatencyMethod.getBody().emplaceBlock();
+  builder.setInsertionPointToEnd(getLatencyBody);
+  auto dummyLatency = builder.create<arith::ConstantOp>(loc, builder.getI32Type(), builder.getI32IntegerAttr(defaultLatency));
+  builder.create<::sharp::txn::ReturnOp>(loc, dummyLatency.getResult());
   
   // Create clear method (action method)
-  builder.create<::sharp::txn::ActionMethodOp>(
+  builder.setInsertionPointAfter(getLatencyMethod);
+  auto clearMethod = builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("clear"), TypeAttr::get(clearType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
+  Block *clearBody = &clearMethod.getBody().emplaceBlock();
+  builder.setInsertionPointToEnd(clearBody);
+  builder.create<::sharp::txn::YieldOp>(loc);
+  
+  // Reset insertion point to primitive body for schedule
+  builder.setInsertionPointToEnd(body);
   
   // Create schedule with conflict matrix
   auto conflictMatrix = builder.getDictionaryAttr({

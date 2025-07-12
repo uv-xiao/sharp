@@ -296,13 +296,141 @@ Different backends support:
 - Timing constraints
 - Power optimization
 
+## Timing Modes
+
+Sharp supports three timing modes for will-fire logic generation, each with different trade-offs:
+
+### Static Mode (`--convert-txn-to-firrtl=will-fire-mode=static`)
+
+**Characteristics:**
+- Conservative will-fire logic generation
+- Fixed compile-time priority scheme 
+- Rigid priority-encoder chains
+- Predictable but can cause starvation
+
+**Use Cases:**
+- Maximum safety and predictability
+- Simple designs
+- Early development and prototyping
+- When deterministic behavior is critical
+
+**Generated Logic:** Most conservative, clear priority relationships
+
+### Dynamic Mode (`--convert-txn-to-firrtl=will-fire-mode=dynamic`)
+
+**Characteristics:**
+- Balanced scheduling with fairness considerations
+- More sophisticated arbitration logic
+- Prevents starvation through dynamic arbitration
+- Balanced hardware complexity
+
+**Use Cases:**
+- Production designs requiring fairness
+- Multi-action modules with balanced priorities
+- When both performance and fairness matter
+- General-purpose default mode
+
+**Generated Logic:** More complex but fairer arbitration
+
+### Most-Dynamic Mode (`--convert-txn-to-firrtl=will-fire-mode=most-dynamic`)
+
+**Characteristics:**
+- Primitive-level tracking for maximum optimization
+- Pure conflict-based scheduling (no built-in priorities)
+- Minimal hardware overhead
+- Requires external arbitration
+
+**Use Cases:**
+- Maximum hardware efficiency
+- Complex designs with many primitives
+- When environment handles arbitration
+- High-performance applications
+
+**Generated Logic:** Simplest hardware, symmetric ready signals
+
+### Timing Mode Comparison
+
+Run all timing modes with:
+```bash
+./run_all_modes.sh
+```
+
+Individual timing modes:
+```bash
+./run_static.sh      # Conservative, predictable
+./run_dynamic.sh     # Balanced, fair
+./run_most_dynamic.sh # Minimal, efficient
+```
+
+**Complexity Comparison (for counter example):**
+- Static: 93 lines FIRRTL, 15 will-fire signals, 26 logic gates
+- Dynamic: 108 lines FIRRTL, 18 will-fire signals, 30 logic gates  
+- Most-Dynamic: 87 lines FIRRTL, 12 will-fire signals, 20 logic gates
+
+Counter-intuitively, most-dynamic produces the simplest hardware because it enforces the fewest scheduling constraints.
+
+## Module Nesting and Hierarchical Design
+
+Sharp supports hierarchical module composition where modules can instantiate other custom modules (not just primitives). This enables:
+
+### Nested Module Example
+
+```mlir
+// Inner module: SimpleAdder
+txn.module @SimpleAdder {
+  %result = txn.instance @result of @Register<i32> : !txn.module<"Register">
+  
+  txn.action_method @add(%a: i32, %b: i32) { ... }
+  txn.value_method @getResult() -> i32 { ... }
+  txn.action_method @reset() { ... }
+  
+  txn.schedule [@add, @reset] { ... }
+}
+
+// Outer module: DualProcessor  
+txn.module @DualProcessor {
+  %adder1 = txn.instance @adder1 of @SimpleAdder : !txn.module<"SimpleAdder">
+  %adder2 = txn.instance @adder2 of @SimpleAdder : !txn.module<"SimpleAdder">
+  
+  txn.action_method @processA(%x: i32, %y: i32) {
+    txn.call @adder1::@add(%x, %y) : (i32, i32) -> ()
+    txn.yield
+  }
+  // ...
+}
+```
+
+### Timing Mode Impact on Nested Modules
+
+**Complexity comparison for nested modules:**
+- Static: 156 lines FIRRTL (most conservative)
+- Dynamic: 166 lines FIRRTL (balanced arbitration) 
+- Most-Dynamic: 144 lines FIRRTL (minimal constraints)
+
+The timing mode differences become more pronounced with nested hierarchies, as each module's scheduling decisions interact with the parent module's timing mode.
+
+### Design Benefits
+
+1. **Modularity**: Reusable components with encapsulated behavior
+2. **Scalability**: Complex systems built from simpler verified modules  
+3. **Timing Isolation**: Each module has independent scheduling constraints
+4. **Testing**: Individual modules can be verified separately
+
+### Current Limitations
+
+- Value method calls to child modules require careful handling
+- Action methods with return values from child modules need proper port mapping
+- Complex nested schedules may require timing mode tuning
+
 ## Key Takeaways
 
 - Translation preserves transaction semantics in RTL
 - Conflict matrices become hardware arbiters
 - Methods map to well-defined port interfaces
 - Primitives need backend implementations
-- Verification ensures correctness
+- Three timing modes offer different performance/complexity trade-offs
+- Choose timing mode based on your priority requirements
+- Verification ensures correctness across all modes
 
 ## Next Chapter
 

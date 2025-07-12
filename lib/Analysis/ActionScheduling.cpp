@@ -8,6 +8,7 @@
 
 #include "sharp/Analysis/ActionScheduling.h"
 #include "sharp/Analysis/Passes.h"
+#include "sharp/Analysis/AnalysisError.h"
 #include "sharp/Dialect/Txn/TxnOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Support/LogicalResult.h"
@@ -200,7 +201,12 @@ void ActionSchedulingPass::processModule(::sharp::txn::ModuleOp module) {
   }
   
   if (schedule.empty()) {
-    module.emitError("Failed to compute valid schedule - possible cyclic dependencies");
+    AnalysisError(module, "ActionScheduling")
+      .setCategory(ErrorCategory::SchedulingFailure)
+      .setDetails("Failed to compute a valid schedule for module '" + module.getName().str() + "'")
+      .setReason("The action dependency graph contains a cycle, which makes it impossible to create a linear schedule. This typically occurs when there are contradictory sequence constraints (e.g., A must come before B, and B must come before A)")
+      .setSolution("Please check the SA (Sequence After) and SB (Sequence Before) relationships in your conflict matrix and verify that partial order constraints in your txn.schedule operation do not create circular dependencies")
+      .emit();
     signalPassFailure();
     return;
   }

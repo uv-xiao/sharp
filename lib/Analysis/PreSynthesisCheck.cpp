@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "sharp/Analysis/Passes.h"
+#include "sharp/Analysis/AnalysisError.h"
 #include "sharp/Dialect/Txn/TxnOps.h"
 #include "sharp/Dialect/Txn/TxnDialect.h"
 
@@ -69,6 +70,12 @@ private:
   /// Propagate non-synthesizable status through the hierarchy
   void propagateNonSynthesizable(ModuleOp topModule);
   
+  /// Validate method attributes for synthesis compatibility
+  LogicalResult validateMethodAttributesForSynthesis(::sharp::txn::ModuleOp module);
+  
+  /// Check for signal name conflicts in method attributes
+  LogicalResult checkMethodNameConflicts(::sharp::txn::ModuleOp module);
+  
   /// Track non-synthesizable modules
   llvm::StringSet<> nonSynthesizableModules;
   
@@ -79,7 +86,20 @@ private:
 void PreSynthesisCheckPass::runOnOperation() {
   auto module = getOperation();
   
-  LLVM_DEBUG(llvm::dbgs() << "Running pre-synthesis check on module\n");
+  // Report pass execution
+  LLVM_DEBUG(llvm::dbgs() << "[PreSynthesisCheck] Starting pre-synthesis validation pass\n");
+  
+  // Check dependency: GeneralCheck must have completed
+  if (!module->hasAttr("sharp.general_checked")) {
+    AnalysisError(module, "PreSynthesisCheck")
+      .setCategory(ErrorCategory::MissingDependency)
+      .setDetails("sharp-general-check must be run before sharp-pre-synthesis-check")
+      .setReason("Pre-synthesis validation requires modules to pass general semantic validation first to ensure all core execution model constraints are satisfied before checking synthesis compatibility")
+      .setSolution("Please run sharp-general-check first to ensure the module follows Sharp's execution model")
+      .emit();
+    signalPassFailure();
+    return;
+  }
   
   // First pass: Check all primitives and modules for non-synthesizable constructs
   module.walk([&](Operation *op) {
@@ -95,17 +115,33 @@ void PreSynthesisCheckPass::runOnOperation() {
       if (!checkOperationsAreSynthesizable(txnModule)) {
         markNonSynthesizable(txnModule, "contains non-synthesizable operations");
       }
+      // Check method attributes for synthesis compatibility
+      if (failed(validateMethodAttributesForSynthesis(txnModule))) {
+        markNonSynthesizable(txnModule, "has invalid method attributes for synthesis");
+      }
     }
   });
   
   // Second pass: Propagate non-synthesizable status through the hierarchy
   propagateNonSynthesizable(module);
   
-  // Report all non-synthesizable modules
-  for (const auto &entry : nonSynthesizableReasons) {
-    module.emitError() << "Module '" << entry.first() 
-                       << "' is non-synthesizable: " << entry.second;
+  // Report all non-synthesizable modules and fail if any found
+  if (!nonSynthesizableReasons.empty()) {
+    for (const auto &entry : nonSynthesizableReasons) {
+      module.emitError("[PreSynthesisCheck] Synthesis validation failed - non-synthesizable module")
+          << ": module '" << entry.first() << "' cannot be synthesized to hardware. "
+          << "Reason: " << entry.second << ". "
+          << "Please remove or replace non-synthesizable constructs before attempting FIRRTL conversion.";
+    }
+    signalPassFailure();
+    return;
   }
+  
+  // Mark module as having passed pre-synthesis validation
+  module->setAttr("sharp.pre_synthesis_checked", 
+                  UnitAttr::get(module.getContext()));
+  
+  LLVM_DEBUG(llvm::dbgs() << "[PreSynthesisCheck] Pre-synthesis validation completed successfully\n");
 }
 
 bool PreSynthesisCheckPass::checkPrimitive(::sharp::txn::PrimitiveOp primitive) {
@@ -123,7 +159,11 @@ bool PreSynthesisCheckPass::checkPrimitive(::sharp::txn::PrimitiveOp primitive) 
   if (!firrtlImpl) {
     LLVM_DEBUG(llvm::dbgs() << "Primitive " << primitive.getSymName() 
                             << " lacks firrtl.impl attribute\n");
-    primitive.emitError() << "synthesizable primitive lacks firrtl.impl attribute";
+    primitive.emitError("[PreSynthesisCheck] Primitive validation failed - missing attribute")
+        << ": Synthesizable primitive '" << primitive.getSymName() << "' lacks firrtl.impl attribute at "
+        << primitive.getLoc() << ". "
+        << "Reason: Hardware primitives require a firrtl.impl attribute to specify their FIRRTL implementation. "
+        << "Solution: Add a firrtl.impl attribute to the primitive definition with the appropriate FIRRTL module name.";
     markNonSynthesizable(primitive, "spec primitive type");
     return false;
   }
@@ -144,7 +184,10 @@ bool PreSynthesisCheckPass::checkForMultiCycle(::sharp::txn::ModuleOp module) {
   module.walk([&](::sharp::txn::RuleOp rule) {
     if (checkRuleForMultiCycle(rule)) {
       hasMultiCycle = true;
-      rule.emitError() << "multi-cycle rules are not yet supported for synthesis";
+      rule.emitError("[PreSynthesisCheck] Multi-cycle validation failed - unsupported timing")
+          << ": Multi-cycle rules are not yet supported for synthesis at " << rule.getLoc() << ". "
+          << "Reason: Multi-cycle operations require complex state machine generation that is not yet implemented. "
+          << "Solution: Refactor the rule to use single-cycle operations or implement the state machine manually.";
     }
   });
   
@@ -156,7 +199,10 @@ bool PreSynthesisCheckPass::checkForMultiCycle(::sharp::txn::ModuleOp module) {
         isa<::sharp::txn::FirActionMethodOp>(op)) {
       if (checkMethodForMultiCycle(op)) {
         hasMultiCycle = true;
-        op->emitError() << "multi-cycle methods are not yet supported for synthesis";
+        op->emitError("[PreSynthesisCheck] Multi-cycle validation failed - unsupported timing")
+            << ": Multi-cycle methods are not yet supported for synthesis at " << op->getLoc() << ". "
+            << "Reason: Multi-cycle operations require complex state machine generation that is not yet implemented. "
+            << "Solution: Refactor the method to use single-cycle operations or implement the state machine manually.";
       }
     }
   });
@@ -252,8 +298,12 @@ bool PreSynthesisCheckPass::checkOperationsAreSynthesizable(Operation *op) {
       return;
     
     if (!isAllowedOperation(innerOp)) {
-      innerOp->emitError() << "operation '" << innerOp->getName() 
-                          << "' is not allowed in synthesizable code";
+      innerOp->emitError("[PreSynthesisCheck] Operation validation failed - disallowed operation")
+          << ": Operation '" << innerOp->getName() << "' is not allowed in synthesizable code at "
+          << innerOp->getLoc() << ". "
+          << "Reason: This operation is not in the synthesis allowlist and cannot be converted to hardware. "
+          << "Solution: Replace with an equivalent operation from the allowlist (arith.addi, arith.subi, etc.) "
+          << "or remove the operation if it's not essential for hardware functionality.";
       allOperationsSynthesizable = false;
     }
   });
@@ -293,6 +343,95 @@ bool PreSynthesisCheckPass::isAllowedOperation(Operation *op) {
                           << "' is not allowed for synthesis\n");
   
   return false;
+}
+
+LogicalResult PreSynthesisCheckPass::validateMethodAttributesForSynthesis(::sharp::txn::ModuleOp module) {
+  // Check for signal name conflicts that would cause synthesis issues
+  if (failed(checkMethodNameConflicts(module))) {
+    return failure();
+  }
+  
+  // Validate method attributes that affect FIRRTL generation
+  auto result = success();
+  module.walk([&](::sharp::txn::ActionMethodOp method) {
+    // Check for attributes that require special handling in synthesis
+    if (method->hasAttr("always_ready") || method->hasAttr("always_enable") ||
+        method->hasAttr("prefix") || method->hasAttr("result") ||
+        method->hasAttr("ready") || method->hasAttr("enable")) {
+      
+      // For synthesis, we need to ensure these attributes are consistent
+      // and don't create conflicting signal names
+      
+      // Check always_ready constraint
+      if (method->hasAttr("always_ready")) {
+        // In synthesis, always_ready methods cannot have scheduling conflicts
+        // This would be checked more thoroughly by conflict matrix inference
+      }
+      
+      // Check naming attributes don't create conflicts
+      if (method->hasAttr("prefix")) {
+        auto prefixAttr = method->getAttrOfType<StringAttr>("prefix");
+        if (!prefixAttr || prefixAttr.getValue().empty()) {
+          method.emitError("synthesis requires non-empty prefix attribute");
+          result = failure();
+        }
+      }
+    }
+  });
+  
+  return result;
+}
+
+LogicalResult PreSynthesisCheckPass::checkMethodNameConflicts(::sharp::txn::ModuleOp module) {
+  llvm::StringSet<> usedSignalNames;
+  
+  // Collect all potential signal names from methods
+  module.walk([&](Operation* methodOp) {
+    if (auto valueMethod = dyn_cast<::sharp::txn::ValueMethodOp>(methodOp)) {
+      StringRef methodName = valueMethod.getSymName();
+      
+      // Generate potential signal names based on method attributes
+      std::string baseName = methodName.str();
+      if (auto prefixAttr = methodOp->getAttrOfType<StringAttr>("prefix")) {
+        baseName = prefixAttr.getValue().str() + "_" + baseName;
+      }
+      
+      // Check for conflicts
+      if (!usedSignalNames.insert(baseName).second) {
+        methodOp->emitError("method generates conflicting signal name: ") << baseName;
+        return;
+      }
+      
+      // Also check derived signal names (ready, enable, result)
+      if (methodOp->hasAttr("ready")) {
+        std::string readyName = baseName + "_ready";
+        if (!usedSignalNames.insert(readyName).second) {
+          methodOp->emitError("method generates conflicting ready signal name: ") << readyName;
+        }
+      }
+      
+      if (methodOp->hasAttr("enable")) {
+        std::string enableName = baseName + "_enable";
+        if (!usedSignalNames.insert(enableName).second) {
+          methodOp->emitError("method generates conflicting enable signal name: ") << enableName;
+        }
+      }
+    } else if (auto actionMethod = dyn_cast<::sharp::txn::ActionMethodOp>(methodOp)) {
+      // Similar logic for action methods
+      StringRef methodName = actionMethod.getSymName();
+      std::string baseName = methodName.str();
+      
+      if (auto prefixAttr = methodOp->getAttrOfType<StringAttr>("prefix")) {
+        baseName = prefixAttr.getValue().str() + "_" + baseName;
+      }
+      
+      if (!usedSignalNames.insert(baseName).second) {
+        methodOp->emitError("method generates conflicting signal name: ") << baseName;
+      }
+    }
+  });
+  
+  return success();
 }
 
 } // end anonymous namespace

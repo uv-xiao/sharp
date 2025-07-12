@@ -1,13 +1,15 @@
 add_mlir_dialect_library(SharpAnalysis
+  AnalysisError.cpp
+  GeneralCheck.cpp
   ConflictMatrixInference.cpp
   PreSynthesisCheck.cpp
   ReachabilityAnalysis.cpp
-  CombinationalLoopDetection.cpp
-  MethodAttributeValidation.cpp
+  # Individual passes now consolidated:
+  # MethodAttributeValidation.cpp - merged into PreSynthesisCheck
+  # ScheduleValidation.cpp - merged into GeneralCheck
+  # ValueMethodConflictCheck.cpp - merged into GeneralCheck
+  # ActionCallValidation.cpp - merged into GeneralCheck
   ActionScheduling.cpp
-  ScheduleValidation.cpp
-  ValueMethodConflictCheck.cpp
-  ActionCallValidation.cpp
   CollectPrimitiveActions.cpp
   InlineFunctions.cpp
   PrimitiveGen.cpp

@@ -88,6 +88,20 @@ private:
 
 void ReachabilityAnalysisPass::runOnOperation() {
   auto module = getOperation();
+  
+  // Report pass execution
+  LLVM_DEBUG(llvm::dbgs() << "[ReachabilityAnalysis] Starting reachability analysis pass\n");
+  
+  // Check dependency: PrimitiveGen must have completed
+  if (!module->hasAttr("sharp.primitive_gen_complete")) {
+    module.emitError("[ReachabilityAnalysis] Pass failed - missing dependency")
+        << ": sharp-primitive-gen must be run before sharp-reachability-analysis. "
+        << "Primitive definitions are needed to properly analyze method calls and their reachability. "
+        << "Please run sharp-primitive-gen first to ensure all referenced primitives are available.";
+    signalPassFailure();
+    return;
+  }
+  
   ReachabilityState state;
   
   // Process each txn module
@@ -110,6 +124,12 @@ void ReachabilityAnalysisPass::runOnOperation() {
       updateCallOp(call, condition, builder);
     }
   }
+  
+  // Mark module as having completed reachability analysis
+  module->setAttr("sharp.reachability_analyzed", 
+                  UnitAttr::get(module.getContext()));
+  
+  LLVM_DEBUG(llvm::dbgs() << "[ReachabilityAnalysis] Reachability analysis completed successfully\n");
   
   LLVM_DEBUG({
     llvm::dbgs() << "Reachability Analysis Results:\n";

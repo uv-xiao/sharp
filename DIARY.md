@@ -1,5 +1,57 @@
 # Sharp Development Diary
 
+## 2025-07-12 - Analysis Infrastructure Documentation Update
+
+**User Request:** Fix docs/analysis.md to reflect current status, using Gemini CLI for suggestions.
+
+**Claude Response:**
+- **Analyzed Current Implementation**: Used Gemini CLI to comprehensively analyze the Sharp analysis infrastructure
+- **Completely Rewrote docs/analysis.md**: Updated documentation to accurately reflect the current implementation:
+  - **Core Analysis Pipeline**: Documented the mandatory 5-pass pipeline with proper dependencies and state tracking
+  - **All Current Passes**: Covered PrimitiveGen, ConflictMatrixInference, ReachabilityAnalysis, GeneralCheck, PreSynthesisCheck
+  - **Utility Passes**: ActionScheduling, InlineFunctions, CollectPrimitiveActions
+  - **Infrastructure**: AnalysisError utility, dependency enforcement, state tracking attributes
+  - **Testing Framework**: Chapter 4 tutorial examples and validation scripts
+- **Key Documentation Improvements**:
+  - Clear dependency chain and pass ordering requirements
+  - AnalysisError utility with fluent API for structured error reporting
+  - Pass consolidation (GeneralCheck combines 3 passes, PreSynthesisCheck integrates method validation)
+  - Comprehensive examples and practical pipeline configurations
+  - Testing section with chapter4-analysis tutorial validation
+- **Current Status Reflected**: 
+  - All spec primitive generation working (SpecFIFO, SpecMemory with proper MLIR blocks)
+  - Robust error handling across all passes with consistent formatting
+  - Complete analysis pipeline validated through tutorial examples
+  - State tracking attributes for proper dependency resolution
+
+**Status**: Documentation now accurately reflects the sophisticated analysis infrastructure with structured error handling, dependency enforcement, and comprehensive validation capabilities.
+
+## 2025-07-11 - Combinational Loop Detection Removal
+
+**User Request:** Remove all combinational loop detection code from the project because it's "very weak and frustrating" and add it as a todo in STATUS.md.
+
+**Claude Response:**
+- **Removed Combinational Loop Detection Implementation**: 
+  - Deleted `/home/uvxiao/sharp/lib/Analysis/CombinationalLoopDetection.cpp`
+  - Deleted `/home/uvxiao/sharp/include/sharp/Analysis/CombinationalLoopDetection.h`
+  - Updated `/home/uvxiao/sharp/lib/Analysis/CMakeLists.txt` to remove file references
+  - Updated `/home/uvxiao/sharp/include/sharp/Analysis/Passes.td` to remove pass definition
+  - Updated `/home/uvxiao/sharp/include/sharp/Analysis/Passes.h` to remove function declaration
+- **Updated Documentation and Examples**:
+  - Cleaned up chapter4-analysis tutorial to remove loop detection examples and references
+  - Updated chapter3-primitives to remove combinational loop detection mention
+  - Removed loop detection explanations from complex_module.mlir examples
+  - Updated run.sh scripts to remove loop detection tests
+- **Added Future Work Item**: Added "Combinational Loop Detection: Robust cycle detection through combinational paths in Wire networks and value method dependencies" to STATUS.md under new "Future Work" section
+- **Verified System Integrity**: 
+  - Build completed successfully after all removals
+  - Updated analysis-integration.mlir test to fix expected conflict matrix values after architectural improvements
+  - Fixed test to remove invalid action-calling-action patterns (violates Sharp execution model)
+  - All analysis passes working correctly with updated test expectations
+  - Chapter 4 tutorial runs successfully demonstrating conflict inference and pre-synthesis checking
+
+**Status**: All combinational loop detection code successfully removed, documentation updated, and system verified to work correctly. Feature moved to future work as requested.
+
 ## 2025-07-10 - Conflict Matrix Inference Fixes and Primitive Method Semantics
 
 **User Request:** Fix conflict inference problem in Toggle example showing incorrect CF instead of C, and address three critical issues: Register read should be value method (not scheduled), Wire read should be action method (read SA write), and conflict override logic preserving user CF with UNK for unknown relations.

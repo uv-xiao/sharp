@@ -32,7 +32,6 @@ test/
 #### Analysis Tests
 - **analysis-integration.mlir**: Multiple analysis passes working together
 - **conflict-inference-advanced.mlir**: Transitive conflicts
-- **loop-detection.mlir**: Combinational loop detection
 - **pre-synthesis-check.mlir**: Non-synthesizable constructs
 
 #### Conversion Tests

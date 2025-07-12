@@ -97,6 +97,19 @@ private:
 void ConflictMatrixInferencePass::runOnOperation() {
   ModuleOp module = getOperation();
   
+  // Report pass execution
+  LLVM_DEBUG(llvm::dbgs() << "[ConflictMatrixInference] Starting conflict matrix inference pass\n");
+  
+  // Check dependency: PrimitiveGen must have completed
+  if (!module->hasAttr("sharp.primitive_gen_complete")) {
+    module.emitError("[ConflictMatrixInference] Pass failed - missing dependency")
+        << ": sharp-primitive-gen must be run before sharp-infer-conflict-matrix. "
+        << "Required primitives may not be generated, which could lead to incomplete conflict inference. "
+        << "Please run sharp-primitive-gen first to ensure all referenced primitives are available.";
+    signalPassFailure();
+    return;
+  }
+  
   // First process all primitives
   module.walk([&](::sharp::txn::PrimitiveOp primitive) {
     inferPrimitiveConflicts(primitive);
@@ -114,6 +127,12 @@ void ConflictMatrixInferencePass::runOnOperation() {
   for (auto txnModule : sortedModules) {
     inferModuleConflicts(txnModule);
   }
+  
+  // Mark module as having completed conflict matrix inference
+  module->setAttr("sharp.conflict_matrix_inferred", 
+                  UnitAttr::get(module.getContext()));
+  
+  LLVM_DEBUG(llvm::dbgs() << "[ConflictMatrixInference] Conflict matrix inference completed successfully\n");
 }
 
 void ConflictMatrixInferencePass::inferPrimitiveConflicts(::sharp::txn::PrimitiveOp primitive) {

@@ -515,6 +515,89 @@ When implementing new primitives:
 4. Follow the pattern in Register.cpp for hardware primitives
 5. Follow the pattern in Memory.cpp for spec primitives
 
+### Structured Error Reporting Standard
+
+**MANDATORY**: All Sharp passes must use the `AnalysisError` utility class for structured error reporting to ensure consistency and user experience.
+
+**Required Format:**
+```
+[PassName] Pass failed - issue category: detailed description with context. Reason: [clear explanation of why this is a problem]. Solution: [actionable advice on how to fix the issue].
+```
+
+**Implementation with AnalysisError Utility:**
+```cpp
+#include "sharp/Analysis/AnalysisError.h"
+
+// Recommended - Use AnalysisError utility class
+return AnalysisError(op, "PassName")
+    .setCategory(ErrorCategory::ValidationFailure)
+    .setDetails("detailed description with context")
+    .setReason("clear explanation of why this is a problem")
+    .setSolution("actionable advice on how to fix the issue")
+    .emit(), failure();
+
+// Alternative - Use custom category
+return AnalysisError(op, "PassName")
+    .setCategory("custom issue category")
+    .setDetails("specific problem description")
+    .setReason("why this is problematic") 
+    .setSolution("how to fix it")
+    .emit(), failure();
+
+// Bad - Manual error construction (deprecated)
+return op.emitError("[PassName] Pass failed - issue category: ...");
+```
+
+**AnalysisError Categories:**
+- `ErrorCategory::MissingDependency` - Pass dependency not satisfied
+- `ErrorCategory::ValidationFailure` - Semantic validation failed
+- `ErrorCategory::UnsupportedConstruct` - Non-synthesizable constructs
+- `ErrorCategory::SchedulingFailure` - Action scheduling failed
+- `ErrorCategory::InvalidContext` - Invalid operation context
+- `ErrorCategory::InconsistentState` - Inconsistent internal state
+- `ErrorCategory::Custom` - Custom category string
+
+**Examples from Refactored Passes:**
+```cpp
+// Dependency enforcement (GeneralCheck)
+AnalysisError(moduleOp, "GeneralCheck")
+  .setCategory(ErrorCategory::MissingDependency)
+  .setDetails("sharp-infer-conflict-matrix must be run before sharp-general-check")
+  .setReason("General validation requires complete conflict matrices to verify scheduling constraints")
+  .setSolution("Please run sharp-infer-conflict-matrix first to ensure all conflict relationships are properly inferred")
+  .emit();
+
+// Schedule completeness validation (GeneralCheck)
+AnalysisError(schedule, "GeneralCheck")
+  .setCategory(ErrorCategory::ValidationFailure)
+  .setDetails("schedule in module '" + txnModule.getName().str() + "' is missing " + std::to_string(missingActions.size()) + " action(s): [" + missingList + "]")
+  .setReason("Schedules must include ALL actions (rules and action methods) in the module. Incomplete schedules lead to unscheduled actions that cannot execute")
+  .setSolution("Please add the missing actions to the schedule, or use sharp-action-scheduling to automatically generate a complete schedule")
+  .emit();
+
+// Action scheduling failure (ActionScheduling)
+AnalysisError(module, "ActionScheduling")
+  .setCategory(ErrorCategory::SchedulingFailure)
+  .setDetails("Failed to compute a valid schedule for module '" + module.getName().str() + "'")
+  .setReason("The action dependency graph contains a cycle, which makes it impossible to create a linear schedule")
+  .setSolution("Please check the SA (Sequence After) and SB (Sequence Before) relationships in your conflict matrix and verify that partial order constraints do not create circular dependencies")
+  .emit();
+```
+
+**Pass Naming Convention:**
+- Use exact pass name in brackets: `[PrimitiveGen]`, `[ConflictMatrixInference]`, `[GeneralCheck]`, `[PreSynthesisCheck]`
+- For conversion passes: `[TxnToFIRRTL]`, `[TxnToFunc]`
+- For simulation passes: `[WorkspaceGeneration]`, `[SimulationAnalysis]`
+
+**Issue Categories:**
+- `missing dependency` - Pass ordering violations
+- `incomplete schedule` - Schedule completeness issues  
+- `invalid operation type` - Wrong operation in context
+- `conflict violation` - Conflict matrix violations
+- `non-synthesizable module` - Synthesis compatibility issues
+- `unknown symbol` - Symbol resolution failures
+- `invalid call target` - Method call constraint violations
+
 ### Common Pitfalls and Solutions
 1. **Operation Build Errors**: Always provide all optional attributes (use StringAttr(), ArrayAttr(), UnitAttr() for empty)
 2. **Primitive Instance Types**: Use parametric syntax `@instance of @Primitive<Type>`
@@ -522,6 +605,7 @@ When implementing new primitives:
 4. **FileCheck Tests**: Use `not` command for tests expecting failure, redirect stderr with `2>&1`
 5. **Optional Handling**: Use `.value_or()` or check `.has_value()` before `.value()`
 6. **Builder Context**: Always set insertion point when creating blocks
+7. **Error Reporting**: ALWAYS use structured error reporting format with pass name, issue category, reason, and solution
 
 ### Testing Best Practices
 - Run `pixi run test` frequently during development

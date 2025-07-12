@@ -13,6 +13,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 
 namespace mlir {
 namespace sharp {
@@ -43,35 +44,66 @@ namespace txn {
   auto sizeType = builder.getFunctionType({}, {builder.getI32Type()});
   auto peekType = builder.getFunctionType({}, {dataType});
   
-  // Create methods
-  builder.create<::sharp::txn::ActionMethodOp>(
+  // Create enqueue method with body
+  auto enqueueMethod = builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("enqueue"), TypeAttr::get(enqueueType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
+  Block *enqueueBody = &enqueueMethod.getBody().emplaceBlock();
+  enqueueBody->addArgument(dataType, loc);  // Add data argument
+  builder.setInsertionPointToEnd(enqueueBody);
+  builder.create<::sharp::txn::YieldOp>(loc);
   
-  builder.create<::sharp::txn::ActionMethodOp>(
+  // Create dequeue method with body
+  builder.setInsertionPointAfter(enqueueMethod);
+  auto dequeueMethod = builder.create<::sharp::txn::ActionMethodOp>(
       loc, builder.getStringAttr("dequeue"), TypeAttr::get(dequeueType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
       /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
-  
-  builder.create<::sharp::txn::ValueMethodOp>(
+  Block *dequeueBody = &dequeueMethod.getBody().emplaceBlock();
+  builder.setInsertionPointToEnd(dequeueBody);
+  auto dummyDeq = builder.create<arith::ConstantOp>(loc, dataType, builder.getIntegerAttr(dataType, 0));
+  builder.create<::sharp::txn::ReturnOp>(loc, dummyDeq.getResult());
+
+  // Create isEmpty method with body
+  builder.setInsertionPointAfter(dequeueMethod);
+  auto isEmptyMethod = builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("isEmpty"), TypeAttr::get(isEmptyType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr());
-  
-  builder.create<::sharp::txn::ValueMethodOp>(
+  Block *isEmptyBody = &isEmptyMethod.getBody().emplaceBlock();
+  builder.setInsertionPointToEnd(isEmptyBody);
+  auto dummyEmpty = builder.create<arith::ConstantOp>(loc, builder.getI1Type(), builder.getBoolAttr(false));
+  builder.create<::sharp::txn::ReturnOp>(loc, dummyEmpty.getResult());
+
+  // Create size method with body
+  builder.setInsertionPointAfter(isEmptyMethod);
+  auto sizeMethod = builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("size"), TypeAttr::get(sizeType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr());
-  
-  builder.create<::sharp::txn::ValueMethodOp>(
+  Block *sizeBody = &sizeMethod.getBody().emplaceBlock();
+  builder.setInsertionPointToEnd(sizeBody);
+  auto dummySize = builder.create<arith::ConstantOp>(loc, builder.getI32Type(), builder.getI32IntegerAttr(0));
+  builder.create<::sharp::txn::ReturnOp>(loc, dummySize.getResult());
+
+  // Create peek method with body
+  builder.setInsertionPointAfter(sizeMethod);
+  auto peekMethod = builder.create<::sharp::txn::ValueMethodOp>(
       loc, builder.getStringAttr("peek"), TypeAttr::get(peekType),
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr());
+  Block *peekBody = &peekMethod.getBody().emplaceBlock();
+  builder.setInsertionPointToEnd(peekBody);
+  auto dummyPeek = builder.create<arith::ConstantOp>(loc, dataType, builder.getIntegerAttr(dataType, 0));
+  builder.create<::sharp::txn::ReturnOp>(loc, dummyPeek.getResult());
+  
+  // Reset insertion point to primitive body for schedule
+  builder.setInsertionPointToEnd(body);
   
   // Create schedule with conflict matrix
   auto conflictMatrix = builder.getDictionaryAttr({

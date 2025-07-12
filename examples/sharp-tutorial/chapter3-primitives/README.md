@@ -1,4 +1,4 @@
-# Chapter 3: Hardware Primitives
+# Chapter 3: Hardware Primitives (Unchecked yet)
 
 ## Overview
 
@@ -280,6 +280,5 @@ txn.primitive @CustomPrimitive<T> type = "hw" {
 
 Chapter 4 will explore Sharp's analysis passes:
 - Conflict matrix inference
-- Combinational loop detection
 - Pre-synthesis checking
 - Performance analysis

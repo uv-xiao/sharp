@@ -15,7 +15,6 @@ Sharp is a transaction-based hardware description language with MLIR-based imple
 - Conflict matrix inference
 - Pre-synthesis validation
 - Reachability analysis  
-- Combinational loop detection
 - Schedule validation
 
 ### Code Generation
@@ -130,8 +129,10 @@ Sharp is a transaction-based hardware description language with MLIR-based imple
    - Integrate launch until/after conditions
 4. **Complete DAM implementation** with proper time synchronization (`lib/Simulation/Concurrent/`)
 
+## Future Work
 
-
+### Analysis and Validation
+- **Combinational Loop Detection**: Robust cycle detection through combinational paths in Wire networks and value method dependencies
 
 ### Secondary Issues (Medium Priority)
 

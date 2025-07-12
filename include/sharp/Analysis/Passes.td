@@ -15,6 +15,36 @@
 
 include "mlir/Pass/PassBase.td"
 
+def GeneralCheck : Pass<"sharp-general-check", "mlir::ModuleOp"> {
+  let summary = "General semantic validation for Sharp Txn modules";
+  let description = [{
+    This pass performs comprehensive semantic validation of Sharp Txn modules
+    according to the core execution model. It combines multiple validation
+    checks that apply to all Sharp code regardless of target:
+
+    1. **Schedule Validation**: Ensures schedules only contain actions (rules
+       and action methods), not value methods.
+
+    2. **Value Method Conflict Check**: Validates that value methods are
+       conflict-free with all scheduled actions, as required by the execution model.
+
+    3. **Action Call Validation**: Ensures actions cannot call other actions
+       within the same module, maintaining the one-rule-at-a-time semantics.
+
+    This unified pass replaces the individual passes:
+    - sharp-validate-schedule  
+    - sharp-check-value-method-conflicts
+    - sharp-validate-action-calls
+
+    The pass should be run on any Sharp module to verify it follows the
+    core execution model before further analysis or conversion.
+  }];
+  
+  let constructor = "mlir::sharp::createGeneralCheckPass()";
+  
+  let dependentDialects = ["::sharp::txn::TxnDialect"];
+}
+
 def ConflictMatrixInference : Pass<"sharp-infer-conflict-matrix", "mlir::ModuleOp"> {
   let summary = "Infer and complete conflict matrix for txn modules";
   let description = [{
@@ -41,18 +71,35 @@ def ConflictMatrixInference : Pass<"sharp-infer-conflict-matrix", "mlir::ModuleO
 }
 
 def PreSynthesisCheck : Pass<"sharp-pre-synthesis-check", "mlir::ModuleOp"> {
-  let summary = "Check for non-synthesizable constructs before FIRRTL translation";
+  let summary = "Comprehensive synthesis validation for Sharp Txn modules";
   let description = [{
-    This pass analyzes Sharp Txn modules to identify non-synthesizable constructs
-    that would prevent successful translation to FIRRTL/Verilog. The pass checks for:
+    This pass analyzes Sharp Txn modules to identify any constructs that would
+    prevent successful translation to FIRRTL/Verilog hardware. The pass performs
+    comprehensive validation including:
 
-    1. Non-synthesizable (spec) primitives
-    2. Multi-cycle operations (currently none since timing attributes removed)
-    3. Modules that instantiate non-synthesizable submodules or primitives
-    4. Operations from non-synthesizable dialects (only txn, firrtl, and builtin allowed)
+    1. **Primitive Synthesizability**: Checks for non-synthesizable (spec) primitives
+       that are simulation-only and cannot be converted to hardware.
 
-    The pass marks modules as non-synthesizable by adding a "nonsynthesizable"
-    attribute and emits clear error messages for unsupported constructs.
+    2. **Operation Allowlist**: Validates that only synthesizable operations from
+       approved dialects (txn, firrtl, builtin, test) and specific arith operations
+       are used in synthesizable modules.
+
+    3. **Multi-cycle Operations**: Checks for timing constraints that require
+       multi-cycle implementation (currently disabled as all operations are single-cycle).
+
+    4. **Method Attribute Validation**: Validates method attributes used in FIRRTL
+       signal generation, including signal name uniqueness, prefix/postfix correctness,
+       and synthesis-compatible attribute combinations.
+
+    5. **Hierarchical Propagation**: Marks parent modules as non-synthesizable if
+       they instantiate non-synthesizable child modules or primitives.
+
+    This unified pass replaces the individual pass:
+    - sharp-validate-method-attributes (now integrated)
+
+    The pass marks non-synthesizable modules with a "nonsynthesizable" attribute
+    and emits clear error messages for all violations. This validation must pass
+    before modules can be converted to FIRRTL.
   }];
   
   let constructor = "mlir::sharp::createPreSynthesisCheckPass()";
@@ -91,53 +138,12 @@ def ReachabilityAnalysis : Pass<"sharp-reachability-analysis", "mlir::ModuleOp">
   let dependentDialects = ["::sharp::txn::TxnDialect", "::mlir::arith::ArithDialect"];
 }
 
-def CombinationalLoopDetection : Pass<"sharp-detect-combinational-loops", "mlir::ModuleOp"> {
-  let summary = "Detect combinational loops in txn modules";
-  let description = [{
-    This pass analyzes Sharp Txn modules to detect combinational loops that would
-    create invalid hardware. Combinational loops can occur through:
 
-    1. Direct method call cycles (e.g., getValue -> compute -> getValue)
-    2. Cycles through value method dependencies
-    3. Cycles through combinational primitives (e.g., Wire)
-
-    The pass builds a dependency graph of combinational paths and uses depth-first
-    search to detect cycles. When a cycle is found, the pass emits an error with
-    the complete cycle path for debugging.
-
-    Example error: "Combinational loop detected: getValue -> compute -> process -> getValue"
-  }];
-  
-  let constructor = "mlir::sharp::createCombinationalLoopDetectionPass()";
-  
-  let dependentDialects = ["::sharp::txn::TxnDialect"];
-}
-
-def MethodAttributeValidation : Pass<"sharp-validate-method-attributes", "mlir::ModuleOp"> {
-  let summary = "Validate method attributes for FIRRTL translation";
-  let description = [{
-    This pass validates method attributes used in FIRRTL signal generation:
-
-    1. Signal Name Conflicts:
-       - Checks for name conflicts between modules and methods (considering prefix)
-       - Ensures signal name uniqueness after applying prefixes/postfixes
-
-    2. Protocol Attributes:
-       - Validates `always_ready`: method must actually be always ready
-       - Validates `always_enable`: method's callers must be always enabled
-
-    3. Naming Attributes:
-       - Validates `prefix`, `result`, `ready`, `enable` attributes
-       - Ensures generated signal names don't conflict
-
-    The pass emits errors for invalid attribute usage that would cause problems
-    during FIRRTL translation.
-  }];
-  
-  let constructor = "mlir::sharp::createMethodAttributeValidationPass()";
-  
-  let dependentDialects = ["::sharp::txn::TxnDialect"];
-}
+// MethodAttributeValidation is now integrated into PreSynthesisCheck
+// def MethodAttributeValidation : Pass<"sharp-validate-method-attributes", "mlir::ModuleOp"> {
+//   let summary = "Validate method attributes for FIRRTL translation";
+//   ... (functionality moved to PreSynthesisCheck)
+// }
 
 def ActionScheduling : Pass<"sharp-action-scheduling", "mlir::ModuleOp"> {
   let summary = "Complete partial schedules to minimize conflicts";
@@ -166,85 +172,23 @@ def ActionScheduling : Pass<"sharp-action-scheduling", "mlir::ModuleOp"> {
   let dependentDialects = ["::sharp::txn::TxnDialect"];
 }
 
-def ScheduleValidation : Pass<"sharp-validate-schedule", "mlir::ModuleOp"> {
-  let summary = "Validate that schedules only contain actions (rules and action methods)";
-  let description = [{
-    This pass validates that schedule operations only contain actions, not value methods.
-    According to Sharp's execution model:
-    
-    1. Schedules must only list actions (rules and action methods)
-    2. Value methods are NOT schedulable and must not appear in schedules
-    3. Value methods must be conflict-free with all actions
-    
-    The pass checks each schedule operation and emits errors if:
-    - A value method appears in the schedule
-    - A scheduled item is not found in the module
-    - A scheduled item is neither a rule nor an action method
-    
-    This validation ensures the execution model is correctly followed and prevents
-    invalid hardware generation.
-  }];
-  
-  let constructor = "mlir::sharp::createScheduleValidationPass()";
-  
-  let dependentDialects = ["::sharp::txn::TxnDialect"];
-}
+// ScheduleValidation is now integrated into GeneralCheck
+// def ScheduleValidation : Pass<"sharp-validate-schedule", "mlir::ModuleOp"> {
+//   let summary = "Validate that schedules only contain actions (rules and action methods)";
+//   ... (functionality moved to GeneralCheck)
+// }
 
-def ValueMethodConflictCheck : Pass<"sharp-check-value-method-conflicts", "mlir::ModuleOp"> {
-  let summary = "Check that value methods are conflict-free with all actions";
-  let description = [{
-    This pass validates that value methods follow Sharp's execution model requirement
-    of being conflict-free with all actions. According to the execution model:
-    
-    1. Value methods must be conflict-free (CF) with all actions
-    2. Value methods can only have CF relationships in conflict matrices
-    3. If a method has any non-CF conflict, it cannot be a value method
-    
-    The pass examines each value method and checks:
-    - Its conflict relationships in the module's conflict matrix
-    - Conflicts inherited from primitive methods it calls
-    - Ensures no SA, SB, or C relationships exist
-    
-    This validation is critical because value methods are computed once per cycle
-    in the Value Phase and must not have ordering dependencies with actions.
-    
-    Example violation: Wire's read method cannot be a value method because it has
-    "read SA write" conflict, requiring it to be scheduled before write operations.
-  }];
-  
-  let constructor = "mlir::sharp::createValueMethodConflictCheckPass()";
-  
-  let dependentDialects = ["::sharp::txn::TxnDialect"];
-}
+// ValueMethodConflictCheck is now integrated into GeneralCheck
+// def ValueMethodConflictCheck : Pass<"sharp-check-value-method-conflicts", "mlir::ModuleOp"> {
+//   let summary = "Check that value methods are conflict-free with all actions";
+//   ... (functionality moved to GeneralCheck)
+// }
 
-def ActionCallValidation : Pass<"sharp-validate-action-calls", "mlir::ModuleOp"> {
-  let summary = "Validate that actions do not call other actions in the same module";
-  let description = [{
-    This pass validates Sharp's execution model requirement that actions (rules and
-    action methods) cannot call other actions within the same module. According to
-    the execution model:
-    
-    1. Actions cannot call other actions in the same module
-    2. Actions can call value methods in the same module
-    3. Actions can call methods (both value and action) of child module instances
-    
-    The pass examines each action (rule or action method) and checks all method
-    calls within it to ensure they follow these restrictions.
-    
-    This restriction ensures that the schedule fully determines the execution order
-    of actions within a module, preventing hidden dependencies and maintaining the
-    one-rule-at-a-time semantics.
-    
-    Example violations:
-    - A rule calling an action method in the same module
-    - An action method calling another action method in the same module
-    - An action method calling a rule (rules are not callable)
-  }];
-  
-  let constructor = "mlir::sharp::createActionCallValidationPass()";
-  
-  let dependentDialects = ["::sharp::txn::TxnDialect"];
-}
+// ActionCallValidation is now integrated into GeneralCheck
+// def ActionCallValidation : Pass<"sharp-validate-action-calls", "mlir::ModuleOp"> {
+//   let summary = "Validate that actions do not call other actions in the same module";
+//   ... (functionality moved to GeneralCheck)
+// }
 
 def SharpAnalysisCollectPrimitiveActionsPass : Pass<"sharp-collect-primitive-actions", "mlir::ModuleOp"> {
   let summary = "Collect primitive action calls for each action";

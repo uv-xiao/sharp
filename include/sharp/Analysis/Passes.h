@@ -21,32 +21,26 @@ class ModuleOp;
 
 namespace sharp {
 
+/// Create a unified pass for general semantic validation of Sharp Txn modules.
+std::unique_ptr<mlir::Pass> createGeneralCheckPass();
+
 /// Create a pass to infer and complete conflict matrices for txn modules.
 std::unique_ptr<mlir::Pass> createConflictMatrixInferencePass();
 
-/// Create a pass to check for non-synthesizable constructs.
+/// Create a comprehensive pass to check for non-synthesizable constructs and method attributes.
 std::unique_ptr<mlir::Pass> createPreSynthesisCheckPass();
 
 /// Create a pass to compute reachability conditions for method calls.
 std::unique_ptr<mlir::Pass> createReachabilityAnalysisPass();
 
-/// Create a pass to detect combinational loops in txn modules.
-std::unique_ptr<mlir::Pass> createCombinationalLoopDetectionPass();
-
-/// Create a pass to validate method attributes for FIRRTL translation.
-std::unique_ptr<mlir::Pass> createMethodAttributeValidationPass();
-
 /// Create a pass to complete partial schedules to minimize conflicts.
 std::unique_ptr<mlir::Pass> createActionSchedulingPass();
 
-/// Create a pass to validate that schedules only contain actions.
-std::unique_ptr<mlir::Pass> createScheduleValidationPass();
-
-/// Create a pass to check that value methods are conflict-free with all actions.
-std::unique_ptr<mlir::Pass> createValueMethodConflictCheckPass();
-
-/// Create a pass to validate that actions do not call other actions in the same module.
-std::unique_ptr<mlir::Pass> createActionCallValidationPass();
+// Consolidated passes - individual functions removed:
+// createMethodAttributeValidationPass() - functionality moved to PreSynthesisCheck
+// createScheduleValidationPass() - functionality moved to GeneralCheck
+// createValueMethodConflictCheckPass() - functionality moved to GeneralCheck
+// createActionCallValidationPass() - functionality moved to GeneralCheck
 
 /// Create a pass to collect primitive action calls for each action.
 std::unique_ptr<mlir::Pass> createCollectPrimitiveActionsPass();
