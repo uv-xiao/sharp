@@ -2,4 +2,4 @@ run:
 	./run.sh
 
 clean:
-	rm -f *.v *.fir *.log
+	rm -f *.v *.fir *.log *._mlir

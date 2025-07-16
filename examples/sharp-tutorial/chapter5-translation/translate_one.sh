@@ -63,11 +63,11 @@ translate_one() {
     # Step 2: Lower Txn operation bodies to FIRRTL operations
     echo "  Step 2: Lower Txn operation bodies to FIRRTL operations"
     local debug_file="${base_name}_firrtl.log"
-    local intermediate_file="${base_name}_firrtl_op.mlir"
+    local firrtl_op_file="${base_name}_firrtl_op.mlir"
 
     $SHARP_OPT "${analysis_file}" \
         --lower-op-to-firrtl \
-        > "${intermediate_file}" 2>"${debug_file}"
+        > "${firrtl_op_file}" 2>"${debug_file}"
     
     if [ $? -ne 0 ]; then
         echo "     ❌ Step 2 failed - operation body conversion failed"
@@ -75,134 +75,81 @@ translate_one() {
         return 1
     else
         echo "     ✅ Step 2 completed - operation bodies converted to FIRRTL"
+        # Print Step 1 results
+        echo "     📄 Intermediate IR (after LowerOpToFIRRTLPass, in ${firrtl_op_file}):"
+        echo "     ╭─────────────────────────────────────────────────────────────────────────────────"
+        if [ -f "${firrtl_op_file}" ] && [ -s "${firrtl_op_file}" ]; then
+            head -20 "${firrtl_op_file}" | sed 's/^/     │ /'
+            if [ $(wc -l < "${firrtl_op_file}") -gt 20 ]; then
+                echo "     │ ... ($(wc -l < "${firrtl_op_file}") total lines)"
+            fi
+        else
+            echo "     │ (empty or not generated)"
+        fi
+        echo "     ╰─────────────────────────────────────────────────────────────────────────────────"
+        echo ""
     fi
 
-    if [ "${until}" == "firrtl_op" ]; then
+    if [ "${until}" == "firrtl-op" ]; then
         return 0
     fi
 
-    # 1. Translate to FIRRTL (with debug output and two-pass conversion)
-    echo "   - Generating FIRRTL..."
-    local debug_file="${base_name}_${mode}_debug.log"
-    local intermediate_file="${base_name}_${mode}_intermediate.mlir"
+    # Step 3: Translate to FIRRTL (with debug output and two-pass conversion)
+    echo "  Step 3: Translate to FIRRTL"
+    local debug_file="${base_name}_${mode}.log"
+    local firrtl_file="${base_name}_${mode}.firrtl"
     
-    # Enable conflict debugging and run with analysis passes
-    export SHARP_DEBUG_CONFLICTS=1
-    
-    # Step 1: Lower Txn operation bodies to FIRRTL operations
-    echo "     Step 1: Converting operation bodies to FIRRTL..."
-    $SHARP_OPT "${mlir_file}" \
-        --sharp-primitive-gen \
-        --sharp-infer-conflict-matrix \
-        --sharp-reachability-analysis \
-        --sharp-general-check \
-        --sharp-pre-synthesis-check \
-        --lower-op-to-firrtl \
-        > "${intermediate_file}" 2>"${debug_file}"
-    
+    $SHARP_OPT "${firrtl_op_file}" \
+        --translate-txn-to-firrtl=will-fire-mode="${mode}" \
+        > "${firrtl_file}" 2>"${debug_file}"
+
     if [ $? -ne 0 ]; then
-        echo "     ❌ Step 1 failed - operation body conversion failed"
+        echo "     ❌ Step 3 failed - FIRRTL generation failed"
         unset SHARP_DEBUG_CONFLICTS
         return 1
-    fi
-    
-    # Print Step 1 results
-    echo "     ✅ Step 1 completed - operation bodies converted to FIRRTL"
-    echo "     📄 Intermediate IR (after Step 1, in ${intermediate_file}):"
-    echo "     ╭─────────────────────────────────────────────────────────────────────────────────"
-    if [ -f "${intermediate_file}" ] && [ -s "${intermediate_file}" ]; then
-        head -20 "${intermediate_file}" | sed 's/^/     │ /'
-        if [ $(wc -l < "${intermediate_file}") -gt 20 ]; then
-            echo "     │ ... ($(wc -l < "${intermediate_file}") total lines)"
-        fi
     else
-        echo "     │ (empty or not generated)"
-    fi
-    echo "     ╰─────────────────────────────────────────────────────────────────────────────────"
-    echo ""
-    
-    # Step 2: Translate Txn structure to FIRRTL modules with will-fire logic
-    echo "     Step 2: Translating Txn structure to FIRRTL modules..."
-    $SHARP_OPT "${intermediate_file}" \
-        --translate-txn-to-firrtl=will-fire-mode="${mode}" \
-        > "${fir_file}" 2>>"${debug_file}"
-    
-    unset SHARP_DEBUG_CONFLICTS
-    
-    # Print Step 2 results
-    if [ $? -eq 0 ]; then
-        echo "     ✅ Step 2 completed - Txn structure translated to FIRRTL"
-        echo "     📄 Final FIRRTL IR (after Step 2):"
+        echo "     ✅ Step 3 completed - FIRRTL generation successful"
+        # Print Step 3 results
+        echo "     📄 Final FIRRTL IR (after Step 3):"
         echo "     ╭─────────────────────────────────────────────────────────────────────────────────"
-        if [ -f "${fir_file}" ] && [ -s "${fir_file}" ]; then
-            head -20 "${fir_file}" | sed 's/^/     │ /'
-            if [ $(wc -l < "${fir_file}") -gt 20 ]; then
-                echo "     │ ... ($(wc -l < "${fir_file}") total lines)"
+        if [ -f "${firrtl_file}" ] && [ -s "${firrtl_file}" ]; then
+            head -20 "${firrtl_file}" | sed 's/^/     │ /'
+            if [ $(wc -l < "${firrtl_file}") -gt 20 ]; then
+                echo "     │ ... ($(wc -l < "${firrtl_file}") total lines)"
             fi
         else
             echo "     │ (empty or not generated)"
         fi
         echo "     ╰─────────────────────────────────────────────────────────────────────────────────"
-    else
-        echo "     ❌ Step 2 failed - Txn structure translation failed"
-        echo "     📄 Step 2 failed, but Step 1 intermediate results:"
-        echo "     ╭─────────────────────────────────────────────────────────────────────────────────"
-        if [ -f "${intermediate_file}" ] && [ -s "${intermediate_file}" ]; then
-            head -20 "${intermediate_file}" | sed 's/^/     │ /'
-            if [ $(wc -l < "${intermediate_file}") -gt 20 ]; then
-                echo "     │ ... ($(wc -l < "${intermediate_file}") total lines)"
-            fi
-        else
-            echo "     │ (empty or not generated)"
-        fi
-        echo "     ╰─────────────────────────────────────────────────────────────────────────────────"
-        # Don't clean up intermediate file if Step 2 failed
-        return 1
-    fi
-    
-    # Clean up intermediate file only if both steps succeeded
-    if [ $? -eq 0 ]; then
-        echo "     ✅ FIRRTL generation successful ($(wc -l < "${fir_file}") lines)"
-        # Analyze debug output for conflict resolution information
-        if [ -f "${debug_file}" ] && [ -s "${debug_file}" ]; then
-            conflict_debugs=$(grep -c "TxnToFIRRTL Debug" "${debug_file}" 2>/dev/null || echo "0")
-            will_fire_decisions=$(grep -c "Will-Fire Generation" "${debug_file}" 2>/dev/null || echo "0")
-            conflict_checks=$(grep -c "Conflict Detection" "${debug_file}" 2>/dev/null || echo "0")
-            abort_conditions=$(grep -c "Abort Condition" "${debug_file}" 2>/dev/null || echo "0")
-            echo "     📊 Debug info: ${will_fire_decisions} will-fire decisions, ${conflict_checks} conflict checks, ${abort_conditions} abort conditions"
-        fi
-    else
-        echo "     ❌ FIRRTL generation failed"
-        echo "     📁 Error details are in ${debug_file}"
-        if [ -f "${debug_file}" ] && [ -s "${debug_file}" ]; then
-            echo "     First few error lines:"
-            head -5 "${debug_file}" | sed 's/^/       /'
-            echo "     ..."
-            echo "     📖 For complete error analysis, check: ${debug_file}"
-        fi
-        return 1
+        echo ""
     fi
 
-    # 2. Translate to Verilog
-    echo "   - Generating Verilog..."
-    
+    if [ "${until}" == "firrtl" ]; then
+        return 0
+    fi
+
+    # Step 4: Translate to Verilog
+    echo "  Step 4: Translate to Verilog"
+    local verilog_log="${base_name}_${mode}_verilog.log"
+    local v_file="${base_name}_${mode}.v"
+
     # Use timeout with proper signal handling
-    if timeout --signal=KILL 30 $FIRTOOL "${fir_file}" --format=mlir --verilog -o "${v_file}" 2>"${log_file}"; then
+    if timeout --signal=KILL 30 $FIRTOOL "${firrtl_file}" --format=mlir --verilog -o "${v_file}" 2>"${verilog_log}"; then
         if [ -f "${v_file}" ] && [ -s "${v_file}" ]; then
             echo "     ✅ Verilog generation successful ($(wc -l < "${v_file}") lines)"
-            echo "     📁 Output: ${fir_file}, ${v_file}"
+            echo "     📁 Output: ${firrtl_file}, ${v_file}"
             
             # Show module interface for verification
             echo "     Module interface:"
             grep -E "(module|input|output)" "${v_file}" | head -5 | sed 's/^/       /'
-            rm "${log_file}" 2>/dev/null || true
+            rm "${verilog_log}" 2>/dev/null || true
         else
             echo "     ❌ Verilog generation failed (empty output)"
-            echo "     📁 Output: ${fir_file} (FIRRTL only)"
-            if [ -f "${log_file}" ]; then
-                error_count=$(grep -c "error:" "${log_file}" 2>/dev/null || echo "0")
+            echo "     📁 Output: ${firrtl_file} (FIRRTL only)"
+            if [ -f "${verilog_log}" ]; then
+                error_count=$(grep -c "error:" "${verilog_log}" 2>/dev/null || echo "0")
                 echo "     Found ${error_count} synthesis errors"
-                rm "${log_file}"
+                rm "${verilog_log}"
             fi
         fi
     else
@@ -212,15 +159,15 @@ translate_one() {
         else
             echo "     ❌ Verilog generation failed"
         fi
-        echo "     📁 Output: ${fir_file} (FIRRTL only)"
+        echo "     📁 Output: ${firrtl_file} (FIRRTL only)"
         
         # Show error details
-        if [ -f "${log_file}" ] && [ -s "${log_file}" ]; then
-            error_count=$(grep -c "error:" "${log_file}" 2>/dev/null || echo "0")
+        if [ -f "${verilog_log}" ] && [ -s "${verilog_log}" ]; then
+            error_count=$(grep -c "error:" "${verilog_log}" 2>/dev/null || echo "0")
             echo "     Found ${error_count} synthesis errors in firtool"
             echo "     First few errors:"
-            head -3 "${log_file}" | sed 's/^/       /'
-            rm "${log_file}"
+            head -3 "${verilog_log}" | sed 's/^/       /'
+            rm "${verilog_log}"
         fi
     fi
     echo ""
