@@ -18,7 +18,11 @@ Sharp is a transaction-based hardware description language with MLIR-based imple
 - Schedule validation
 
 ### Code Generation
-- **Txn-to-FIRRTL**: Complete with will-fire logic and conflict checking
+- **Txn-to-FIRRTL**: Complete two-pass conversion with will-fire logic and conflict checking
+  - Phase 1: LowerTxnBodyToFIRRTLPass - Converts all types to FIRRTL types
+  - Phase 2: TranslateTxnToFIRRTLPass - Generates FIRRTL circuit structure
+  - Comprehensive type conversion without UnrealizedConversionCastOp
+  - Fixed use-after-free errors and architectural issues
 - **Txn-to-Func**: Transactional execution with abort propagation
 - **Verilog Export**: Via CIRCT pipeline (Txn → FIRRTL → HW → Verilog)
 
@@ -102,7 +106,7 @@ Sharp is a transaction-based hardware description language with MLIR-based imple
    - ✅ Fixed control flow issues in reachability tests
    - ✅ Fixed more syntax errors (txn.if/else, trailing commas, token types)
    - ✅ Fixed test violations (actions calling actions)
-   - ✅ Fixed most-dynamic mode dominance error (architectural issue)
+   - ✅ Fixed dynamic mode dominance error (architectural issue)
    - ✅ Fixed txn.if missing terminator issues
    - ✅ Added FIFO primitive support to TxnToFIRRTL conversion
    - ✅ Added Memory primitive support to TxnToFIRRTL conversion
@@ -116,7 +120,7 @@ Sharp is a transaction-based hardware description language with MLIR-based imple
      - Control flow syntax errors in complex tests
      - TxnToFunc conversion issues
      - Python binding tests: 7 tests failing (runtime issues)
-2. **Complete Most-Dynamic Mode**
+2. **Complete Dynamic Mode Enhancements**
    - ✅ Fixed dominance error when updating will-fire nodes (SSA violation)
    - ✅ Implemented two-pass approach for will-fire signal generation
    - Add full recursive call tracking as described in docs

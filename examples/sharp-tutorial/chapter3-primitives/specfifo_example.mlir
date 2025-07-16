@@ -1,5 +1,5 @@
 // Example demonstrating SpecFIFO for verification
-txn.module @NetworkInterface {
+txn.module @NetworkInterface attributes {top} {
   // Unbounded packet queue for specification
   %rx_queue = txn.instance @rx_queue of @SpecFIFO<i64> : !txn.module<"SpecFIFO">
   %tx_queue = txn.instance @tx_queue of @SpecFIFO<i64> : !txn.module<"SpecFIFO">

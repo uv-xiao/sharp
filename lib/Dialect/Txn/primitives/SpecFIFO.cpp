@@ -20,17 +20,21 @@ namespace sharp {
 namespace txn {
 
 ::sharp::txn::PrimitiveOp createSpecFIFOPrimitive(OpBuilder &builder, Location loc,
-                                                  StringRef name, Type dataType) {
+                                                  StringRef name, Type dataType,
+                                                  ArrayAttr typeArgs) {
+  // Generate the full name for the interface type
+  std::string fullName = ::sharp::txn::module_name_with_type_args(name, typeArgs);
+  
   // Create interface type for the primitive
   auto moduleType = ::sharp::txn::ModuleType::get(builder.getContext(), 
-                                                  StringAttr::get(builder.getContext(), name));
+                                                  StringAttr::get(builder.getContext(), fullName));
   
   // Create the primitive operation
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
                                                             StringAttr::get(builder.getContext(), name),
                                                             builder.getStringAttr("spec"), 
                                                             TypeAttr::get(moduleType),
-                                                            /*type_parameters=*/ArrayAttr());
+                                                            /*type_parameters=*/typeArgs);
   
   // Create a new builder for the primitive body
   OpBuilder::InsertionGuard guard(builder);
@@ -50,7 +54,7 @@ namespace txn {
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
-      /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
+      /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr(), /*guardCount=*/0);
   Block *enqueueBody = &enqueueMethod.getBody().emplaceBlock();
   enqueueBody->addArgument(dataType, loc);  // Add data argument
   builder.setInsertionPointToEnd(enqueueBody);
@@ -63,7 +67,7 @@ namespace txn {
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
-      /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
+      /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr(), /*guardCount=*/0);
   Block *dequeueBody = &dequeueMethod.getBody().emplaceBlock();
   builder.setInsertionPointToEnd(dequeueBody);
   auto dummyDeq = builder.create<arith::ConstantOp>(loc, dataType, builder.getIntegerAttr(dataType, 0));

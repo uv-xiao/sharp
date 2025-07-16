@@ -69,7 +69,8 @@ struct GeneralCheck : public impl::GeneralCheckBase<GeneralCheck> {
     }
     
     // Run all general semantic validation checks
-    if (failed(validateScheduleConstraints(moduleOp)) ||
+    if (failed(validateTopModuleUniqueness(moduleOp)) ||
+        failed(validateScheduleConstraints(moduleOp)) ||
         failed(validateScheduleCompleteness(moduleOp)) ||
         failed(validateValueMethodConstraints(moduleOp)) ||
         failed(validateActionCallConstraints(moduleOp))) {
@@ -203,11 +204,12 @@ private:
           extraList += extraActions[i].str();
         }
         
-        return schedule.emitError("[GeneralCheck] Schedule completeness validation failed - invalid references")
+        schedule.emitError("[GeneralCheck] Schedule completeness validation failed - invalid references")
                << ": schedule in module '" << txnModule.getName() << "' references " 
                << extraActions.size() << " non-existent action(s): [" << extraList << "] at " << schedule.getLoc() << ". "
                << "Reason: Schedules can only reference actions that actually exist in the module. "
                << "Please remove the invalid references or define the missing actions.";
+        return failure();
       }
     }
     return success();
@@ -247,7 +249,7 @@ private:
               // 0=SB, 1=SA, 2=C, 3=CF - only CF (3) is allowed for value methods
               if (conflictValue != 3) { // Not CF
                 const char* conflictNames[] = {"SB", "SA", "C", "CF", "UNK"};
-                return valueMethod.emitError("[GeneralCheck] Value method constraint validation failed - conflict violation")
+                valueMethod.emitError("[GeneralCheck] Value method constraint validation failed - conflict violation")
                        << ": value method '" << methodName << "' in module '" << txnModule.getName()
                        << "' has " << (conflictValue < 5 ? conflictNames[conflictValue] : "unknown")
                        << " (" << conflictValue << ") conflict with action '" << actionName << "' at "
@@ -255,6 +257,7 @@ private:
                        << "Reason: Value methods must be conflict-free (CF) with all scheduled actions "
                        << "because they are computed automatically once per cycle. "
                        << "Please ensure the value method does not interfere with any scheduled actions.";
+                return failure();
               }
             }
             return success();
@@ -321,6 +324,47 @@ private:
         }
       }
     }
+    return success();
+  }
+
+  /// Validate that there is exactly one top module marked with 'top' attribute
+  LogicalResult validateTopModuleUniqueness(ModuleOp moduleOp) {
+    SmallVector<::sharp::txn::ModuleOp> topModules;
+    
+    // Find all modules marked as top
+    for (auto txnModule : moduleOp.getOps<::sharp::txn::ModuleOp>()) {
+      if (txnModule->hasAttr("top")) {
+        topModules.push_back(txnModule);
+      }
+    }
+    
+    // Must have exactly one top module
+    if (topModules.empty()) {
+      return AnalysisError(moduleOp, "GeneralCheck")
+             .setCategory(ErrorCategory::ValidationFailure)
+             .setDetails("no module is marked as 'top' module")
+             .setReason("Every Sharp program must have exactly one top-level module for FIRRTL circuit generation")
+             .setSolution("Please add {top} attribute to one of your txn.module declarations")
+             .emit(), failure();
+    }
+    
+    if (topModules.size() > 1) {
+      std::string moduleNames;
+      for (size_t i = 0; i < topModules.size(); ++i) {
+        if (i > 0) moduleNames += ", ";
+        moduleNames += topModules[i].getName().str();
+      }
+      
+      return AnalysisError(moduleOp, "GeneralCheck")
+             .setCategory(ErrorCategory::ValidationFailure)
+             .setDetails("multiple modules marked as 'top': " + moduleNames)
+             .setReason("Only one module can be the top-level module for FIRRTL circuit generation")
+             .setSolution("Please remove the 'top' attribute from all but one module")
+             .emit(), failure();
+    }
+    
+    LLVM_DEBUG(llvm::dbgs() << "[GeneralCheck] Top module validation passed: " 
+                           << topModules[0].getName() << "\n");
     return success();
   }
 };

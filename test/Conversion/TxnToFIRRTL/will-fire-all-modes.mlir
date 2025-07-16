@@ -1,6 +1,5 @@
 // RUN: sharp-opt %s --convert-txn-to-firrtl | FileCheck %s --check-prefix=DYNAMIC
 // RUN: sharp-opt %s --convert-txn-to-firrtl=mode=static | FileCheck %s --check-prefix=STATIC
-// RUN: sharp-opt %s --convert-txn-to-firrtl=mode=most-dynamic | FileCheck %s --check-prefix=MOST-DYNAMIC
 
 // Comprehensive test for will-fire generation in all modes
 
@@ -191,21 +190,3 @@ txn.module @WillFireModes {
 // STATIC: %writer1_no_conflict = firrtl.and
 // STATIC: %writer2_no_conflict = firrtl.and
 
-// MOST-DYNAMIC mode checks - maximum flexibility
-// MOST-DYNAMIC: firrtl.module @WillFireModes
-
-// Most dynamic mode includes all dynamic checks
-// MOST-DYNAMIC: %conditionalAbort_reach_abort = firrtl.or
-// MOST-DYNAMIC: %wireAbort_reach_abort = firrtl.or
-// MOST-DYNAMIC: %abortingRule_reach_abort = firrtl.or
-
-// Complex will-fire with all conditions
-// MOST-DYNAMIC: %conditionalAbort_will_fire = firrtl.and
-// MOST-DYNAMIC: %wireAbort_will_fire = firrtl.and
-// MOST-DYNAMIC: %guardedRule_will_fire = firrtl.and
-// MOST-DYNAMIC: %abortingRule_will_fire = firrtl.and
-
-// Most dynamic allows maximum parallelism
-// MOST-DYNAMIC: %writer1_will_fire = firrtl.and
-// MOST-DYNAMIC: %writer2_will_fire = firrtl.and
-// MOST-DYNAMIC: %independentRule_will_fire = firrtl.and

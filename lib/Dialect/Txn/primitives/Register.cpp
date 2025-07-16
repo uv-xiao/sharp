@@ -29,24 +29,24 @@ namespace sharp {
 namespace txn {
 
 ::sharp::txn::PrimitiveOp createRegisterPrimitive(OpBuilder &builder, Location loc,
-                                                 StringRef name, Type dataType) {
+                                                 StringRef name, Type dataType,
+                                                 ArrayAttr typeArgs) {
   llvm::dbgs() << "DEBUG: Creating Register primitive: " << name 
                << " with dataType: " << (dataType ? "valid" : "null") << "\n";
   
+  // Generate the full name for the interface type
+  std::string fullName = ::sharp::txn::module_name_with_type_args(name, typeArgs);
+  
   // Create interface type for the primitive
   auto moduleType = ::sharp::txn::ModuleType::get(builder.getContext(), 
-                                                  StringAttr::get(builder.getContext(), name));
+                                                  StringAttr::get(builder.getContext(), fullName));
   
-  // Create the primitive operation with dataType as type parameter
-  auto typeParams = builder.getArrayAttr({
-    TypeAttr::get(dataType)
-  });
-  
+  // Create the primitive operation with base name and type parameters
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
                                                             StringAttr::get(builder.getContext(), name),
                                                             builder.getStringAttr("hw"), 
                                                             TypeAttr::get(moduleType),
-                                                            /*type_parameters=*/typeParams);
+                                                            /*type_parameters=*/typeArgs);
   
   // Create a new builder for the primitive body
   OpBuilder::InsertionGuard guard(builder);
@@ -78,7 +78,7 @@ namespace txn {
   builder.create<::sharp::txn::ResetByOp>(loc, SymbolRefAttr::get(builder.getContext(), "rst"));
   
   // Add reference to the FIRRTL module implementation
-  primitive->setAttr("firrtl.impl", builder.getStringAttr(name.str() + "_impl"));
+  primitive->setAttr("firrtl.impl", builder.getStringAttr(fullName + "_impl"));
   
   // Create schedule with conflict matrix
   // For Register: only action methods (write) are scheduled

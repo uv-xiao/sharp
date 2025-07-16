@@ -1,5 +1,5 @@
 // Producer-Consumer pattern using FIFO
-txn.module @ProducerConsumer {
+txn.module @ProducerConsumer attributes {top} {
   // FIFO buffer between producer and consumer
   %buffer = txn.instance @buffer of @FIFO<i32> : !txn.module<"FIFO">
   

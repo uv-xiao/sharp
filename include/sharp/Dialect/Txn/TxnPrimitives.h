@@ -33,13 +33,15 @@ namespace txn {
 /// Create a Register primitive.
 /// The register holds a value of the given type and supports read/write operations.
 ::sharp::txn::PrimitiveOp createRegisterPrimitive(OpBuilder &builder, Location loc,
-                                                 StringRef name, Type dataType);
+                                                 StringRef name, Type dataType,
+                                                 ArrayAttr typeArgs = nullptr);
 
 /// Create a Wire primitive.  
 /// The wire provides a combinational connection with read/write operations.
 /// Read must sequence before (SB) write.
 ::sharp::txn::PrimitiveOp createWirePrimitive(OpBuilder &builder, Location loc,
-                                             StringRef name, Type dataType);
+                                             StringRef name, Type dataType,
+                                             ArrayAttr typeArgs = nullptr);
 
 /// Create a FIRRTL module implementation for Register primitive.
 /// This creates the actual hardware implementation with clock, reset, and data ports.
@@ -57,6 +59,7 @@ circt::firrtl::FModuleOp createWireFIRRTLModule(OpBuilder &builder, Location loc
 /// The FIFO provides first-in-first-out queue functionality with enqueue/dequeue operations.
 ::sharp::txn::PrimitiveOp createFIFOPrimitive(OpBuilder &builder, Location loc,
                                               StringRef name, Type dataType,
+                                              ArrayAttr typeArgs = nullptr,
                                               unsigned depth = 16);
 
 /// Create a FIRRTL module implementation for FIFO primitive.
@@ -71,6 +74,7 @@ circt::firrtl::FModuleOp createFIFOFIRRTLModule(OpBuilder &builder, Location loc
 /// This is a spec primitive for verification.
 ::sharp::txn::PrimitiveOp createMemoryPrimitive(OpBuilder &builder, Location loc,
                                                 StringRef name, Type dataType,
+                                                ArrayAttr typeArgs = nullptr,
                                                 unsigned addressWidth = 10);
 
 /// Create a FIRRTL module implementation for Memory primitive.
@@ -84,13 +88,15 @@ circt::firrtl::FModuleOp createMemoryFIRRTLModule(OpBuilder &builder, Location l
 /// SpecFIFO is an unbounded FIFO for specification and verification.
 /// It provides enqueue/dequeue/isEmpty/size/peek operations.
 ::sharp::txn::PrimitiveOp createSpecFIFOPrimitive(OpBuilder &builder, Location loc,
-                                                  StringRef name, Type dataType);
+                                                  StringRef name, Type dataType,
+                                                  ArrayAttr typeArgs = nullptr);
 
 /// Create a SpecMemory primitive.
 /// SpecMemory is a memory with configurable read latency for verification.
 /// It provides read/write/clear operations with latency configuration.
 ::sharp::txn::PrimitiveOp createSpecMemoryPrimitive(OpBuilder &builder, Location loc,
                                                     StringRef name, Type dataType,
+                                                    ArrayAttr typeArgs = nullptr,
                                                     unsigned addressWidth = 16,
                                                     unsigned defaultLatency = 1);
 

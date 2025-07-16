@@ -154,17 +154,17 @@ void PrimitiveGenPass::generatePrimitive(ModuleOp module, StringRef baseName, Ar
   
   if (baseName == "Register") {
     LLVM_DEBUG(llvm::dbgs() << "Creating Register primitive with type: " << (dataType ? "valid" : "null") << "\n");
-    txn::createRegisterPrimitive(builder, loc, fullName, dataType);
+    txn::createRegisterPrimitive(builder, loc, baseName, dataType, typeArgs);
   } else if (baseName == "Wire") {
-    txn::createWirePrimitive(builder, loc, fullName, dataType);
+    txn::createWirePrimitive(builder, loc, baseName, dataType, typeArgs);
   } else if (baseName == "FIFO") {
-    txn::createFIFOPrimitive(builder, loc, fullName, dataType);
+    txn::createFIFOPrimitive(builder, loc, baseName, dataType, typeArgs);
   } else if (baseName == "Memory") {
-    txn::createMemoryPrimitive(builder, loc, fullName, dataType);
+    txn::createMemoryPrimitive(builder, loc, baseName, dataType, typeArgs);
   } else if (baseName == "SpecFIFO") {
-    txn::createSpecFIFOPrimitive(builder, loc, fullName, dataType);
+    txn::createSpecFIFOPrimitive(builder, loc, baseName, dataType, typeArgs);
   } else if (baseName == "SpecMemory") {
-    txn::createSpecMemoryPrimitive(builder, loc, fullName, dataType);
+    txn::createSpecMemoryPrimitive(builder, loc, baseName, dataType, typeArgs);
   } else {
     LLVM_DEBUG(llvm::dbgs() << "Unknown primitive type: " << baseName << "\n");
   }

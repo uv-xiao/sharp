@@ -1,5 +1,7 @@
 add_mlir_library(SharpTxnToFIRRTL
   TxnToFIRRTLPass.cpp
+  LowerOpToFIRRTLPass.cpp
+  TranslateTxnToFIRRTLPass.cpp
 
   DEPENDS
   SharpConversionPassesIncGen
@@ -11,5 +13,6 @@ add_mlir_library(SharpTxnToFIRRTL
   MLIRArithDialect
   SharpTxn
   SharpTxnPrimitives
+  SharpAnalysis
   CIRCTFIRRTL
   )

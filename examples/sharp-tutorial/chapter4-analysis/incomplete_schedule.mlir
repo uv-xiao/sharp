@@ -1,5 +1,5 @@
 // Module with incomplete schedule for testing schedule completeness validation
-txn.module @IncompleteScheduleExample {
+txn.module @IncompleteScheduleExample attributes {top} {
   // State elements
   %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
   %flag = txn.instance @flag of @Register<i1> : !txn.module<"Register">

@@ -28,17 +28,21 @@ namespace txn {
 
 ::sharp::txn::PrimitiveOp createMemoryPrimitive(OpBuilder &builder, Location loc,
                                                 StringRef name, Type dataType,
+                                                ArrayAttr typeArgs,
                                                 unsigned addressWidth) {
+  // Generate the full name for the interface type
+  std::string fullName = ::sharp::txn::module_name_with_type_args(name, typeArgs);
+  
   // Create interface type for the primitive
   auto moduleType = ::sharp::txn::ModuleType::get(builder.getContext(), 
-                                                  StringAttr::get(builder.getContext(), name));
+                                                  StringAttr::get(builder.getContext(), fullName));
   
   // Create the primitive operation
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
                                                             StringAttr::get(builder.getContext(), name),
                                                             builder.getStringAttr("spec"), 
                                                             TypeAttr::get(moduleType),
-                                                            /*type_parameters=*/ArrayAttr());
+                                                            /*type_parameters=*/typeArgs);
   
   // Create a new builder for the primitive body
   OpBuilder::InsertionGuard guard(builder);
@@ -63,7 +67,7 @@ namespace txn {
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
-      /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
+      /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr(), /*guardCount=*/0);
   
   // Create clear method (action method)
   builder.create<::sharp::txn::ActionMethodOp>(
@@ -71,7 +75,7 @@ namespace txn {
       /*sym_visibility=*/StringAttr(), /*arg_attrs=*/ArrayAttr(), /*res_attrs=*/ArrayAttr(),
       /*ready=*/StringAttr(), /*enable=*/StringAttr(),
       /*result=*/StringAttr(), /*prefix=*/StringAttr(),
-      /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr());
+      /*always_ready=*/UnitAttr(), /*always_enable=*/UnitAttr(), /*guardCount=*/0);
   
   // Create schedule with conflict matrix
   auto conflictMatrix = builder.getDictionaryAttr({

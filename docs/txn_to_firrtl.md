@@ -41,7 +41,7 @@ reach_abort[actionk] = OR(reach(ai, actionk) && reach_abort(method[ai]) for ever
 wf[actionk] = enabled[actionk] && !reach_abort[actionk] && !conflicts_with_earlier[actionk] && !conflict_inside[actionk]
 ```
 
-**MISMATCH**: Implementation at lines 264-321 doesn't include `reach_abort` calculation as shown in this formula. The actual implementation only handles `enabled` and `conflicts_with_earlier`.
+**✅ IMPLEMENTED**: Lines 638-700 correctly implement reach_abort calculation and conflict_inside logic for static mode.
 
 **Conflict with earlier actions**:
 ```
@@ -71,7 +71,7 @@ wf[actionk] = enabled[actionk] && !reach_abort[actionk] &&
                  NOT(reach(ai, actionk) && conflict_with_earlier(method[ai]))}
 ```
 
-**MISMATCH**: Implementation doesn't include `reach_abort` calculation. Actual implementation at lines 335-429 only handles `enabled` and conflict checking.
+**✅ IMPLEMENTED**: Lines 702-751 correctly implement reach_abort calculation and method-level conflict tracking for dynamic mode.
 
 This mode generates more complex hardware but allows more concurrency by considering actual execution paths.
 
@@ -91,28 +91,6 @@ conflict_with_earlier(methodk) = OR(method_called[methodi] && conflict(methodi, 
 **Code Position**: Lines 386-417 (conflict checking per method call)
 
 **NOTE**: The `dynamic` mode uses the conflict matrix of the called modules to determine "Conflict with earlier actions", which unifies all the conflict scenarios for the current action ("inside an action" and "with earlier actions" in `static` mode). The conflict matrix of the current module is not used for the current module's will-fire logic.
-
-#### Most-Dynamic Mode
-
-**Code Position**: Lines 432-449 (`generateMostDynamicWillFire` function)
-
-Most-dynamic mode extends dynamic mode by tracking conflicts on recursively called methods (no matter called directly or indirectly):
-
-```
-wf[actionk] = enabled[actionk] && !reach_abort[actionk] && 
-             AND{for every direct/indirect action method call ai by actionk: 
-                 NOT(reach(ai, actionk) && conflict_with_earlier(method[ai]))}
-// since now actionk may call ai indirectly, the reach(ai, actionk) is computed by a recursive reachability analysis (ReachabilityAnalysis).
-```
-
-**MISMATCH**: Implementation is incomplete - function only has the basic structure without the recursive call tracking logic described.
-
-
-**Trade-offs**:
-- Static mode: Simpler hardware, conservative conflict resolution, may block valid concurrent executions
-- Dynamic mode: Complex hardware with reachability tracking, precise conflict detection, better concurrency
-- Most-dynamic mode: Tracks more conflicts on recursively called methods for even finer granularity, more complex hardware, best concurrency
-
 
 ### 3. Conflict Resolution
 
@@ -208,33 +186,33 @@ sharp-opt input.mlir \
 ### Issues Resolved
 
 1. **✅ `reach_abort` Logic Implemented**
-   - **Location**: Lines 250-370 (`calculateReachAbort` function)
+   - **Location**: Lines 405-520 (`calculateReachAbort` function)
    - **Status**: Fully implemented with path condition tracking and abort propagation
-   - **Implementation**: All will-fire modes (static, dynamic, most-dynamic) now include reach_abort calculation
+   - **Implementation**: All will-fire modes (static, dynamic) now include reach_abort calculation
 
 2. **✅ `conflict_inside` Implementation**
-   - **Location**: Lines 2050-2080 in main conversion logic
-   - **Status**: Implemented with reachability condition checking
+   - **Location**: Lines 638-700 in static mode will-fire generation
+   - **Status**: Implemented with reachability condition checking for static mode
    - **Implementation**: Checks conflicts between method calls within an action using reach conditions
 
 3. **✅ Reachability Conditions Integration**
-   - **Location**: Lines 290-310 in `calculateReachAbort`
+   - **Location**: Lines 405-520 in `calculateReachAbort`
    - **Status**: Properly integrated with ReachabilityAnalysis pass results
    - **Implementation**: Uses both analysis-provided conditions and fallback to call operands
 
+4. **✅ Most-Dynamic Mode Complete**
+   - **Location**: Lines 752-833 in TxnToFIRRTLPass.cpp
+   - **Status**: Fully implemented with recursive call tracking via collectAllReachableCalls
+   - **Implementation**: Complete direct/indirect method conflict analysis with reach_abort logic
+
 ### Remaining Issues
 
-1. **Most-Dynamic Mode Incomplete**
-   - **Location**: Lines 630-750 in TxnToFIRRTLPass.cpp
-   - **Issue**: Has reach_abort but lacks full recursive call tracking as described in docs
-   - **Impact**: Most-dynamic mode provides some improvement but not full capability
-
-2. **Multi-Cycle Support**
+1. **Multi-Cycle Support**
    - **Location**: Line 186 notes "This is a TODO"
    - **Issue**: Launch operations for multi-cycle execution not implemented
    - **Impact**: Cannot generate FIRRTL for designs with launch operations
 
-3. **Primitive Conflict Matrix**
+2. **Primitive Conflict Matrix**
    - **Issue**: Primitive methods assumed to have hardcoded conflict behavior
    - **Impact**: May not accurately model all primitive conflicts
 

@@ -36,7 +36,7 @@ test/
 
 #### Conversion Tests
 - **txn-to-firrtl-complete.mlir**: All TxnToFIRRTL features
-- **will-fire-all-modes.mlir**: Static, dynamic, most-dynamic modes
+- **will-fire-all-modes.mlir**: Static and dynamic modes
 - **abort-propagation-full.mlir**: Abort through multiple levels
 - **txn-to-func-transactional.mlir**: Full transactional execution
 

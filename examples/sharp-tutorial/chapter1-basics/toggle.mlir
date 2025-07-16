@@ -1,5 +1,5 @@
 // A module that toggles between 0 and 1
-txn.module @Toggle {
+txn.module @Toggle attributes {top} {
   // We'll use a Register primitive to store state
   %state = txn.instance @state of @Register<i1> : !txn.module<"Register">
   

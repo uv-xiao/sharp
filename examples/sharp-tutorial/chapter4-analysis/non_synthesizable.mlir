@@ -45,7 +45,7 @@ txn.module @DisallowedOperations {
   txn.schedule [@useFloatingPoint, @useDisallowedArith]
 }
 
-txn.module @HierarchicalViolation {
+txn.module @HierarchicalViolation attributes {top} {
   // Violation 4: Instantiating non-synthesizable module
   %non_synth = txn.instance @child of @NonSynthesizable : !txn.module<"NonSynthesizable">
   %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">

@@ -38,7 +38,7 @@ translate_one() {
     # Step 1: do dependent analysis
     echo "  Step 1: do dependent analysis"
     local debug_file="${base_name}_analysis.log"
-    local analysis_file="${base_name}_analysis.mlir"
+    local analysis_file="${base_name}_analysis._mlir"
 
     $SHARP_OPT "${mlir_file}" \
         --sharp-primitive-gen \
@@ -63,7 +63,7 @@ translate_one() {
     # Step 2: Lower Txn operation bodies to FIRRTL operations
     echo "  Step 2: Lower Txn operation bodies to FIRRTL operations"
     local debug_file="${base_name}_firrtl.log"
-    local firrtl_op_file="${base_name}_firrtl_op.mlir"
+    local firrtl_op_file="${base_name}_firrtl_op._mlir"
 
     $SHARP_OPT "${analysis_file}" \
         --lower-op-to-firrtl \

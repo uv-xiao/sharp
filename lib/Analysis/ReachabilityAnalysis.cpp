@@ -82,6 +82,9 @@ private:
   /// Update a CallOp to include its reachability condition
   void updateCallOp(CallOp callOp, Value condition, OpBuilder &builder);
   
+  /// Update an AbortOp to include its reachability condition
+  void updateAbortOp(txn::AbortOp abortOp, Value condition, OpBuilder &builder);
+  
   /// Find a safe insertion point after the given value
   Block::iterator findInsertionPoint(Value value);
 };
@@ -117,11 +120,13 @@ void ReachabilityAnalysisPass::runOnOperation() {
     });
   });
   
-  // Update CallOps with their reachability conditions
+  // Update CallOps and AbortOps with their reachability conditions
   OpBuilder builder(module);
-  for (auto &[callOp, condition] : state.reachabilityConditions) {
-    if (auto call = dyn_cast<CallOp>(callOp)) {
+  for (auto &[op, condition] : state.reachabilityConditions) {
+    if (auto call = dyn_cast<CallOp>(op)) {
       updateCallOp(call, condition, builder);
+    } else if (auto abort = dyn_cast<txn::AbortOp>(op)) {
+      updateAbortOp(abort, condition, builder);
     }
   }
   
@@ -354,6 +359,26 @@ void ReachabilityAnalysisPass::updateCallOp(CallOp callOp, Value condition,
   // Replace uses and erase old call
   callOp.replaceAllUsesWith(newCall);
   callOp.erase();
+}
+
+void ReachabilityAnalysisPass::updateAbortOp(txn::AbortOp abortOp, Value condition, 
+                                              OpBuilder &builder) {
+  // Don't update if the abort already has a condition
+  if (abortOp.getCondition()) {
+    return;
+  }
+  
+  // Create a new AbortOp with the condition
+  builder.setInsertionPoint(abortOp);
+  
+  // Create new abort with condition
+  auto newAbort = builder.create<txn::AbortOp>(abortOp.getLoc(), condition);
+  
+  // Copy attributes
+  newAbort->setAttrs(abortOp->getAttrs());
+  
+  // Since AbortOp has no results, we can directly erase the old one
+  abortOp.erase();
 }
 
 } // namespace

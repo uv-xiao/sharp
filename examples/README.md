@@ -31,10 +31,10 @@ Demonstrates analysis passes:
 - Schedule completion
 - Reachability analysis for conditional calls
 
-### most_dynamic_example.mlir
+### dynamic_example.mlir
 Shows advanced will-fire generation:
 - Primitive-level conflict detection
-- Most-dynamic mode for fine-grained scheduling
+- Dynamic mode for fine-grained scheduling
 - Conditional primitive calls
 
 ## Running Examples

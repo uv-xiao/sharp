@@ -61,10 +61,10 @@ ParseResult PrimitiveOp::parse(OpAsmParser &parser, OperationState &result) {
   // Parse optional type parameters: <T1, T2, ...>
   if (succeeded(parser.parseOptionalLess())) {
     do {
-      StringRef paramName;
-      if (parser.parseKeyword(&paramName))
+      Type paramType;
+      if (parser.parseType(paramType))
         return failure();
-      typeParams.push_back(parser.getBuilder().getStringAttr(paramName));
+      typeParams.push_back(TypeAttr::get(paramType));
     } while (succeeded(parser.parseOptionalComma()));
     
     if (parser.parseGreater())
@@ -117,10 +117,10 @@ void PrimitiveOp::print(OpAsmPrinter &p) {
   // Print type parameters if present
   if (auto typeParamsOpt = getTypeParameters()) {
     auto typeParams = typeParamsOpt.value();
-    p << "<";
+    p << " <";  // Add space before type parameters
     llvm::interleaveComma(typeParams, p, [&](Attribute attr) {
-      if (auto strAttr = dyn_cast<StringAttr>(attr))
-        p << strAttr.getValue();
+      if (auto typeAttr = dyn_cast<TypeAttr>(attr))
+        p.printType(typeAttr.getValue());
     });
     p << ">";
   }
@@ -425,19 +425,6 @@ ParseResult CallOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseAttribute(calleeAttr, "callee", result.attributes))
     return failure();
 
-  // Check for optional condition operand: if <cond> : <type> then (operands)
-  if (succeeded(parser.parseOptionalKeyword("if"))) {
-    hasCondition = true;
-    if (parser.parseOperand(conditionOperand))
-      return failure();
-    if (parser.parseColon())
-      return failure();
-    if (parser.parseType(conditionType))
-      return failure();
-    if (parser.parseKeyword("then"))
-      return failure();
-  }
-
   // Parse (operands)
   if (parser.parseOperandList(operands, OpAsmParser::Delimiter::Paren))
     return failure();
@@ -459,6 +446,15 @@ ParseResult CallOp::parse(OpAsmParser &parser, OperationState &result) {
   // Parse optional attributes
   if (parser.parseOptionalAttrDict(result.attributes))
     return failure();
+
+  // Check for optional dangling condition: if <cond>
+  if (succeeded(parser.parseOptionalKeyword("if"))) {
+    hasCondition = true;
+    if (parser.parseOperand(conditionOperand))
+      return failure();
+    // No need to parse type here since we'll infer it as i1
+    conditionType = parser.getBuilder().getI1Type();
+  }
 
   // Resolve operands
   SmallVector<OpAsmParser::UnresolvedOperand> allOperands;
@@ -487,31 +483,70 @@ void CallOp::print(OpAsmPrinter &p) {
   p << " ";
   p.printAttributeWithoutType(getCalleeAttr());
   
-  // Check if we have a condition operand
-  if (getCondition()) {
-    p << " if ";
-    p.printOperand(getCondition());
-    p << " : ";
-    p.printType(getCondition().getType());
-    p << " then";
-  }
-  
   p << "(";
   p.printOperands(getArgs());
   p << ") : ";
   
   // Print as function type
-  auto funcType = FunctionType::get(getContext(), getOperandTypes(), getResultTypes());
+  auto funcType = FunctionType::get(getContext(), getArgs().getTypes(), getResultTypes());
   p.printType(funcType);
   
   // Print attributes (excluding callee and operandSegmentSizes)
   SmallVector<StringRef> elidedAttrs = {"callee", "operandSegmentSizes"};
   p.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
+  
+  // Check if we have a condition operand - print as dangling condition
+  if (getCondition()) {
+    p << " if ";
+    p.printOperand(getCondition());
+  }
 }
 
 LogicalResult CallOp::verify() {
   // TODO: Verify that the callee exists and has matching signature.
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// AbortOp
+//===----------------------------------------------------------------------===//
+
+ParseResult AbortOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand conditionOperand;
+  Type conditionType;
+  bool hasCondition = false;
+
+  // Parse optional attributes
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  // Check for optional dangling condition: if <cond>
+  if (succeeded(parser.parseOptionalKeyword("if"))) {
+    hasCondition = true;
+    if (parser.parseOperand(conditionOperand))
+      return failure();
+    // No need to parse type here since we'll infer it as i1
+    conditionType = parser.getBuilder().getI1Type();
+  }
+
+  // Resolve condition operand if present
+  if (hasCondition) {
+    if (parser.resolveOperand(conditionOperand, conditionType, result.operands))
+      return failure();
+  }
+
+  return success();
+}
+
+void AbortOp::print(OpAsmPrinter &p) {
+  // Print attributes
+  p.printOptionalAttrDict((*this)->getAttrs());
+  
+  // Check if we have a condition operand - print as dangling condition
+  if (getCondition()) {
+    p << " if ";
+    p.printOperand(getCondition());
+  }
 }
 
 //===----------------------------------------------------------------------===//

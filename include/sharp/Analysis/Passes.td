@@ -198,7 +198,7 @@ def SharpAnalysisCollectPrimitiveActionsPass : Pass<"sharp-collect-primitive-act
     attribute to each action containing the list of primitive instance paths that
     the action calls methods on.
     
-    This information is used by the most-dynamic mode of the TxnToFIRRTL conversion
+    This information is used by the dynamic mode of the TxnToFIRRTL conversion
     pass to track conflicts at the primitive action level rather than just at the
     module method level.
     
@@ -211,7 +211,7 @@ def SharpAnalysisCollectPrimitiveActionsPass : Pass<"sharp-collect-primitive-act
     - Rule @resetFirst gets attribute: primitive_calls = ["counter1::reg::write"]
     - Rule @incrementSecond gets attribute: primitive_calls = ["counter2::reg::write", "counter2::reg::read"]
     
-    This enables most-dynamic mode to detect that incrementFirst and resetFirst
+    This enables dynamic mode to detect that incrementFirst and resetFirst
     conflict because they both access counter1::reg, while incrementSecond does
     not conflict with them because it accesses counter2::reg.
   }];

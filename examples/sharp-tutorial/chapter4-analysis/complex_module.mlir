@@ -1,5 +1,5 @@
 // A module with various analysis challenges
-txn.module @ComplexModule {
+txn.module @ComplexModule attributes {top} {
   // State elements
   %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
   %flag = txn.instance @flag of @Register<i1> : !txn.module<"Register">

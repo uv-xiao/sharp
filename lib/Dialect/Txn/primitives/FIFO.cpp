@@ -30,17 +30,21 @@ namespace txn {
 
 ::sharp::txn::PrimitiveOp createFIFOPrimitive(OpBuilder &builder, Location loc,
                                               StringRef name, Type dataType, 
+                                              ArrayAttr typeArgs,
                                               unsigned depth) {
+  // Generate the full name for the interface type
+  std::string fullName = ::sharp::txn::module_name_with_type_args(name, typeArgs);
+  
   // Create interface type for the primitive
   auto moduleType = ::sharp::txn::ModuleType::get(builder.getContext(), 
-                                                  StringAttr::get(builder.getContext(), name));
+                                                  StringAttr::get(builder.getContext(), fullName));
   
   // Create the primitive operation
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
                                                             StringAttr::get(builder.getContext(), name),
                                                             builder.getStringAttr("hw"), 
                                                             TypeAttr::get(moduleType),
-                                                            /*type_parameters=*/ArrayAttr());
+                                                            /*type_parameters=*/typeArgs);
   
   // Store depth as an attribute
   primitive->setAttr("depth", builder.getI32IntegerAttr(depth));

@@ -83,10 +83,10 @@ Computes reachability conditions for method calls within actions by tracking con
 **Algorithm**:
 1. Walk through each action (rule/action method)
 2. Track path conditions through `txn.if` branches
-3. For each `txn.call`, compute the condition under which it's reachable
-4. Add condition operands to `txn.call` operations
+3. For each `txn.call` or `txn.abort`, compute the condition under which it's reachable
+4. Add condition operands to `txn.call` and `txn.abort` operations
 
-**Purpose**: Enables precise `conflict_inside` calculation for will-fire logic generation in FIRRTL conversion.
+**Purpose**: Enables precise `conflict_inside`/`conflict_with_earlier`/`reach_abort` calculation for will-fire logic generation in FIRRTL conversion.
 
 **Example**:
 ```mlir
@@ -95,7 +95,7 @@ txn.rule @example {
   txn.if %cond {
     txn.call @inst::@method1() : () -> ()  // reachability = %cond
   } else {
-    txn.call @inst::@method2() : () -> ()  // reachability = !%cond
+    txn.abort // reachability = !%cond
   }
 }
 ```
@@ -172,7 +172,7 @@ Inlines all `txn.func_call` operations by replacing them with the body of the ca
 ### Primitive Action Collection (`--sharp-collect-primitive-actions`)
 **Implementation**: `lib/Analysis/CollectPrimitiveActions.cpp`
 
-Collects all primitive action calls made by each action for use in most-dynamic mode of TxnToFIRRTL conversion. Adds `primitive_calls` attribute to each action containing the list of primitive instance paths.
+Collects all primitive action calls made by each action for use in dynamic mode of TxnToFIRRTL conversion. Adds `primitive_calls` attribute to each action containing the list of primitive instance paths.
 
 **Tracing**:
 - Direct primitive calls (e.g., `@reg::@write`)

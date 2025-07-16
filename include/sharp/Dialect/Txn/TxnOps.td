@@ -151,6 +151,8 @@ def ActionMethodOp : TxnOp<"action_method", [
   let summary = "Action method definition";
   let description = [{
     Defines an action method that may modify state or abort.
+    Can optionally include a guard region that returns a condition.
+    If the guard region returns false, the method will abort.
   }];
 
   let arguments = (ins
@@ -166,7 +168,7 @@ def ActionMethodOp : TxnOp<"action_method", [
     OptionalAttr<UnitAttr>:$always_ready,  // Method is always ready (removes ready signal)
     OptionalAttr<UnitAttr>:$always_enable  // Method is always enabled (removes enable signal)
   );
-  let regions = (region SizedRegion<1>:$body);
+  let regions = (region SizedRegion<1>:$body, VariadicRegion<AnyRegion>:$guard);
 
 
   let extraClassDeclaration = [{
@@ -178,6 +180,12 @@ def ActionMethodOp : TxnOp<"action_method", [
 
     /// Returns the region that is callable.
     ::mlir::Region *getCallableRegion() { return &getBody(); }
+    
+    /// Returns true if this method has a guard region.
+    bool hasGuard() { return !getGuard().empty(); }
+    
+    /// Returns the guard region if it exists.
+    ::mlir::Region &getGuardRegion() { return getGuard()[0]; }
   }];
 
   let hasCustomAssemblyFormat = 1;
@@ -189,13 +197,23 @@ def RuleOp : TxnOp<"rule", [
   let summary = "Spontaneous transition rule";
   let description = [{
     Defines a rule that executes spontaneously.
+    Can optionally include a guard region that returns a condition.
+    If the guard region returns false, the rule will abort.
   }];
 
   let arguments = (ins
     SymbolNameAttr:$sym_name,
     OptionalAttr<StrAttr>:$prefix
   );
-  let regions = (region SizedRegion<1>:$body);
+  let regions = (region SizedRegion<1>:$body, VariadicRegion<AnyRegion>:$guard);
+
+  let extraClassDeclaration = [{
+    /// Returns true if this rule has a guard region.
+    bool hasGuard() { return !getGuard().empty(); }
+    
+    /// Returns the guard region if it exists.
+    ::mlir::Region &getGuardRegion() { return getGuard()[0]; }
+  }];
 
   let hasCustomAssemblyFormat = 1;
 }
@@ -291,9 +309,24 @@ def AbortOp : TxnOp<"abort", [Terminator]> {
   let summary = "Abort the current transaction";
   let description = [{
     Causes the current transaction to fail and rollback any effects.
+    
+    An optional reachability condition can be provided as the first operand.
+    If present, it must be of type i1 and represents the condition under which
+    this abort can be reached during execution.
   }];
 
-  let assemblyFormat = "attr-dict";
+  let arguments = (ins Optional<AnyType>:$condition);
+
+  let hasCustomAssemblyFormat = 1;
+  
+  let builders = [
+    OpBuilder<(ins), [{
+      $_state.addOperands(::mlir::ValueRange{});
+    }]>,
+    OpBuilder<(ins "::mlir::Value":$condition), [{
+      $_state.addOperands(condition ? ::mlir::ValueRange{condition} : ::mlir::ValueRange{});
+    }]>
+  ];
 }
 
 def CallOp : TxnOp<"call", [AttrSizedOperandSegments]> {

@@ -29,6 +29,9 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Debug.h"
+#include "sharp/Analysis/AnalysisError.h"
+#include "sharp/Analysis/ConflictDebugger.h"
+#include "sharp/Analysis/ScheduleDebugger.h"
 
 #define DEBUG_TYPE "txn-to-firrtl"
 
@@ -42,6 +45,25 @@ namespace {
 
 using namespace ::sharp::txn;
 using namespace ::circt::firrtl;
+
+/// Conflict relations from the execution model
+enum class ConflictRelation {
+  SequenceBefore = 0,   // SB
+  SequenceAfter = 1,    // SA
+  Conflict = 2,         // C
+  ConflictFree = 3      // CF
+};
+
+/// Helper to convert enum to string for debugging
+llvm::StringRef conflictRelationToString(ConflictRelation rel) {
+  switch (rel) {
+    case ConflictRelation::SequenceBefore: return "SB";
+    case ConflictRelation::SequenceAfter: return "SA";  
+    case ConflictRelation::Conflict: return "C";
+    case ConflictRelation::ConflictFree: return "CF";
+  }
+  return "Unknown";
+}
 
 /// Conversion context to track state during translation
 /// 
@@ -63,11 +85,11 @@ struct ConversionContext {
   /// Conflict matrix for current module
   llvm::StringMap<int> conflictMatrix;
   
-  /// Reachability conditions for method calls
-  DenseMap<Operation*, Value> reachabilityConditions;
+  // Removed: redundant reachability conditions
+  // These are already computed by ReachabilityAnalysis pass and attached to operations
   
-  /// Reachability conditions for abort operations
-  DenseMap<Operation*, Value> abortReachabilityConditions;
+  // Removed: reachAbortCache - incorrect to cache reachAbort values
+  // since they depend on call context, not just the action
   
   /// Track instance ports for method call connections
   DenseMap<StringRef, DenseMap<StringRef, Value>> instancePorts;
@@ -186,6 +208,50 @@ static ConflictRelation getConflictRelationFromString(const std::string &method1
   return ConflictRelation::ConflictFree;
 }
 
+/// Helper to lookup called action method from a CallOp
+static Operation* lookupCalledActionMethod(CallOp callOp, ConversionContext &ctx) {
+  auto callee = callOp.getCallee();
+  
+  // Only handle direct calls to action methods (not instance method calls)
+  if (callee.getNestedReferences().empty()) {
+    StringRef methodName = callee.getRootReference().getValue();
+    
+    // Look for action method in current module
+    Operation* foundMethod = nullptr;
+    ctx.currentTxnModule.walk([&](ActionMethodOp actionMethod) {
+      if (actionMethod.getSymName() == methodName) {
+        foundMethod = actionMethod.getOperation();
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+    return foundMethod;
+  }
+  return nullptr;
+}
+
+/// Get reachability condition for a call operation
+static Value getCallReachCondition(CallOp callOp, ConversionContext &ctx) {
+  auto &builder = ctx.firrtlBuilder;
+  auto loc = callOp.getLoc();
+  auto boolType = IntType::get(builder.getContext(), false, 1);
+  
+  // Check if ReachabilityAnalysis provided a condition
+  if (auto condAttr = callOp.getOperation()->getAttrOfType<FlatSymbolRefAttr>("condition")) {
+    // TODO: Get the actual value from the symbol reference
+    // For now, skip analysis conditions and use operand-based conditions
+  }
+  
+  // Fall back to condition operand if present
+  if (callOp.getCondition()) {
+    Value callCond = ctx.txnToFirrtl.lookup(callOp.getCondition());
+    if (callCond) return callCond;
+  }
+  
+  // Default: always reachable
+  return builder.create<ConstantOp>(loc, Type(boolType), APSInt(APInt(1, 1), true));
+}
+
 /// Helper to walk an action and track reachability conditions
 static void walkWithPathConditions(
     Operation *op, Value pathCondition, ConversionContext &ctx,
@@ -246,7 +312,10 @@ static void walkWithPathConditions(
   }
 }
 
-/// Calculate reach_abort for an action
+// Forward declaration for convertGuardRegion
+static Value convertGuardRegion(Region &guardRegion, ConversionContext &ctx);
+
+/// Calculate reach_abort for an action with recursive analysis
 /// reach_abort[action] = OR(reach(abort_i, action) for every abort_i in action) 
 ///                     || OR(reach(call_i, action) && reach_abort(method[call_i]) for every call_i in action)
 static Value calculateReachAbort(Operation *action, ConversionContext &ctx, 
@@ -255,9 +324,27 @@ static Value calculateReachAbort(Operation *action, ConversionContext &ctx,
   auto loc = action->getLoc();
   auto boolType = IntType::get(builder.getContext(), false, 1);
   
-  // Start with false (no abort)
+  // Start with false (no abort) - no caching since reachAbort depends on call context
   Value reachAbort = builder.create<ConstantOp>(loc, Type(boolType), 
                                                 APSInt(APInt(1, 0), true));
+  
+  // Handle guard regions first - if guard returns false, the action aborts
+  Value guardAbort = nullptr;
+  if (auto rule = dyn_cast<RuleOp>(action)) {
+    if (rule.hasGuard()) {
+      guardAbort = convertGuardRegion(rule.getGuardRegion(), ctx);
+    }
+  } else if (auto method = dyn_cast<ActionMethodOp>(action)) {
+    if (method.hasGuard()) {
+      guardAbort = convertGuardRegion(method.getGuardRegion(), ctx);
+    }
+  }
+  
+  if (guardAbort) {
+    // Guard abort condition: NOT(guard_result)
+    Value notGuard = builder.create<NotPrimOp>(loc, guardAbort);
+    reachAbort = builder.create<OrPrimOp>(loc, reachAbort, notGuard);
+  }
   
   // Walk the action body with path conditions
   Region *bodyRegion = nullptr;
@@ -273,31 +360,40 @@ static Value calculateReachAbort(Operation *action, ConversionContext &ctx,
   for (auto &block : *bodyRegion) {
     for (auto &op : block) {
       walkWithPathConditions(&op, nullptr, ctx, [&](Operation *nested, Value pathCond) {
-        if (isa<::sharp::txn::AbortOp>(nested)) {
-          // Found an abort - use its path condition
+        if (auto abortOp = dyn_cast<::sharp::txn::AbortOp>(nested)) {
+          // Found an abort - use its path condition combined with analysis result
           Value abortReach = pathCond;
-          if (!abortReach) {
-            // No path condition means always reachable
-            abortReach = builder.create<ConstantOp>(loc, Type(boolType), 
-                                                   APSInt(APInt(1, 1), true));
+          
+          // Check if ReachabilityAnalysis provided a condition for this abort
+          if (auto condAttr = nested->getAttrOfType<FlatSymbolRefAttr>("condition")) {
+            // TODO: Get the actual value from the symbol reference
+            // For now, use the abort's direct condition operand
+          } else if (abortOp.getCondition()) {
+            // Use the condition operand provided by ReachabilityAnalysis pass
+            Value abortCond = ctx.txnToFirrtl.lookup(abortOp.getCondition());
+            if (abortCond) {
+              if (abortReach) {
+                abortReach = builder.create<AndPrimOp>(loc, abortReach, abortCond);
+              } else {
+                abortReach = abortCond;
+              }
+            }
           }
-          // OR with existing reach_abort
-          reachAbort = builder.create<OrPrimOp>(loc, reachAbort, abortReach);
+          
+          // Only include abort if it has a reachability condition
+          // If there's no condition, it means the abort is unreachable or was eliminated
+          if (abortReach) {
+            // OR with existing reach_abort
+            reachAbort = builder.create<OrPrimOp>(loc, reachAbort, abortReach);
+          }
         } else if (auto callOp = dyn_cast<CallOp>(nested)) {
           // For method calls, use path condition combined with the call's own condition
           Value callReach = pathCond;
           
           // Check if ReachabilityAnalysis provided a condition 
-          auto condIt = ctx.reachabilityConditions.find(nested);
-          if (condIt != ctx.reachabilityConditions.end()) {
-            Value analysisCondition = ctx.txnToFirrtl.lookup(condIt->second);
-            if (analysisCondition) {
-              if (callReach) {
-                callReach = builder.create<AndPrimOp>(loc, callReach, analysisCondition);
-              } else {
-                callReach = analysisCondition;
-              }
-            }
+          if (auto condAttr = nested->getAttrOfType<FlatSymbolRefAttr>("condition")) {
+            // TODO: Get the actual value from the symbol reference
+            // For now, use the call's direct condition operand
           } else if (callOp.getCondition()) {
             // Fall back to the condition operand if present
             Value callCond = ctx.txnToFirrtl.lookup(callOp.getCondition());
@@ -321,56 +417,102 @@ static Value calculateReachAbort(Operation *action, ConversionContext &ctx,
           if (callOp.getCallee().getNestedReferences().size() == 1) {
             StringRef methodName = callOp.getCallee().getNestedReferences()[0].getValue();
             
-            // For primitive methods, we know their abort behavior
-            // Register/Wire read/write methods don't abort
-            // FIFO dequeue can abort if empty, enqueue can abort if full
-            // TODO: In a full implementation, we'd check the instance type and method
+            // For instance method calls, the abort condition is NOT RDY
+            // This implements the requirement: when action a0 calls @i::@ax, 
+            // the abort should be @i::@ax's RDY signal (NOT RDY = abort)
+            StringRef instName = callOp.getCallee().getRootReference().getValue();
             
-            // For now, assume primitive methods don't abort except FIFO operations
-            bool methodCanAbort = false;
-            if (methodName == "dequeue" || methodName == "enqueue") {
-              // FIFO operations can abort
-              methodCanAbort = true;
-            }
+            // Construct the RDY signal name: instanceName::methodNameRDY
+            std::string rdySignalName = (instName + "_" + methodName + "RDY").str();
             
-            if (methodCanAbort) {
-              // Create abort condition: callReach && method_aborts
-              // For FIFO, the abort condition depends on empty/full status
-              // This is a simplification - in reality we'd need the FIFO's status signals
-              Value methodAbortCond = builder.create<ConstantOp>(loc, Type(boolType), 
-                                                                APSInt(APInt(1, 0), true)); // TODO: Get actual abort condition
-              Value callAborts = builder.create<AndPrimOp>(loc, callReach, methodAbortCond);
-              reachAbort = builder.create<OrPrimOp>(loc, reachAbort, callAborts);
+            // Look for the RDY signal in the current FIRRTL module ports
+            auto currentModule = builder.getInsertionBlock()->getParentOp();
+            if (auto fmodule = dyn_cast<circt::firrtl::FModuleOp>(currentModule)) {
+              auto portNames = fmodule.getPortNames();
+              auto blockArgs = fmodule.getBodyBlock()->getArguments();
+              
+              Value rdySignal = nullptr;
+              for (size_t i = 0; i < portNames.size(); ++i) {
+                if (cast<StringAttr>(portNames[i]).getValue() == rdySignalName) {
+                  rdySignal = blockArgs[i];
+                  break;
+                }
+              }
+              
+              if (rdySignal) {
+                // Method abort condition = callReach && NOT(RDY)
+                Value notRdy = builder.create<NotPrimOp>(loc, rdySignal);
+                Value methodAbortCond = builder.create<AndPrimOp>(loc, callReach, notRdy);
+                reachAbort = builder.create<OrPrimOp>(loc, reachAbort, methodAbortCond);
+              } else {
+                // Fallback: some methods don't have RDY signals (always ready)
+                // Register/Wire read/write methods typically don't abort
+                bool methodCanAbort = false;
+                if (methodName == "dequeue" || methodName == "enqueue") {
+                  // FIFO operations can abort when not ready
+                  methodCanAbort = true;
+                }
+                
+                if (methodCanAbort) {
+                  // For methods without explicit RDY signals, use a conservative approach
+                  Value methodAbortCond = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                                    APSInt(APInt(1, 0), true)); // Assume always ready
+                  Value callAborts = builder.create<AndPrimOp>(loc, callReach, methodAbortCond);
+                  reachAbort = builder.create<OrPrimOp>(loc, reachAbort, callAborts);
+                }
+              }
             }
           } else {
-            // For local method calls, we'd need to recursively analyze the called method
-            // This requires inter-procedural analysis which is complex
-            // For now, conservatively assume local action methods might abort
-            StringRef methodName = callOp.getCallee().getRootReference().getValue();
-            
-            // Look up if this is an action method
-            bool isActionMethod = false;
-            ctx.currentTxnModule.walk([&](ActionMethodOp am) {
-              if (am.getSymName() == methodName) {
-                isActionMethod = true;
+            // For local action method calls, perform recursive analysis
+            if (auto calledAction = lookupCalledActionMethod(callOp, ctx)) {
+              // Recursively calculate reach_abort for the called action method
+              Value calleeReachAbort = calculateReachAbort(calledAction, ctx, actionMap);
+              if (calleeReachAbort) {
+                // Propagate abort: callReach && calleeReachAbort
+                Value propagatedAbort = builder.create<AndPrimOp>(loc, callReach, calleeReachAbort);
+                reachAbort = builder.create<OrPrimOp>(loc, reachAbort, propagatedAbort);
               }
-            });
-            
-            if (isActionMethod) {
-              // Conservatively assume action methods can abort
-              // In reality, we'd analyze the method body
-              Value methodAbortCond = builder.create<ConstantOp>(loc, Type(boolType), 
-                                                                APSInt(APInt(1, 1), true)); // Conservative: assume can abort
-              Value callAborts = builder.create<AndPrimOp>(loc, callReach, methodAbortCond);
-              reachAbort = builder.create<OrPrimOp>(loc, reachAbort, callAborts);
             }
+            // Note: If not an action method (e.g., value method), it cannot abort
           }
         }
       });
     }
   }
   
+  // No caching - reachAbort depends on call context
   return reachAbort;
+}
+
+/// Collect all reachable calls (direct and indirect) from an action
+static void collectAllReachableCalls(Operation *action, 
+                                   ConversionContext &ctx,
+                                   SmallVector<std::pair<CallOp, Value>> &allCalls,
+                                   DenseSet<Operation*> &visited) {
+  if (visited.count(action)) return; // Avoid cycles
+  visited.insert(action);
+  
+  walkWithPathConditions(action, nullptr, ctx, [&](Operation *op, Value pathCond) {
+    if (auto callOp = dyn_cast<CallOp>(op)) {
+      Value callReachCondition = getCallReachCondition(callOp, ctx);
+      
+      // Combine path condition with call condition
+      Value effectiveCondition = pathCond;
+      if (pathCond && callReachCondition) {
+        effectiveCondition = ctx.firrtlBuilder.create<AndPrimOp>(
+          callOp.getLoc(), pathCond, callReachCondition);
+      } else if (callReachCondition) {
+        effectiveCondition = callReachCondition;
+      }
+      
+      allCalls.push_back({callOp, effectiveCondition});
+      
+      // If calling local action method, recurse to collect indirect calls
+      if (auto calleeAction = lookupCalledActionMethod(callOp, ctx)) {
+        collectAllReachableCalls(calleeAction, ctx, allCalls, visited);
+      }
+    }
+  });
 }
 
 /// Get conflict relation between two actions by examining their method calls
@@ -395,55 +537,8 @@ static ConflictRelation getConflictRelation(StringRef a1, StringRef a2,
     return rel;
   }
   
-  // Infer conflict from method calls: if action a1 calls method m1 and action a2 calls method m2,
-  // and m1 conflicts with m2, then a1 conflicts with a2
-  auto it_a1 = actionMap.find(a1);
-  auto it_a2 = actionMap.find(a2);
-  if (it_a1 == actionMap.end() || it_a2 == actionMap.end()) {
-    return ConflictRelation::ConflictFree;
-  }
-  
-  Operation *action1 = it_a1->second;
-  Operation *action2 = it_a2->second;
-  
-  // Collect method calls from both actions
-  SmallVector<std::string> methods1, methods2;
-  action1->walk([&](CallOp call) {
-    auto callee = call.getCallee();
-    if (callee.getNestedReferences().size() == 1) {
-      // Build full method name: instance::method
-      StringRef inst = callee.getRootReference().getValue();
-      StringRef method = callee.getNestedReferences()[0].getValue();
-      std::string fullName = (inst + "::" + method).str();
-      methods1.push_back(fullName);
-    }
-  });
-  action2->walk([&](CallOp call) {
-    auto callee = call.getCallee();
-    if (callee.getNestedReferences().size() == 1) {
-      // Build full method name: instance::method
-      StringRef inst = callee.getRootReference().getValue();
-      StringRef method = callee.getNestedReferences()[0].getValue();
-      std::string fullName = (inst + "::" + method).str();
-      methods2.push_back(fullName);
-    }
-  });
-  
-  // Check for conflicts between any method pairs
-  ConflictRelation maxConflict = ConflictRelation::ConflictFree;
-  for (const std::string &m1 : methods1) {
-    for (const std::string &m2 : methods2) {
-      auto rel = getConflictRelationFromString(m1, m2, ctx);
-      // Prioritize conflicts: C > SA/SB > CF
-      if (rel == ConflictRelation::Conflict) {
-        return ConflictRelation::Conflict; // Highest priority
-      } else if (rel == ConflictRelation::SequenceBefore || rel == ConflictRelation::SequenceAfter) {
-        maxConflict = rel; // Remember sequence constraints
-      }
-    }
-  }
-  
-  return maxConflict;
+  // Cannot reach here.
+  // signalPassFailure();
 }
 
 /// Generate static mode will-fire logic for an action
@@ -455,22 +550,36 @@ static Value generateStaticWillFire(StringRef actionName, Value enabled,
   auto &builder = ctx.firrtlBuilder;
   auto loc = builder.getUnknownLoc();
   
+  // Initialize debugging
+  ConflictDebugger debugger("TxnToFIRRTL", TimingMode::Static);
+  std::vector<ConflictDebugInfo> conflicts;
+  
   // Start with enabled signal
   Value wf = enabled;
   
   if (!wf) {
+    CONFLICT_DEBUG(debugger, logWillFireDecision(actionName, false, "", conflicts, false)
+                             .setExplanation("FAILED: Enabled signal is null"));
     llvm::errs() << "generateStaticWillFire: enabled signal is null for " << actionName << "\n";
+    // signalPassFailure();
     return nullptr;
   }
   
   // Calculate reach_abort for this action
   auto actionIt = actionMap.find(actionName);
+  Value reachAbort = nullptr;
+  std::string abortCondition = "none";
   if (actionIt != actionMap.end()) {
-    Value reachAbort = calculateReachAbort(actionIt->second, ctx, actionMap);
+    reachAbort = calculateReachAbort(actionIt->second, ctx, actionMap);
     if (reachAbort) {
+      abortCondition = "computed";
+      CONFLICT_DEBUG(debugger, logAbortCondition(actionName, abortCondition, "calculated from method calls and abort operations"));
+      
       // wf = enabled && !reach_abort
       Value notAbort = builder.create<NotPrimOp>(loc, reachAbort);
       wf = builder.create<AndPrimOp>(loc, wf, notAbort);
+    } else {
+      abortCondition = "none";
     }
   }
   
@@ -481,13 +590,25 @@ static Value generateStaticWillFire(StringRef actionName, Value enabled,
     
     auto rel = getConflictRelation(earlier, actionName, ctx, actionMap);
     
+    // Log conflict detection
+    ConflictDebugInfo conflictInfo;
+    conflictInfo.method1 = earlier.str();
+    conflictInfo.method2 = actionName.str();
+    conflictInfo.conflictType = conflictRelationToString(rel).str();
+    conflictInfo.reachCondition1 = "1"; // Actions are always reachable at top level
+    conflictInfo.reachCondition2 = "1";
+    conflictInfo.isConflicting = (rel == ConflictRelation::Conflict || rel == ConflictRelation::SequenceBefore);
+    conflicts.push_back(conflictInfo);
+    
+    CONFLICT_DEBUG(debugger, logConflictDetection(earlier, actionName, conflictRelationToString(rel), "1", "1", conflictInfo.isConflicting));
+    
     // Generate conflict check if needed
     // conflicts(a1, a2) = (CM[a1,a2] == C) || (CM[a1,a2] == SA && wf[a1])
     if (rel == ConflictRelation::Conflict) {
       auto wfIt = ctx.willFireSignals.find(earlier);
       if (wfIt == ctx.willFireSignals.end()) {
         // Earlier action hasn't been processed yet or is a value method
-        llvm::errs() << "Warning: no will-fire signal found for earlier action " << earlier << "\n";
+        llvm::errs() << "Error: no will-fire signal found for earlier action " << earlier << "\n";
         continue;
       }
       Value earlierWF = wfIt->second;
@@ -510,7 +631,74 @@ static Value generateStaticWillFire(StringRef actionName, Value enabled,
     }
   }
   
-  // conflict_inside is already handled in the main logic
+  // Calculate conflict_inside for this action
+  // conflict_inside[action] = OR(conflict(m1,m2) && reach(m1) && reach(m2) for every m1,m2 in action_calls[action] where m1 before m2)
+  auto conflictActionIt = actionMap.find(actionName);
+  if (conflictActionIt != actionMap.end()) {
+    Operation *action = conflictActionIt->second;
+    
+    // Collect all method calls from this action
+    SmallVector<CallOp> calls;
+    action->walk([&](CallOp call) { calls.push_back(call); });
+    
+    // Check for conflicts between method calls within the same action
+    auto boolType = IntType::get(builder.getContext(), false, 1);
+    Value conflictInside = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                     APSInt(APInt(1, 0), true));
+    
+    for (size_t i = 0; i < calls.size(); ++i) {
+      for (size_t j = i + 1; j < calls.size(); ++j) {
+        CallOp call_i = calls[i];
+        CallOp call_j = calls[j];
+        
+        // Check if these method calls conflict
+        StringRef method_i = call_i.getCallee().getRootReference().getValue();
+        StringRef method_j = call_j.getCallee().getRootReference().getValue();
+        
+        auto rel = getConflictRelationFromString(method_i.str(), method_j.str(), ctx);
+        if (rel == ConflictRelation::Conflict) {
+          // Get reachability conditions for both calls
+          Value reach_i = nullptr, reach_j = nullptr;
+          
+          // Check reachability analysis results first
+          // Fall back to condition operand if analysis didn't provide result
+          if (!reach_i && call_i.getCondition()) {
+            reach_i = ctx.txnToFirrtl.lookup(call_i.getCondition());
+          }
+          // Default to always reachable if no condition
+          if (!reach_i) {
+            reach_i = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                APSInt(APInt(1, 1), true));
+          }
+          
+          if (!reach_j && call_j.getCondition()) {
+            reach_j = ctx.txnToFirrtl.lookup(call_j.getCondition());
+          }
+          if (!reach_j) {
+            reach_j = builder.create<ConstantOp>(loc, Type(boolType), 
+                                                APSInt(APInt(1, 1), true));
+          }
+          
+          // conflict_inside |= reach(call_i) && reach(call_j)
+          Value bothReachable = builder.create<AndPrimOp>(loc, reach_i, reach_j);
+          conflictInside = builder.create<OrPrimOp>(loc, conflictInside, bothReachable);
+        }
+      }
+    }
+    
+    // Apply conflict_inside: wf = wf && !conflict_inside
+    Value notConflictInside = builder.create<NotPrimOp>(loc, conflictInside);
+    wf = builder.create<AndPrimOp>(loc, wf, notConflictInside);
+  }
+  
+  // Log final will-fire decision
+  bool finalResult = (wf != nullptr);
+  std::string explanation = finalResult ? 
+    "SUCCESS: Generated static will-fire with " + std::to_string(conflicts.size()) + " conflict checks" :
+    "FAILED: Could not generate will-fire signal";
+    
+  CONFLICT_DEBUG(debugger, logWillFireDecision(actionName, true, abortCondition, conflicts, finalResult)
+                           .setExplanation(explanation));
   
   // Return the will-fire value - node creation is handled in the main loop
   return wf;
@@ -527,17 +715,27 @@ static Value generateDynamicWillFire(StringRef actionName, Value enabled,
   auto loc = builder.getUnknownLoc();
   auto intType = IntType::get(builder.getContext(), false, 1);
   
+  // Initialize debugging
+  ConflictDebugger debugger("TxnToFIRRTL", TimingMode::Dynamic);
+  std::vector<ConflictDebugInfo> conflicts;
+  
   // Start with enabled signal
   Value wf = enabled;
   
   if (!wf) {
+    CONFLICT_DEBUG(debugger, logWillFireDecision(actionName, false, "", conflicts, false)
+                             .setExplanation("FAILED: Enabled signal is null"));
     llvm::errs() << "generateDynamicWillFire: enabled signal is null for " << actionName << "\n";
     return nullptr;
   }
   
   // Calculate reach_abort for this action
   Value reachAbort = calculateReachAbort(action, ctx, actionMap);
+  std::string abortCondition = "none";
   if (reachAbort) {
+    abortCondition = "computed";
+    // CONFLICT_DEBUG(debugger, logAbortCondition(actionName, abortCondition, "calculated from method calls and abort operations"));
+    
     // wf = enabled && !reach_abort
     Value notAbort = builder.create<NotPrimOp>(loc, reachAbort);
     wf = builder.create<AndPrimOp>(loc, wf, notAbort);
@@ -561,15 +759,22 @@ static Value generateDynamicWillFire(StringRef actionName, Value enabled,
     
     // Collect method calls from earlier action
     earlierAction->walk([&](CallOp call) {
-      StringRef methodKey = call.getCallee().getRootReference().getValue();
+      // Extract full method signature for proper conflict detection
+      std::string methodKey;
+      if (call.getCallee().getNestedReferences().size() > 0) {
+        // Instance method call: @instance::@method
+        StringRef instance = call.getCallee().getRootReference().getValue();
+        StringRef method = call.getCallee().getLeafReference().getValue();
+        methodKey = instance.str() + "::" + method.str();
+      }
       
       // Get reachability condition for this call
       Value condition;
       if (call.getCondition()) {
         condition = ctx.txnToFirrtl.lookup(call.getCondition());
         if (!condition) {
-          condition = builder.create<ConstantOp>(loc, Type(intType), 
-                                                APSInt(APInt(1, 1), true));
+          // give a error
+          llvm::errs() << "Error: no reachability condition implemented for call " << methodKey << "\n";
         }
       } else {
         condition = builder.create<ConstantOp>(loc, Type(intType), 
@@ -588,17 +793,25 @@ static Value generateDynamicWillFire(StringRef actionName, Value enabled,
   
   // For each method call in current action, check for conflicts with earlier calls
   action->walk([&](CallOp call) {
-    StringRef methodKey = call.getCallee().getRootReference().getValue();
+    // Extract full method signature for proper conflict detection
+    std::string methodKey;
+    if (call.getCallee().getNestedReferences().size() > 0) {
+      // Instance method call: @instance::@method
+      StringRef instance = call.getCallee().getRootReference().getValue();
+      StringRef method = call.getCallee().getLeafReference().getValue();
+      methodKey = instance.str() + "::" + method.str();
+    }
     
     // Get reachability condition for this call
     Value condition;
     if (call.getCondition()) {
       condition = ctx.txnToFirrtl.lookup(call.getCondition());
       if (!condition) {
-        condition = builder.create<ConstantOp>(loc, Type(intType), 
-                                              APSInt(APInt(1, 1), true));
+        // give error and abort
+        llvm::errs() << "Error: no reachability condition found for call " << methodKey << "\n";
       }
     } else {
+      // default to be true
       condition = builder.create<ConstantOp>(loc, Type(intType), 
                                             APSInt(APInt(1, 1), true));
     }
@@ -606,200 +819,78 @@ static Value generateDynamicWillFire(StringRef actionName, Value enabled,
     // Check for conflicts with any earlier method calls
     for (auto &[earlierMethodKey, earlierCalled] : methodCalled) {
       // Check if these methods conflict
-      auto rel = getConflictRelationFromString(earlierMethodKey.str(), methodKey.str(), ctx);
+      // In dynamic mode, methods conflict if:
+      // 1. They are the same method call (exact match), OR
+      // 2. They access the same resource with conflicting operations (write-write conflicts)
+      bool methodsConflict = false;
       
-      if (rel == ConflictRelation::Conflict) {
+      // Exact method match
+      if (earlierMethodKey.str() == methodKey) {
+        methodsConflict = true;
+      } else {
+        // Resource-level conflict: check if both methods write to the same instance
+        // Extract instance and method names
+        auto parseMethodKey = [](const std::string& key) -> std::pair<std::string, std::string> {
+          size_t pos = key.find("::");
+          if (pos != std::string::npos) {
+            return {key.substr(0, pos), key.substr(pos + 2)};
+          }
+          return {"", key};
+        };
+        
+        auto [earlierInstance, earlierMethod] = parseMethodKey(earlierMethodKey.str());
+        auto [currentInstance, currentMethod] = parseMethodKey(methodKey);
+        
+        // If they access the same instance and both are write operations, they conflict
+        if (!earlierInstance.empty() && !currentInstance.empty() && 
+            earlierInstance == currentInstance) {
+          // Check if both are write methods (methods that modify state)
+          bool earlierIsWrite = (earlierMethod == "write" || earlierMethod.find("set") == 0 || 
+                                earlierMethod.find("push") == 0 || earlierMethod.find("pop") == 0);
+          bool currentIsWrite = (currentMethod == "write" || currentMethod.find("set") == 0 ||
+                                currentMethod.find("push") == 0 || currentMethod.find("pop") == 0);
+          
+          if (earlierIsWrite && currentIsWrite) {
+            methodsConflict = true;
+          }
+        }
+      }
+      
+      if (methodsConflict) {
         // conflict_with_earlier(m) = method_called[M'] && conflict(M', M)
         Value conflictCondition = builder.create<AndPrimOp>(loc, earlierCalled, condition);
         
         // wf = wf && !(reach(m) && conflict_with_earlier(m))
         auto notConflict = builder.create<NotPrimOp>(loc, conflictCondition);
         wf = builder.create<AndPrimOp>(loc, wf, notConflict);
+        
+        // Debug log the conflict detection
+        ConflictDebugInfo conflictInfo;
+        conflictInfo.actionName = actionName.str();
+        conflictInfo.method1 = methodKey;
+        conflictInfo.method2 = earlierMethodKey.str();
+        conflictInfo.conflictType = "resource-write";
+        conflictInfo.isConflicting = true;
+        conflictInfo.explanation = "Write methods conflict on same resource instance";
+        conflicts.push_back(conflictInfo);
       }
     }
   });
   
-  // conflict_inside is already handled in the main logic
+  // Log final will-fire decision for dynamic mode
+  bool finalResult = (wf != nullptr);
+  std::string explanation = finalResult ? 
+    "SUCCESS: Generated dynamic will-fire with method-level conflict tracking" :
+    "FAILED: Could not generate will-fire signal";
+    
+  CONFLICT_DEBUG(debugger, logWillFireDecision(actionName, true, abortCondition, conflicts, finalResult)
+                           .setExplanation(explanation));
   
   // Return the will-fire value - node creation is handled in the main loop
   return wf;
 }
 
-/// Generate most-dynamic mode will-fire logic for an action
-/// wf[action] = enabled[action] && !reach_abort[action] && 
-///              AND{for every direct/indirect method call m by action: NOT(reach(m, action) && conflict_with_earlier(m))}
-static Value generateMostDynamicWillFire(StringRef actionName, Value enabled,
-                                       ArrayRef<StringRef> schedule,
-                                       ConversionContext &ctx,
-                                       Operation *action,
-                                       const DenseMap<StringRef, Operation*> &actionMap) {
-  auto &builder = ctx.firrtlBuilder;
-  auto loc = builder.getUnknownLoc();
-  
-  // Start with enabled signal
-  Value wf = enabled;
-  
-  if (!wf) {
-    llvm::errs() << "generateMostDynamicWillFire: enabled signal is null for " << actionName << "\n";
-    return nullptr;
-  }
-  
-  // Calculate reach_abort for this action
-  Value reachAbort = calculateReachAbort(action, ctx, actionMap);
-  if (reachAbort) {
-    // wf = enabled && !reach_abort
-    Value notAbort = builder.create<NotPrimOp>(loc, reachAbort);
-    wf = builder.create<AndPrimOp>(loc, wf, notAbort);
-  }
-  
-  // Track primitive actions that have been called by earlier actions
-  llvm::StringMap<Value> primitiveCalled;
-  
-  // Get primitive calls for current action from the attribute
-  SmallVector<StringRef> currentPrimitiveCalls;
-  if (auto attr = action->getAttrOfType<ArrayAttr>("primitive_calls")) {
-    for (auto elem : attr) {
-      if (auto strAttr = dyn_cast<StringAttr>(elem)) {
-        currentPrimitiveCalls.push_back(strAttr.getValue());
-      }
-    }
-  }
-  
-  LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Action " << actionName 
-             << " has primitive calls: ";
-             for (auto call : currentPrimitiveCalls) {
-               llvm::dbgs() << call << " ";
-             }
-             llvm::dbgs() << "\n");
-  
-  // Analyze earlier actions to see what primitive actions they might call
-  for (StringRef earlierName : schedule) {
-    if (earlierName == actionName) break;
-    
-    Value earlierWF = ctx.willFireSignals[earlierName];
-    if (!earlierWF) {
-      LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: No will-fire signal for earlier action " << earlierName << "\n");
-      continue;
-    }
-    
-    // Find the earlier action operation
-    auto it = actionMap.find(earlierName);
-    if (it == actionMap.end()) continue;
-    Operation *earlierAction = it->second;
-    
-    // Get primitive calls from the earlier action's attribute
-    if (auto attr = earlierAction->getAttrOfType<ArrayAttr>("primitive_calls")) {
-      LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Earlier action " << earlierName 
-                 << " has primitive calls\n");
-      for (auto elem : attr) {
-        if (auto strAttr = dyn_cast<StringAttr>(elem)) {
-          StringRef primitiveCall = strAttr.getValue();
-          LLVM_DEBUG(llvm::dbgs() << "  - " << primitiveCall << "\n");
-          
-          // Mark this primitive as called
-          if (primitiveCalled.count(primitiveCall) == 0) {
-            primitiveCalled[primitiveCall] = earlierWF;
-          } else {
-            // OR with existing signal
-            Value existing = primitiveCalled[primitiveCall];
-            primitiveCalled[primitiveCall] = builder.create<OrPrimOp>(loc, existing, earlierWF);
-          }
-        }
-      }
-    }
-  }
-  
-  // Check if any of current action's primitive calls conflict with earlier ones
-  for (StringRef primitiveCall : currentPrimitiveCalls) {
-    // Parse the primitive call format: instance::method
-    // For nested paths like counter1::reg::write, we need the last :: split
-    size_t lastDoubleColon = primitiveCall.rfind("::");
-    if (lastDoubleColon == StringRef::npos) continue;
-    
-    StringRef instancePath = primitiveCall.substr(0, lastDoubleColon);
-    StringRef methodName = primitiveCall.substr(lastDoubleColon + 2);
-    
-    // Check all earlier primitive calls for conflicts
-    for (const auto &entry : primitiveCalled) {
-      StringRef earlierCall = entry.first();
-      Value earlierCalled = entry.second;
-      
-      // Parse the earlier call format: instance::method
-      // For nested paths like counter1::reg::write, we need the last :: split
-      size_t earlierLastDoubleColon = earlierCall.rfind("::");
-      if (earlierLastDoubleColon == StringRef::npos) continue;
-      
-      StringRef earlierInstance = earlierCall.substr(0, earlierLastDoubleColon);
-      StringRef earlierMethod = earlierCall.substr(earlierLastDoubleColon + 2);
-      
-      // Check if same instance
-      if (instancePath == earlierInstance) {
-        // Get conflict relation between methods
-        // For primitives, we need to check their conflict matrix
-        // This is a simplified check - in reality we'd need the primitive's conflict matrix
-        ConflictRelation conflict = ConflictRelation::ConflictFree;
-        
-        LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Checking conflict between " 
-                   << instancePath << "::" << methodName << " and " 
-                   << earlierInstance << "::" << earlierMethod << "\n");
-        LLVM_DEBUG(llvm::dbgs() << "  Full primitive calls: " << primitiveCall << " vs " << earlierCall << "\n");
-        
-        // Common primitive conflicts:
-        // Register: read CF write, write C write
-        // Wire: read SA write, write C write
-        // FIFO: enqueue C dequeue, enqueue C enqueue, dequeue C dequeue
-        
-        // Check primitive type by looking at the instance path
-        // The instance might be named "reg", "wire", etc., or the path might contain the type
-        bool isRegister = instancePath.ends_with("reg") || instancePath.contains("Register");
-        bool isWire = instancePath.ends_with("wire") || instancePath.contains("Wire");
-        bool isFIFO = instancePath.ends_with("fifo") || instancePath.contains("FIFO");
-        
-        LLVM_DEBUG(llvm::dbgs() << "  Instance path: " << instancePath 
-                   << " isRegister: " << isRegister 
-                   << " methodName: " << methodName 
-                   << " earlierMethod: " << earlierMethod << "\n");
-        
-        if (isRegister) {
-          LLVM_DEBUG(llvm::dbgs() << "  Detected Register primitive\n");
-          if (methodName == "write" && earlierMethod == "write") {
-            conflict = ConflictRelation::Conflict;
-          }
-        } else if (isWire) {
-          if (methodName == "read" && earlierMethod == "write") {
-            conflict = ConflictRelation::SequenceAfter;
-          } else if (methodName == "write" && earlierMethod == "write") {
-            conflict = ConflictRelation::Conflict;
-          }
-        } else if (isFIFO) {
-          if ((methodName == "enqueue" && earlierMethod == "dequeue") ||
-              (methodName == "dequeue" && earlierMethod == "enqueue") ||
-              (methodName == "enqueue" && earlierMethod == "enqueue") ||
-              (methodName == "dequeue" && earlierMethod == "dequeue")) {
-            conflict = ConflictRelation::Conflict;
-          }
-        }
-        
-        // If there's a conflict, block this action
-        if (conflict != ConflictRelation::ConflictFree) {
-          LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Found conflict! Blocking " 
-                     << actionName << " when primitive " << earlierCall << " is called\n");
-          LLVM_DEBUG(llvm::dbgs() << "  - primitiveCall: " << primitiveCall << "\n");
-          LLVM_DEBUG(llvm::dbgs() << "  - earlierCall: " << earlierCall << "\n");
-          LLVM_DEBUG(llvm::dbgs() << "  - conflict type: " << static_cast<int>(conflict) << "\n");
-          Value notEarlierCalled = builder.create<NotPrimOp>(loc, earlierCalled);
-          wf = builder.create<AndPrimOp>(loc, wf, notEarlierCalled);
-          LLVM_DEBUG(llvm::dbgs() << "  - updated wf: " << wf << "\n");
-        }
-      }
-    }
-  }
-  
-  LLVM_DEBUG(llvm::dbgs() << "Most-dynamic: Final wf for " << actionName << ": " << wf << "\n");
-  return wf;
-}
-
-/// Generate will-fire logic for an action (dispatcher for static/dynamic/most-dynamic modes)
+/// Generate will-fire logic for an action (dispatcher for static/dynamic modes)
 static Value generateWillFire(StringRef actionName, Value enabled,
                             ArrayRef<StringRef> schedule,
                             ConversionContext &ctx,
@@ -817,12 +908,6 @@ static Value generateWillFire(StringRef actionName, Value enabled,
       return generateStaticWillFire(actionName, enabled, schedule, ctx, *actionMap);
     }
     return generateDynamicWillFire(actionName, enabled, schedule, ctx, action, *actionMap);
-  } else if (willFireMode == "most-dynamic") {
-    if (!action) {
-      llvm::errs() << "generateWillFire: most-dynamic mode requires action operation\n";
-      return generateStaticWillFire(actionName, enabled, schedule, ctx, *actionMap);
-    }
-    return generateMostDynamicWillFire(actionName, enabled, schedule, ctx, action, *actionMap);
   } else {
     return generateStaticWillFire(actionName, enabled, schedule, ctx, *actionMap);
   }
@@ -831,74 +916,8 @@ static Value generateWillFire(StringRef actionName, Value enabled,
 // Forward declaration
 static LogicalResult convertBodyOps(Region &region, ConversionContext &ctx);
 static LogicalResult convertOp(Operation *op, ConversionContext &ctx);
+static Value convertGuardRegion(Region &guardRegion, ConversionContext &ctx);
 
-// Note: This function is currently unused but kept for potential future use
-// when implementing more sophisticated reachability analysis
-#if 0
-/// Build reachability conditions for method calls in an action's body
-static void buildReachabilityConditions(Region &region, Value currentCond, 
-                                       ConversionContext &ctx,
-                                       DenseMap<CallOp, Value> &reachMap) {
-  for (auto &op : region.front()) {
-    if (auto ifOp = dyn_cast<IfOp>(&op)) {
-      // Convert the condition
-      Value cond = ifOp.getCondition();
-      if (ctx.txnToFirrtl.count(cond)) {
-        cond = ctx.txnToFirrtl[cond];
-      } else {
-        // Convert the condition if not already converted
-        if (auto cmpOp = cond.getDefiningOp<arith::CmpIOp>()) {
-          Value lhs = ctx.txnToFirrtl.lookup(cmpOp.getLhs());
-          Value rhs = ctx.txnToFirrtl.lookup(cmpOp.getRhs());
-          if (lhs && rhs) {
-            switch (cmpOp.getPredicate()) {
-              case arith::CmpIPredicate::eq:
-                cond = ctx.firrtlBuilder.create<EQPrimOp>(cmpOp.getLoc(), lhs, rhs);
-                break;
-              case arith::CmpIPredicate::ne:
-                cond = ctx.firrtlBuilder.create<NEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
-                break;
-              case arith::CmpIPredicate::slt:
-              case arith::CmpIPredicate::ult:
-                cond = ctx.firrtlBuilder.create<LTPrimOp>(cmpOp.getLoc(), lhs, rhs);
-                break;
-              case arith::CmpIPredicate::sle:
-              case arith::CmpIPredicate::ule:
-                cond = ctx.firrtlBuilder.create<LEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
-                break;
-              case arith::CmpIPredicate::sgt:
-              case arith::CmpIPredicate::ugt:
-                cond = ctx.firrtlBuilder.create<GTPrimOp>(cmpOp.getLoc(), lhs, rhs);
-                break;
-              case arith::CmpIPredicate::sge:
-              case arith::CmpIPredicate::uge:
-                cond = ctx.firrtlBuilder.create<GEQPrimOp>(cmpOp.getLoc(), lhs, rhs);
-                break;
-            }
-            ctx.txnToFirrtl[ifOp.getCondition()] = cond;
-          }
-        }
-      }
-      
-      // Process then branch
-      Value thenCond = ctx.firrtlBuilder.create<AndPrimOp>(
-          ifOp.getLoc(), currentCond, cond);
-      buildReachabilityConditions(ifOp.getThenRegion(), thenCond, ctx, reachMap);
-      
-      // Process else branch if exists
-      if (!ifOp.getElseRegion().empty()) {
-        Value notCond = ctx.firrtlBuilder.create<NotPrimOp>(ifOp.getLoc(), cond);
-        Value elseCond = ctx.firrtlBuilder.create<AndPrimOp>(
-            ifOp.getLoc(), currentCond, notCond);
-        buildReachabilityConditions(ifOp.getElseRegion(), elseCond, ctx, reachMap);
-      }
-    } else if (auto callOp = dyn_cast<CallOp>(&op)) {
-      // Record reachability condition for this call
-      reachMap[callOp] = currentCond;
-    }
-  }
-}
-#endif
 
 /// Check if action has potential internal conflicts (simple check)
 static bool hasConflictingCalls(Operation *action, ConversionContext &ctx) {
@@ -1606,10 +1625,87 @@ static LogicalResult convertOp(Operation *op, ConversionContext &ctx) {
     if (result) {
       ctx.txnToFirrtl[cmpOp.getResult()] = result;
     }
+  } else if (auto andOp = dyn_cast<arith::AndIOp>(op)) {
+    // Convert integer bitwise AND
+    Value lhs = ctx.txnToFirrtl.lookup(andOp.getLhs());
+    Value rhs = ctx.txnToFirrtl.lookup(andOp.getRhs());
+    if (!lhs || !rhs) return failure();
+    
+    Value result = ctx.firrtlBuilder.create<AndPrimOp>(andOp.getLoc(), lhs, rhs);
+    ctx.txnToFirrtl[andOp.getResult()] = result;
+  } else if (auto orOp = dyn_cast<arith::OrIOp>(op)) {
+    // Convert integer bitwise OR
+    Value lhs = ctx.txnToFirrtl.lookup(orOp.getLhs());
+    Value rhs = ctx.txnToFirrtl.lookup(orOp.getRhs());
+    if (!lhs || !rhs) return failure();
+    
+    Value result = ctx.firrtlBuilder.create<OrPrimOp>(orOp.getLoc(), lhs, rhs);
+    ctx.txnToFirrtl[orOp.getResult()] = result;
+  } else if (auto xorOp = dyn_cast<arith::XOrIOp>(op)) {
+    // Convert integer bitwise XOR
+    Value lhs = ctx.txnToFirrtl.lookup(xorOp.getLhs());
+    Value rhs = ctx.txnToFirrtl.lookup(xorOp.getRhs());
+    if (!lhs || !rhs) return failure();
+    
+    Value result = ctx.firrtlBuilder.create<XorPrimOp>(xorOp.getLoc(), lhs, rhs);
+    ctx.txnToFirrtl[xorOp.getResult()] = result;
+  } else if (auto addOp = dyn_cast<arith::AddIOp>(op)) {
+    // Convert integer addition
+    Value lhs = ctx.txnToFirrtl.lookup(addOp.getLhs());
+    Value rhs = ctx.txnToFirrtl.lookup(addOp.getRhs());
+    if (!lhs || !rhs) return failure();
+    
+    Value result = ctx.firrtlBuilder.create<AddPrimOp>(addOp.getLoc(), lhs, rhs);
+    ctx.txnToFirrtl[addOp.getResult()] = result;
   }
   // Add more operation types as needed
   
   return success();
+}
+
+/// Convert a guard region to FIRRTL and return the guard condition
+/// Guard regions should contain logic that computes a boolean result
+/// The result represents the "NOT abort" condition - if false, the action aborts
+static Value convertGuardRegion(Region &guardRegion, ConversionContext &ctx) {
+  if (guardRegion.empty() || guardRegion.front().empty()) {
+    return nullptr;
+  }
+  
+  auto &builder = ctx.firrtlBuilder;
+  auto loc = guardRegion.getLoc();
+  auto boolType = IntType::get(builder.getContext(), false, 1);
+  
+  // Convert all operations in the guard region
+  for (auto &block : guardRegion) {
+    for (auto &op : block) {
+      if (auto yieldOp = dyn_cast<YieldOp>(&op)) {
+        // The yielded value is the guard condition
+        if (yieldOp.getNumOperands() > 0) {
+          Value guardCondition = yieldOp.getOperand(0);
+          if (ctx.txnToFirrtl.count(guardCondition)) {
+            return ctx.txnToFirrtl[guardCondition];
+          } else {
+            // Try to convert the operand
+            if (failed(convertOp(guardCondition.getDefiningOp(), ctx))) {
+              return nullptr;
+            }
+            return ctx.txnToFirrtl.lookup(guardCondition);
+          }
+        }
+      } else {
+        // Convert other operations in the guard region
+        if (failed(convertOp(&op, ctx))) {
+          // If conversion fails, assume guard always succeeds (conservative)
+          return builder.create<ConstantOp>(loc, Type(boolType), 
+                                           APSInt(APInt(1, 1), true));
+        }
+      }
+    }
+  }
+  
+  // If no yield found, assume guard always succeeds
+  return builder.create<ConstantOp>(loc, Type(boolType), 
+                                   APSInt(APInt(1, 1), true));
 }
 
 /// Convert a Txn module to FIRRTL
@@ -1640,6 +1736,47 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   }
   
   populateConflictMatrix(schedule, ctx);
+  
+  // Debug output for schedule and conflict matrix (if debug enabled)
+  LLVM_DEBUG({
+    ScheduleDebugger schedDebugger("TxnToFIRRTL", willFireMode);
+    
+    // Prepare schedule debug info
+    ScheduleDebugInfo scheduleInfo;
+    scheduleInfo.moduleName = txnModule.getName().str();
+    scheduleInfo.timingMode = willFireMode;
+    
+    auto scheduleArrayAttr = schedule.getActions();
+    for (auto attr : scheduleArrayAttr) {
+      auto symRef = cast<SymbolRefAttr>(attr);
+      scheduleInfo.actions.push_back(symRef.getRootReference().getValue().str());
+    }
+    schedDebugger.setSchedule(scheduleInfo);
+    
+    // Prepare conflict matrix debug info
+    ConflictMatrixDebugInfo conflictInfo;
+    conflictInfo.moduleName = txnModule.getName().str();
+    conflictInfo.allActions = scheduleInfo.actions;
+    
+    // Convert conflict matrix from ctx.conflictMatrix
+    for (const auto& entry : ctx.conflictMatrix) {
+      std::string key = entry.first().str();
+      int conflictValue = entry.second;
+      std::string relStr;
+      switch (conflictValue) {
+        case 0: relStr = "SB"; break;  // SequenceBefore
+        case 1: relStr = "SA"; break;  // SequenceAfter
+        case 2: relStr = "C"; break;   // Conflict
+        case 3: relStr = "CF"; break;  // ConflictFree
+        default: relStr = "?"; break;  // Unknown
+      }
+      conflictInfo.conflictEntries[key] = relStr;
+    }
+    schedDebugger.setConflictMatrix(conflictInfo);
+    
+    // Print the pretty debug output
+    schedDebugger.printAll();
+  });
   
   // Create FIRRTL module structure
   SmallVector<PortInfo> ports;
@@ -1672,7 +1809,6 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     } else if (auto actionMethod = dyn_cast<ActionMethodOp>(op)) {
       // Get method attributes
       StringRef prefix = actionMethod.getPrefix().value_or(actionMethod.getSymName());
-      StringRef resultPostfix = actionMethod.getResult().value_or("OUT");
       StringRef enablePostfix = actionMethod.getEnable().value_or("EN");
       StringRef readyPostfix = actionMethod.getReady().value_or("RDY");
       
@@ -1680,12 +1816,15 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       auto funcType = actionMethod.getFunctionType();
       for (unsigned i = 0; i < funcType.getNumInputs(); ++i) {
         if (auto firrtlType = convertType(funcType.getInput(i))) {
-          std::string portName;
-          if (funcType.getNumInputs() == 1) {
-            portName = (prefix + resultPostfix).str();
+          // Get the actual argument name from the method
+          std::string argName;
+          if (auto argNameAttr = actionMethod.getArgAttrOfType<StringAttr>(i, "mlir.arg_name")) {
+            argName = argNameAttr.getValue().str();
           } else {
-            portName = (prefix + resultPostfix + "_arg" + std::to_string(i)).str();
+            // Fallback to default name if no arg name attribute
+            argName = "arg" + std::to_string(i);
           }
+          std::string portName = (prefix + "Arg_" + argName).str();
           ports.push_back({builder.getStringAttr(portName),
                           firrtlType, Direction::In});
         }
@@ -1877,6 +2016,55 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
       ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
                                          ports["dequeueEN"], falseVal);
     }
+    
+    // Register read_enable port (missed in initial implementation)
+    if (ports.count("read_enable")) {
+      auto falseVal = ctx.firrtlBuilder.create<ConstantOp>(
+          txnModule.getLoc(),
+          ports["read_enable"].getType(),
+          APSInt(APInt(1, 0), true));
+      ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
+                                         ports["read_enable"], falseVal);
+    }
+    
+    // Initialize all enable ports to false by default
+    for (auto& [portName, portValue] : ports) {
+      StringRef portNameStr = portName;
+      // Skip ports that are already initialized
+      if (portNameStr == "write_enable" || portNameStr == "enqueueEN" || 
+          portNameStr == "dequeueEN" || portNameStr == "read_enable") {
+        continue;
+      }
+      
+      // Initialize all EN/enable ports to false
+      if (portNameStr.ends_with("EN") || portNameStr.ends_with("_enable")) {
+        auto falseVal = ctx.firrtlBuilder.create<ConstantOp>(
+            txnModule.getLoc(),
+            portValue.getType(),
+            APSInt(APInt(1, 0), true));
+        ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
+                                           portValue, falseVal);
+      }
+      
+      // Initialize all argument ports to zero (for method call arguments)
+      if (portNameStr.contains("Arg_")) {
+        if (auto portType = dyn_cast<UIntType>(portValue.getType())) {
+          auto zeroVal = ctx.firrtlBuilder.create<ConstantOp>(
+              txnModule.getLoc(),
+              portValue.getType(),
+              APSInt(APInt(portType.getWidth().value_or(32), 0), true));
+          ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
+                                             portValue, zeroVal);
+        } else if (auto portType = dyn_cast<SIntType>(portValue.getType())) {
+          auto zeroVal = ctx.firrtlBuilder.create<ConstantOp>(
+              txnModule.getLoc(),
+              portValue.getType(),
+              APSInt(APInt(portType.getWidth().value_or(32), 0), false));
+          ctx.firrtlBuilder.create<ConnectOp>(txnModule.getLoc(),
+                                             portValue, zeroVal);
+        }
+      }
+    }
   }
   
   // First step: Map all block arguments to FIRRTL ports for all action methods
@@ -1888,11 +2076,15 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
     // Map method arguments to FIRRTL ports
     for (unsigned i = 0; i < actionMethod.getNumArguments(); ++i) {
       Value methodArg = actionMethod.getArgument(i);
-      // Find corresponding FIRRTL input port
-      std::string argPortName = (prefix + "OUT").str();
-      if (actionMethod.getNumArguments() > 1) {
-        argPortName = (prefix + "OUT_arg" + std::to_string(i)).str();
+      // Find corresponding FIRRTL input port using new naming convention
+      std::string argName;
+      if (auto argNameAttr = actionMethod.getArgAttrOfType<StringAttr>(i, "mlir.arg_name")) {
+        argName = argNameAttr.getValue().str();
+      } else {
+        // Fallback to default name if no arg name attribute
+        argName = "arg" + std::to_string(i);
       }
+      std::string argPortName = (prefix + "Arg_" + argName).str();
       
       for (size_t j = 0; j < methodPortNames.size(); ++j) {
         if (cast<StringAttr>(methodPortNames[j]).getValue() == argPortName) {
@@ -2138,7 +2330,7 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
   }
   
   // Second pass: generate will-fire signals with simplified conflict_inside
-  // In most-dynamic mode, we need to collect primitive information first,
+  // In dynamic mode, we need to collect primitive information first,
   // but we create the will-fire signals in a single pass to maintain SSA form
   
   for (StringRef name : scheduleOrder) {
@@ -2411,11 +2603,15 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
         auto blockArgs = firrtlModule.getBodyBlock()->getArguments();
         for (unsigned i = 0; i < actionMethod.getNumArguments(); ++i) {
           Value methodArg = actionMethod.getArgument(i);
-          // For action methods with args, we created ports with pattern: methodOUT
-          std::string argPortName = (prefix + "OUT").str();
-          if (actionMethod.getNumArguments() > 1) {
-            argPortName = (prefix + "OUT_arg" + std::to_string(i)).str();
+          // For action methods with args, we created ports with pattern: methodArg_argName
+          std::string argName;
+          if (auto argNameAttr = actionMethod.getArgAttrOfType<StringAttr>(i, "mlir.arg_name")) {
+            argName = argNameAttr.getValue().str();
+          } else {
+            // Fallback to default name if no arg name attribute
+            argName = "arg" + std::to_string(i);
           }
+          std::string argPortName = (prefix + "Arg_" + argName).str();
           
           for (size_t j = 0; j < portNames.size(); ++j) {
             if (cast<StringAttr>(portNames[j]).getValue() == argPortName) {
@@ -2460,6 +2656,24 @@ static LogicalResult convertModule(::sharp::txn::ModuleOp txnModule,
                 actionMethod.getLoc(), 
                 blockArgs[i].getType(),
                 (prefix + "_result_wire").str());
+                
+            // Initialize wire with default value to ensure it's fully initialized
+            auto wireType = blockArgs[i].getType();
+            if (auto uintType = dyn_cast<UIntType>(wireType)) {
+              auto defaultVal = ctx.firrtlBuilder.create<ConstantOp>(
+                  actionMethod.getLoc(),
+                  wireType,
+                  APSInt(APInt(uintType.getWidth().value_or(32), 0), true));
+              ctx.firrtlBuilder.create<ConnectOp>(actionMethod.getLoc(),
+                                                 resultWire.getResult(), defaultVal);
+            } else if (auto sintType = dyn_cast<SIntType>(wireType)) {
+              auto defaultVal = ctx.firrtlBuilder.create<ConstantOp>(
+                  actionMethod.getLoc(),
+                  wireType,
+                  APSInt(APInt(sintType.getWidth().value_or(32), 0), false));
+              ctx.firrtlBuilder.create<ConnectOp>(actionMethod.getLoc(),
+                                                 resultWire.getResult(), defaultVal);
+            }
                 
             // Connect return value to wire when method fires
             ctx.firrtlBuilder.create<WhenOp>(actionMethod.getLoc(), wf, false, [&]() {
@@ -2602,15 +2816,9 @@ struct TxnToFIRRTLConversionPass
     // The ReachabilityAnalysis pass adds condition operands to txn.call operations
     module.walk([&](::sharp::txn::ModuleOp txnModule) {
       txnModule.walk([&](Operation *op) {
-        // Collect reachability conditions from CallOps
-        if (auto callOp = dyn_cast<CallOp>(op)) {
-          if (auto cond = callOp.getCondition()) {
-            convCtx.reachabilityConditions[op] = cond;
-          }
-        }
-        // Also need to collect abort reachability conditions
-        // Since ReachabilityAnalysis now tracks aborts, we need to extract that info
-        // For now, we'll handle this during the conversion phase
+        // No longer collecting reachability conditions in context
+        // ReachabilityAnalysis pass attaches conditions directly to operations
+        // TODO: Process conditions attached by ReachabilityAnalysis pass
       });
     });
     
@@ -2662,11 +2870,24 @@ struct TxnToFIRRTLConversionPass
       // Check if this is the top-level module
       bool isTopLevel = (txnModule.getName() == topModuleName);
       
-      if (failed(convertModule(txnModule, convCtx, firrtlCircuit, willFireMode, isTopLevel))) {
+      // Use will-fire mode from command-line option (not module attribute)
+      std::string currentWillFireMode = this->willFireMode;
+      
+      
+      if (failed(convertModule(txnModule, convCtx, firrtlCircuit, currentWillFireMode, isTopLevel))) {
         signalPassFailure();
         return;
       }
       ++numModulesConverted;
+    }
+    
+    // Remove txn.primitive operations from entire module (firtool cannot handle them)
+    SmallVector<::sharp::txn::PrimitiveOp> primitivesToErase;
+    module.walk([&](::sharp::txn::PrimitiveOp primitiveOp) {
+      primitivesToErase.push_back(primitiveOp);
+    });
+    for (auto primitiveOp : primitivesToErase) {
+      primitiveOp.erase();
     }
     
     // Remove original Txn modules after successful conversion

@@ -1,5 +1,7 @@
 add_mlir_dialect_library(SharpAnalysis
   AnalysisError.cpp
+  ConflictDebugger.cpp
+  ScheduleDebugger.cpp
   GeneralCheck.cpp
   ConflictMatrixInference.cpp
   PreSynthesisCheck.cpp

@@ -19,6 +19,50 @@ include "mlir/Pass/PassBase.td"
 // TxnToFIRRTL
 //===----------------------------------------------------------------------===//
 
+def LowerOpToFIRRTLPass : Pass<"lower-op-to-firrtl", "mlir::ModuleOp"> {
+  let summary = "Lower Txn operation bodies to FIRRTL operations";
+  let description = [{
+    This pass converts operations within the guards and bodies of Txn value methods,
+    action methods, and rules to FIRRTL operations. The Txn module structure is
+    preserved, but the internal operations are converted to FIRRTL equivalents.
+    
+    This is the first pass in the two-phase Txn-to-FIRRTL conversion pipeline.
+    After this pass, the module still contains txn.module, txn.value_method, etc.,
+    but their bodies contain FIRRTL operations.
+  }];
+  
+  let dependentDialects = [
+    "::sharp::txn::TxnDialect",
+    "::circt::firrtl::FIRRTLDialect",
+    "::mlir::arith::ArithDialect"
+  ];
+}
+
+def TranslateTxnToFIRRTLPass : Pass<"translate-txn-to-firrtl", "mlir::ModuleOp"> {
+  let summary = "Translate Txn structure to FIRRTL modules with will-fire logic";
+  let description = [{
+    This pass converts the Txn module structure to FIRRTL modules and circuits,
+    generating the necessary will-fire logic and merging the converted method
+    and rule bodies into a complete FIRRTL module.
+    
+    This is the second pass in the two-phase Txn-to-FIRRTL conversion pipeline.
+    It assumes that operation bodies have already been converted to FIRRTL by
+    the LowerOpToFIRRTLPass.
+  }];
+  
+  let dependentDialects = [
+    "::sharp::txn::TxnDialect",
+    "::circt::firrtl::FIRRTLDialect",
+    "::mlir::arith::ArithDialect"
+  ];
+  
+  let options = [
+    Option<"willFireMode", "will-fire-mode", "std::string",
+           /*default=*/"\"static\"",
+           "Will-fire logic generation mode: 'static' (conservative) or 'dynamic' (precise)">
+  ];
+}
+
 def TxnToFIRRTLConversion : Pass<"convert-txn-to-firrtl", "mlir::ModuleOp"> {
   let summary = "Convert Sharp Txn dialect to FIRRTL dialect";
   let description = [{
@@ -58,7 +102,7 @@ def TxnToFIRRTLConversion : Pass<"convert-txn-to-firrtl", "mlir::ModuleOp"> {
            "Generate debug attributes for will-fire signals">,
     Option<"willFireMode", "will-fire-mode", "std::string",
            /*default=*/"\"static\"",
-           "Will-fire logic generation mode: 'static' (conservative), 'dynamic' (precise), or 'most-dynamic' (primitive-level tracking)">
+           "Will-fire logic generation mode: 'static' (conservative) or 'dynamic' (precise)">
   ];
 }
 
