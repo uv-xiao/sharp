@@ -21,19 +21,64 @@ FIRTOOL="$SHARP_ROOT/.install/unified/bin/firtool"
 translate_one() {
     local mlir_file=$1
     local mode=$2
-    local step_num=${3:-""}
+    local until=$3
+
     local base_name=$(basename "${mlir_file}" .mlir)
     local fir_file="${base_name}_${mode}.fir"
     local v_file="${base_name}_${mode}.v"
     local log_file="${base_name}_${mode}_verilog.log"
 
+    export SHARP_DEBUG_CONFLICTS=1
+
     # Display header
-    if [ -n "${step_num}" ]; then
-        echo "${step_num}. Translating ${base_name} with ${mode} timing:"
-        echo "$(printf '%*s' $((${#base_name} + ${#mode} + 30)) '' | tr ' ' '-')"
+
+    echo "Translating ${base_name} with ${mode} will-fire mode:"
+    echo "$(printf '%*s' $((${#base_name} + ${#mode} + 20)) '' | tr ' ' '-')"
+
+    # Step 1: do dependent analysis
+    echo "  Step 1: do dependent analysis"
+    local debug_file="${base_name}_analysis.log"
+    local analysis_file="${base_name}_analysis.mlir"
+
+    $SHARP_OPT "${mlir_file}" \
+        --sharp-primitive-gen \
+        --sharp-infer-conflict-matrix \
+        --sharp-reachability-analysis \
+        --sharp-general-check \
+        --sharp-pre-synthesis-check \
+        > "${analysis_file}" 2>"${debug_file}"
+    
+    if [ $? -ne 0 ]; then
+        echo "     ❌ Step 1 failed - analysis failed"
+        unset SHARP_DEBUG_CONFLICTS
+        return 1
     else
-        echo "Translating ${base_name} with ${mode} timing:"
-        echo "$(printf '%*s' $((${#base_name} + ${#mode} + 20)) '' | tr ' ' '-')"
+        echo "     ✅ Step 1 completed - analysis completed"
+    fi
+
+    if [ "${until}" == "analysis" ]; then
+        return 0
+    fi
+
+    # Step 2: Lower Txn operation bodies to FIRRTL operations
+    echo "  Step 2: Lower Txn operation bodies to FIRRTL operations"
+    local debug_file="${base_name}_firrtl.log"
+    local intermediate_file="${base_name}_firrtl_op.mlir"
+
+    $SHARP_OPT "${analysis_file}" \
+        --lower-op-to-firrtl \
+        > "${intermediate_file}" 2>"${debug_file}"
+    
+    if [ $? -ne 0 ]; then
+        echo "     ❌ Step 2 failed - operation body conversion failed"
+        unset SHARP_DEBUG_CONFLICTS
+        return 1
+    else
+        echo "     ✅ Step 2 completed - operation bodies converted to FIRRTL"
+    fi
+
+    if [ "${until}" == "firrtl_op" ]; then
+        return 0
     fi
 
     # 1. Translate to FIRRTL (with debug output and two-pass conversion)
@@ -52,7 +97,7 @@ translate_one() {
         --sharp-reachability-analysis \
         --sharp-general-check \
         --sharp-pre-synthesis-check \
-        --lower-txn-body-to-firrtl \
+        --lower-op-to-firrtl \
         > "${intermediate_file}" 2>"${debug_file}"
     
     if [ $? -ne 0 ]; then
@@ -185,19 +230,19 @@ translate_one() {
 
 # Validate arguments
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <mlir_file> <mode> [step_number]"
+    echo "Usage: $0 <mlir_file> <mode>"
     echo "  mlir_file: Input MLIR file to translate"
     echo "  mode: Timing mode (static or dynamic)"
-    echo "  step_number: Optional step number for display"
+    echo "  until: Which step to stop (analysis, firrtl-op, firrtl, verilog)"
     echo ""
-    echo "Example: $0 counter_hw.mlir dynamic 1"
+    echo "Example: $0 counter_hw.mlir dynamic"
     exit 1
 fi
 
 # Extract arguments
 MLIR_FILE=$1
 MODE=$2
-STEP_NUM=${3:-""}
+UNTIL=$3
 
 # Validate inputs
 if [ ! -f "${MLIR_FILE}" ]; then
@@ -211,4 +256,4 @@ if [[ ! "${MODE}" =~ ^(static|dynamic)$ ]]; then
 fi
 
 # Run the translation
-translate_one "${MLIR_FILE}" "${MODE}" "${STEP_NUM}"
+translate_one "${MLIR_FILE}" "${MODE}" "${UNTIL}"
