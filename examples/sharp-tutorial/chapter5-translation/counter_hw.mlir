@@ -1,5 +1,5 @@
 // Hardware counter for translation
-txn.module @HardwareCounter {
+txn.module @HardwareCounter attributes {top} {
   %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
   
   // Enable signal (input)
@@ -14,7 +14,7 @@ txn.module @HardwareCounter {
     %one = arith.constant 1 : i32
     %next = arith.addi %current, %one : i32
     txn.call @count::@write(%next) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Decrement action
@@ -23,14 +23,14 @@ txn.module @HardwareCounter {
     %one = arith.constant 1 : i32
     %next = arith.subi %current, %one : i32
     txn.call @count::@write(%next) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Reset action
   txn.action_method @reset() {
     %zero = arith.constant 0 : i32
     txn.call @count::@write(%zero) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   txn.schedule [@increment, @decrement, @reset] {
@@ -38,9 +38,9 @@ txn.module @HardwareCounter {
       // Actions conflict with each other
       "increment,increment" = 2 : i32,     // C
       "increment,decrement" = 2 : i32,     // C
-      "increment,reset" = 2 : i32,         // C
+      "increment,reset" = 3 : i32,         // CF
       "decrement,decrement" = 2 : i32,     // C
-      "decrement,reset" = 2 : i32,         // C
+      "decrement,reset" = 3 : i32,         // CF
       "reset,reset" = 2 : i32              // C
     }
   }

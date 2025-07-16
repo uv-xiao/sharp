@@ -7,7 +7,7 @@ txn.module @SimpleAdder {
   txn.action_method @add(%a: i32, %b: i32) {
     %sum = arith.addi %a, %b : i32
     txn.call @result::@write(%sum) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Read the result
@@ -20,7 +20,7 @@ txn.module @SimpleAdder {
   txn.action_method @reset() {
     %zero = arith.constant 0 : i32
     txn.call @result::@write(%zero) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   txn.schedule [@add, @reset] {
@@ -33,7 +33,7 @@ txn.module @SimpleAdder {
 }
 
 // Outer module: Dual adder processor
-txn.module @DualProcessor {
+txn.module @DualProcessor attributes {top} {
   %adder1 = txn.instance @adder1 of @SimpleAdder : !txn.module<"SimpleAdder">
   %adder2 = txn.instance @adder2 of @SimpleAdder : !txn.module<"SimpleAdder">
   %output = txn.instance @output of @Register<i32> : !txn.module<"Register">
@@ -41,13 +41,13 @@ txn.module @DualProcessor {
   // Process input through first adder
   txn.action_method @processA(%x: i32, %y: i32) {
     txn.call @adder1::@add(%x, %y) : (i32, i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Process input through second adder  
   txn.action_method @processB(%x: i32, %y: i32) {
     txn.call @adder2::@add(%x, %y) : (i32, i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Combine results (simplified - just store one result)
@@ -56,7 +56,7 @@ txn.module @DualProcessor {
     // In a real implementation, this would combine both results
     %dummy = arith.constant 42 : i32
     txn.call @output::@write(%dummy) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Reset all adders
@@ -65,7 +65,7 @@ txn.module @DualProcessor {
     txn.call @adder2::@reset() : () -> ()
     %zero = arith.constant 0 : i32
     txn.call @output::@write(%zero) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Get final output

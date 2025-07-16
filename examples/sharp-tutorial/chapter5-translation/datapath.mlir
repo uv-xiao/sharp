@@ -14,7 +14,7 @@ txn.module @SimpleFifo {
     %new_count = arith.addi %current_count, %one : i32
     txn.call @count::@write(%new_count) : (i32) -> ()
     
-    txn.yield
+    txn.return
   }
   
   // Dequeue data from FIFO - THIS CAUSES THE ISSUE
@@ -42,7 +42,7 @@ txn.module @SimpleFifo {
 }
 
 // Datapath with FIFO and processing - DEMONSTRATES NESTED MODULE LIMITATION
-txn.module @Datapath {
+txn.module @Datapath attributes {top} {
   %input_fifo = txn.instance @input_fifo of @SimpleFifo : !txn.module<"SimpleFifo">
   %output_reg = txn.instance @output_reg of @Register<i32> : !txn.module<"Register">
   %status = txn.instance @status of @Register<i1> : !txn.module<"Register">
@@ -50,7 +50,7 @@ txn.module @Datapath {
   // Input data - this works (action method with no return value)
   txn.action_method @pushData(%data: i32) {
     txn.call @input_fifo::@enqueue(%data) : (i32) -> ()
-    txn.yield
+    txn.return
   }
   
   // Process and store - THIS FAILS: action method with return value from child module
@@ -64,7 +64,7 @@ txn.module @Datapath {
     txn.call @output_reg::@write(%processed) : (i32) -> ()
     %true = arith.constant true
     txn.call @status::@write(%true) : (i1) -> ()
-    txn.yield
+    txn.return
   }
   
   // Read output

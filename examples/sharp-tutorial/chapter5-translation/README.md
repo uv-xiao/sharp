@@ -8,14 +8,6 @@ Sharp modules can be translated to standard hardware description languages for s
 - Handling primitives in translation
 - Verification of translated designs
 
-## Translation Pipeline
-
-```
-Txn Module → FIRRTL → Verilog
-           ↓         ↓
-      (Simulation) (Synthesis)
-```
-
 ## Txn to FIRRTL Translation
 
 The `--convert-txn-to-firrtl` pass converts transaction-level modules to FIRRTL:
@@ -24,67 +16,6 @@ The `--convert-txn-to-firrtl` pass converts transaction-level modules to FIRRTL:
 - Primitives instantiate FIRRTL implementations
 - Schedule determines arbitration logic
 
-## Example: Counter Translation
-
-Let's translate a simple counter:
-
-### counter_hw.mlir
-
-```mlir
-// Hardware counter for translation
-txn.module @HardwareCounter {
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
-  
-  // Enable signal (input)
-  txn.value_method @getCount() -> i32 {
-    %val = txn.call @count::@read() : () -> i32
-    txn.return %val : i32
-  }
-  
-  // Increment action
-  txn.action_method @increment() {
-    %current = txn.call @count::@read() : () -> i32
-    %one = arith.constant 1 : i32
-    %next = arith.addi %current, %one : i32
-    txn.call @count::@write(%next) : (i32) -> ()
-    txn.yield
-  }
-  
-  // Decrement action
-  txn.action_method @decrement() {
-    %current = txn.call @count::@read() : () -> i32
-    %one = arith.constant 1 : i32
-    %next = arith.subi %current, %one : i32
-    txn.call @count::@write(%next) : (i32) -> ()
-    txn.yield
-  }
-  
-  // Reset action
-  txn.action_method @reset() {
-    %zero = arith.constant 0 : i32
-    txn.call @count::@write(%zero) : (i32) -> ()
-    txn.yield
-  }
-  
-  txn.schedule [@getCount, @increment, @decrement, @reset] {
-    conflict_matrix = {
-      // Value method doesn't conflict
-      "getCount,getCount" = 3 : i32,       // CF
-      "getCount,increment" = 3 : i32,      // CF
-      "getCount,decrement" = 3 : i32,      // CF
-      "getCount,reset" = 3 : i32,          // CF
-      
-      // Actions conflict with each other
-      "increment,increment" = 2 : i32,     // C
-      "increment,decrement" = 2 : i32,     // C
-      "increment,reset" = 2 : i32,         // C
-      "decrement,decrement" = 2 : i32,     // C
-      "decrement,reset" = 2 : i32,         // C
-      "reset,reset" = 2 : i32              // C
-    }
-  }
-}
-```
 
 ### Translating to FIRRTL
 
@@ -298,7 +229,7 @@ Different backends support:
 
 ## Timing Modes
 
-Sharp supports three timing modes for will-fire logic generation, each with different trade-offs:
+Sharp supports two timing modes for will-fire logic generation, each with different trade-offs:
 
 ### Static Mode (`--convert-txn-to-firrtl=will-fire-mode=static`)
 
@@ -332,42 +263,26 @@ Sharp supports three timing modes for will-fire logic generation, each with diff
 
 **Generated Logic:** More complex but fairer arbitration
 
-### Most-Dynamic Mode (`--convert-txn-to-firrtl=will-fire-mode=most-dynamic`)
-
-**Characteristics:**
-- Primitive-level tracking for maximum optimization
-- Pure conflict-based scheduling (no built-in priorities)
-- Minimal hardware overhead
-- Requires external arbitration
-
-**Use Cases:**
-- Maximum hardware efficiency
-- Complex designs with many primitives
-- When environment handles arbitration
-- High-performance applications
-
-**Generated Logic:** Simplest hardware, symmetric ready signals
 
 ### Timing Mode Comparison
 
 Run all timing modes with:
 ```bash
-./run_all_modes.sh
+./run_translation.sh     # Runs all modes
+./run.sh                 # Convenience wrapper for all modes
 ```
 
 Individual timing modes:
 ```bash
-./run_static.sh      # Conservative, predictable
-./run_dynamic.sh     # Balanced, fair
-./run_most_dynamic.sh # Minimal, efficient
+./run_translation.sh static        # Conservative, predictable
+./run_translation.sh dynamic       # Balanced, fair
 ```
 
 **Complexity Comparison (for counter example):**
 - Static: 93 lines FIRRTL, 15 will-fire signals, 26 logic gates
-- Dynamic: 108 lines FIRRTL, 18 will-fire signals, 30 logic gates  
-- Most-Dynamic: 87 lines FIRRTL, 12 will-fire signals, 20 logic gates
+- Dynamic: 108 lines FIRRTL, 18 will-fire signals, 30 logic gates
 
-Counter-intuitively, most-dynamic produces the simplest hardware because it enforces the fewest scheduling constraints.
+Dynamic mode provides a good balance between scheduling flexibility and hardware complexity.
 
 ## Module Nesting and Hierarchical Design
 
@@ -404,8 +319,7 @@ txn.module @DualProcessor {
 
 **Complexity comparison for nested modules:**
 - Static: 156 lines FIRRTL (most conservative)
-- Dynamic: 166 lines FIRRTL (balanced arbitration) 
-- Most-Dynamic: 144 lines FIRRTL (minimal constraints)
+- Dynamic: 166 lines FIRRTL (balanced arbitration)
 
 The timing mode differences become more pronounced with nested hierarchies, as each module's scheduling decisions interact with the parent module's timing mode.
 
@@ -428,7 +342,7 @@ The timing mode differences become more pronounced with nested hierarchies, as e
 - Conflict matrices become hardware arbiters
 - Methods map to well-defined port interfaces
 - Primitives need backend implementations
-- Three timing modes offer different performance/complexity trade-offs
+- Two timing modes offer different performance/complexity trade-offs
 - Choose timing mode based on your priority requirements
 - Verification ensures correctness across all modes
 
