@@ -333,7 +333,7 @@ static LogicalResult convertTxnModule(::sharp::txn::ModuleOp txnModule,
     auto wire = state.firrtlBuilder.create<WireOp>(
         instanceOp.getLoc(), wireType, 
         StringAttr::get(instanceOp.getContext(), instanceOp.getSymName()));
-    state.valueMapping.map(instanceOp.getResult(), wire.getResult());
+    // InstanceOp no longer has a result, so no mapping needed
   }
   
   // Generate will-fire logic
@@ -544,8 +544,7 @@ public:
     
     // For now, just create placeholder FIRRTL modules for primitives
     for (auto txnPrimitive : txnPrimitives) {
-      LLVM_DEBUG(llvm::dbgs() << "Creating Register primitive: " << txnPrimitive.getName() 
-                              << " with dataType: " << txnPrimitive.getTypeAttr() << "\n");
+      LLVM_DEBUG(llvm::dbgs() << "Creating primitive: " << txnPrimitive.getName() << "\n");
       
       // Create a simple FIRRTL module for the primitive
       SmallVector<PortInfo> primPorts;

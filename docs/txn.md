@@ -21,7 +21,7 @@ The `txn` dialect provides transactional hardware description with atomic execut
 ### Module Structure
 ```mlir
 txn.module @Counter {
-  %reg = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @count of @Register<i32> : index
   
   txn.rule @increment {
     %val = txn.call @count::@read() : () -> i32

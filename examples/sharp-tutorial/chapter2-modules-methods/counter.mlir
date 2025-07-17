@@ -1,8 +1,8 @@
 // A counter with increment, decrement, and configurable step
 txn.module @Counter attributes {top} {
   // State: current value and step size
-  %value = txn.instance @value of @Register<!firrtl.uint<32>> : !txn.module<"Register">
-  %step = txn.instance @step of @Register<!firrtl.uint<32>> : !txn.module<"Register">
+  txn.instance @value of @Register<!firrtl.uint<32>> 
+  txn.instance @step of @Register<!firrtl.uint<32>> 
   
   // Value method: read current count
   txn.value_method @getValue() -> !firrtl.uint<32> {

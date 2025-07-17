@@ -1,6 +1,6 @@
 // Hardware counter for translation
 txn.module @HardwareCounter attributes {top} {
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  txn.instance @count of @Register<i32> 
   
   // Enable signal (input)
   txn.value_method @getCount() -> i32 {

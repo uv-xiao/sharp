@@ -1,11 +1,11 @@
 // Module with pre-synthesis violations for testing
 txn.module @NonSynthesizable {
   // Violation 1: Using spec primitives (simulation-only)
-  %spec_fifo = txn.instance @spec_fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
-  %spec_mem = txn.instance @spec_mem of @SpecMemory<i32> : !txn.module<"SpecMemory">
+  txn.instance @spec_fifo of @SpecFIFO<i32> 
+  txn.instance @spec_mem of @SpecMemory<i32> 
   
   // Normal hardware primitive for comparison
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  txn.instance @reg of @Register<i32> 
   
   txn.action_method @useSpecPrimitives(%data: i32) {
     // This will fail synthesis - spec primitives cannot be synthesized
@@ -19,7 +19,7 @@ txn.module @NonSynthesizable {
 }
 
 txn.module @DisallowedOperations {
-  %reg = txn.instance @reg of @Register<f32> : !txn.module<"Register">
+  txn.instance @reg of @Register<f32> 
   
   txn.action_method @useFloatingPoint(%x: f32, %y: f32) {
     // Violation 2: Using disallowed operations (floating point not in allowlist)
@@ -47,8 +47,8 @@ txn.module @DisallowedOperations {
 
 txn.module @HierarchicalViolation attributes {top} {
   // Violation 4: Instantiating non-synthesizable module
-  %non_synth = txn.instance @child of @NonSynthesizable : !txn.module<"NonSynthesizable">
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  txn.instance @child of @NonSynthesizable 
+  txn.instance @reg of @Register<i32> 
   
   txn.action_method @useNonSynthChild(%data: i32) {
     // This module becomes non-synthesizable because it uses NonSynthesizable

@@ -2,7 +2,7 @@
 
 // Test 1: Valid value method with no conflicts
 txn.module @ValidValueMethod {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   // This value method has no conflicts specified, so it's valid
   txn.value_method @getValue() -> i32 {
@@ -23,7 +23,7 @@ txn.module @ValidValueMethod {
 
 // Test 2: Invalid value method with SB conflict
 txn.module @ValueMethodWithSBConflict {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   // expected-error@+1 {{value method 'getValue' has non-CF conflict with action 'setValue' (SB (Sequence Before))}}
   txn.value_method @getValue() -> i32 {
@@ -47,7 +47,7 @@ txn.module @ValueMethodWithSBConflict {
 
 // Test 3: Invalid value method with SA conflict
 txn.module @ValueMethodWithSAConflict {
-  %wire = txn.instance @wire of @Wire<i32> : !txn.module<"Wire">
+  %wire = txn.instance @wire of @Wire<i32> : index
   
   // expected-error@+1 {{value method 'readWire' has non-CF conflict with action 'writeWire' (SA (Sequence After))}}
   txn.value_method @readWire() -> i32 {
@@ -71,7 +71,7 @@ txn.module @ValueMethodWithSAConflict {
 
 // Test 4: Invalid value method with C conflict
 txn.module @ValueMethodWithConflict {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   // expected-error@+1 {{value method 'compute' has non-CF conflict with action 'update' (C (Conflict))}}
   txn.value_method @compute() -> i32 {
@@ -98,7 +98,7 @@ txn.module @ValueMethodWithConflict {
 
 // Test 5: Valid module with explicit CF conflicts
 txn.module @ExplicitCFConflicts {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   // This is valid - CF conflicts are allowed for value methods
   txn.value_method @getValue() -> i32 {
@@ -132,7 +132,7 @@ txn.module @ExplicitCFConflicts {
 
 // Test 6: Multiple value methods with conflicts
 txn.module @MultipleValueMethodsWithConflicts {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   // expected-error@+1 {{value method 'getValue1' has non-CF conflict with action 'setValue' (SB (Sequence Before))}}
   txn.value_method @getValue1() -> i32 {

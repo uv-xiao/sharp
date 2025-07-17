@@ -32,17 +32,20 @@ namespace txn {
                                                 unsigned addressWidth) {
   // Generate the full name for the interface type
   std::string fullName = ::sharp::txn::module_name_with_type_args(name, typeArgs);
+  std::string legalizedName = ::sharp::txn::legalizeName(fullName);
   
   // Create interface type for the primitive
-  auto moduleType = ::sharp::txn::ModuleType::get(builder.getContext(), 
-                                                  StringAttr::get(builder.getContext(), fullName));
+  auto moduleType = builder.getIndexType();
   
   // Create the primitive operation
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
-                                                            StringAttr::get(builder.getContext(), name),
-                                                            builder.getStringAttr("spec"), 
-                                                            TypeAttr::get(moduleType),
-                                                            /*type_parameters=*/typeArgs);
+                                                            StringAttr::get(builder.getContext(), legalizedName),
+                                                            /*type_parameters=*/typeArgs,
+                                                            /*const_parameters=*/ArrayAttr());
+  
+  // Store the original full name and set firrtl.impl to legalized name
+  primitive->setAttr("full_name", StringAttr::get(builder.getContext(), fullName));
+  primitive->setAttr("firrtl.impl", StringAttr::get(builder.getContext(), legalizedName));
   
   // Create a new builder for the primitive body
   OpBuilder::InsertionGuard guard(builder);

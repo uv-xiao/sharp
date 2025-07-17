@@ -35,7 +35,7 @@ Let's create a simple toggle module:
 // A module that toggles between 0 and 1
 txn.module @Toggle {
   // We'll use a Register primitive to store state
-  %state = txn.instance @state of @Register<i1> : !txn.module<"Register">
+  %state = txn.instance @state of @Register<i1> : index
   
   // Value method to read the current state
   txn.value_method @read() -> i1 {

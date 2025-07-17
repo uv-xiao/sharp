@@ -6,11 +6,11 @@
 
 // CHECK-LABEL: @ThreePhaseExecution
 txn.module @ThreePhaseExecution {
-  %counter = txn.instance @counter of @Register<i32> : !txn.module<"Register">
-  %cache = txn.instance @cache of @Register<i32> : !txn.module<"Register">
-  %valid = txn.instance @valid of @Register<i1> : !txn.module<"Register">
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
-  %wire = txn.instance @wire of @Wire<i32> : !txn.module<"Wire">
+  %counter = txn.instance @counter of @Register<i32> : index
+  %cache = txn.instance @cache of @Register<i32> : index
+  %valid = txn.instance @valid of @Register<i1> : index
+  %fifo = txn.instance @fifo of @FIFO<i32> : index
+  %wire = txn.instance @wire of @Wire<i32> : index
   
   // Value method - should be evaluated once per cycle in value phase
   txn.value_method @computeNext() -> i32 attributes {combinational} {
@@ -211,8 +211,8 @@ txn.module @ThreePhaseExecution {
 // Test module for phase separation
 // CHECK-LABEL: @PhaseVisibility
 txn.module @PhaseVisibility {
-  %state = txn.instance @state of @Register<i32> : !txn.module<"Register">
-  %temp = txn.instance @temp of @Wire<i32> : !txn.module<"Wire">
+  %state = txn.instance @state of @Register<i32> : index
+  %temp = txn.instance @temp of @Wire<i32> : index
   
   // This tests that wire writes in execution phase are visible in same cycle
   txn.rule @writer {

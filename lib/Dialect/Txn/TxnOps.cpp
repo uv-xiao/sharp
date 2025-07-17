@@ -49,52 +49,61 @@ LogicalResult ModuleOp::verify() {
 
 ParseResult PrimitiveOp::parse(OpAsmParser &parser, OperationState &result) {
   StringAttr nameAttr;
-  StringAttr typeAttr;
-  TypeAttr interfaceTypeAttr;
   SmallVector<Attribute> typeParams;
+  SmallVector<Attribute> constParams;
   
   // Parse symbol name
   if (parser.parseSymbolName(nameAttr, mlir::SymbolTable::getSymbolAttrName(),
                             result.attributes))
     return failure();
     
-  // Parse optional type parameters: <T1, T2, ...>
-  if (succeeded(parser.parseOptionalLess())) {
-    do {
-      Type paramType;
-      if (parser.parseType(paramType))
-        return failure();
-      typeParams.push_back(TypeAttr::get(paramType));
-    } while (succeeded(parser.parseOptionalComma()));
-    
-    if (parser.parseGreater())
+  // Parse optional type_args=[T1, T2] 
+  if (succeeded(parser.parseOptionalKeyword("type_args"))) {
+    if (parser.parseEqual() || parser.parseOptionalLSquare())
       return failure();
       
-    result.addAttribute("type_parameters", 
-                       parser.getBuilder().getArrayAttr(typeParams));
+    if (parser.parseOptionalRSquare().failed()) {
+      // Parse type parameters
+      do {
+        Type paramType;
+        if (parser.parseType(paramType))
+          return failure();
+        typeParams.push_back(TypeAttr::get(paramType));
+      } while (succeeded(parser.parseOptionalComma()));
+      
+      if (parser.parseRSquare())
+        return failure();
+    }
+      
+    if (!typeParams.empty()) {
+      result.addAttribute("type_parameters", 
+                         parser.getBuilder().getArrayAttr(typeParams));
+    }
   }
-    
-  // Parse 'type = "hw"' or 'type = "spec"'
-  if (parser.parseKeyword("type") || parser.parseEqual())
-    return failure();
-    
-  std::string typeStr;
-  if (parser.parseString(&typeStr))
-    return failure();
-    
-  typeAttr = parser.getBuilder().getStringAttr(typeStr);
-  result.addAttribute("type", typeAttr);
   
-  // Parse 'interface = !txn.module<"...">'
-  if (parser.parseKeyword("interface") || parser.parseEqual())
-    return failure();
-    
-  Type interfaceType;
-  if (parser.parseType(interfaceType))
-    return failure();
-    
-  interfaceTypeAttr = TypeAttr::get(interfaceType);
-  result.addAttribute("interface_type", interfaceTypeAttr);
+  // Parse optional const_args=[C1, C2]
+  if (succeeded(parser.parseOptionalKeyword("const_args"))) {
+    if (parser.parseEqual() || parser.parseOptionalLSquare())
+      return failure();
+      
+    if (parser.parseOptionalRSquare().failed()) {
+      // Parse const parameters
+      do {
+        Attribute constAttr;
+        if (parser.parseAttribute(constAttr))
+          return failure();
+        constParams.push_back(constAttr);
+      } while (succeeded(parser.parseOptionalComma()));
+      
+      if (parser.parseRSquare())
+        return failure();
+    }
+      
+    if (!constParams.empty()) {
+      result.addAttribute("const_parameters", 
+                         parser.getBuilder().getArrayAttr(constParams));
+    }
+  }
   
   // Parse the body region
   Region *body = result.addRegion();
@@ -115,33 +124,38 @@ void PrimitiveOp::print(OpAsmPrinter &p) {
   p << " @" << getSymName();
   
   // Print type parameters if present
-  if (auto typeParamsOpt = getTypeParameters()) {
+  auto typeParamsOpt = getTypeParameters();
+  if (typeParamsOpt) {
+    p << " type_args=[";
     auto typeParams = typeParamsOpt.value();
-    p << " <";  // Add space before type parameters
     llvm::interleaveComma(typeParams, p, [&](Attribute attr) {
       if (auto typeAttr = dyn_cast<TypeAttr>(attr))
         p.printType(typeAttr.getValue());
     });
-    p << ">";
+    p << "]";
   }
   
-  p << " type = \"" << getType() << "\"";
-  p << " interface = ";
-  p.printType(getInterfaceType());
+  // Print const parameters if present
+  auto constParamsOpt = getConstParameters();
+  if (constParamsOpt) {
+    p << " const_args=[";
+    auto constParams = constParamsOpt.value();
+    llvm::interleaveComma(constParams, p, [&](Attribute attr) {
+      p.printAttribute(attr);
+    });
+    p << "]";
+  }
+  
   p << " ";
   p.printRegion(getBody(), /*printEntryBlockArgs=*/false,
                 /*printBlockTerminators=*/true);
   p.printOptionalAttrDict((*this)->getAttrs(), 
-                         {mlir::SymbolTable::getSymbolAttrName(), "type", 
-                          "interface_type", "type_parameters"});
+                         {mlir::SymbolTable::getSymbolAttrName(), 
+                          "type_parameters", "const_parameters"});
 }
 
 LogicalResult PrimitiveOp::verify() {
-  // Verify type is either "hw" or "spec".
-  auto type = getType();
-  if (type != "hw" && type != "spec")
-    return emitOpError("type must be either 'hw' or 'spec'");
-  
+  // No specific verification needed for primitives
   return success();
 }
 
@@ -154,7 +168,6 @@ ParseResult InstanceOp::parse(OpAsmParser &parser, OperationState &result) {
   StringAttr nameAttr;
   FlatSymbolRefAttr moduleRef;
   SmallVector<Attribute> typeArgs;
-  Type resultType;
 
   // Parse: @instance_name
   if (parser.parseSymbolName(nameAttr, mlir::SymbolTable::getSymbolAttrName(),
@@ -191,11 +204,6 @@ ParseResult InstanceOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOptionalAttrDict(result.attributes))
     return failure();
 
-  // Parse: : type
-  if (parser.parseColon() || parser.parseType(resultType))
-    return failure();
-
-  result.addTypes(resultType);
   return success();
 }
 
@@ -216,9 +224,7 @@ void InstanceOp::print(OpAsmPrinter &p) {
   
   p.printOptionalAttrDict((*this)->getAttrs(), 
                          {mlir::SymbolTable::getSymbolAttrName(), 
-                          "module_name", "type_arguments"});
-  p << " : ";
-  p.printType(getType());
+                          "module_name", "type_arguments", "const_arguments"});
 }
 
 LogicalResult InstanceOp::verify() {
@@ -611,6 +617,19 @@ ArrayRef<Type> FuncOp::getCallableResults() {
 // Utility Functions
 //===----------------------------------------------------------------------===//
 
+std::string legalizeName(StringRef name) {
+  std::string legalized = name.str();
+  
+  // Replace all non-alphanumeric characters (except underscore) with underscores
+  for (char &c : legalized) {
+    if (!std::isalnum(c) && c != '_') {
+      c = '_';
+    }
+  }
+  
+  return legalized;
+}
+
 std::string module_name_with_type_args(mlir::StringRef baseName, mlir::ArrayAttr typeArgs) {
   std::string fullName = baseName.str();
   
@@ -625,6 +644,53 @@ std::string module_name_with_type_args(mlir::StringRef baseName, mlir::ArrayAttr
         fullName += typeStr;
       }
     }
+    fullName += ">";
+  }
+  
+  return fullName;
+}
+
+std::string module_name_with_type_args(mlir::StringRef baseName, mlir::ArrayAttr typeArgs, mlir::ArrayAttr constArgs) {
+  std::string fullName = baseName.str();
+  
+  if ((typeArgs && !typeArgs.empty()) || (constArgs && !constArgs.empty())) {
+    fullName += "<";
+    
+    // Add type arguments
+    if (typeArgs && !typeArgs.empty()) {
+      for (size_t i = 0; i < typeArgs.size(); ++i) {
+        if (i > 0) fullName += ",";
+        if (auto typeAttr = dyn_cast<TypeAttr>(typeArgs[i])) {
+          std::string typeStr;
+          llvm::raw_string_ostream stream(typeStr);
+          typeAttr.getValue().print(stream);
+          fullName += typeStr;
+        }
+      }
+    }
+    
+    // Add separator between type and const args if both exist
+    if ((typeArgs && !typeArgs.empty()) && (constArgs && !constArgs.empty())) {
+      fullName += ";";
+    }
+    
+    // Add const arguments
+    if (constArgs && !constArgs.empty()) {
+      for (size_t i = 0; i < constArgs.size(); ++i) {
+        if (i > 0) fullName += ",";
+        if (auto intAttr = dyn_cast<IntegerAttr>(constArgs[i])) {
+          fullName += std::to_string(intAttr.getInt());
+        } else if (auto strAttr = dyn_cast<StringAttr>(constArgs[i])) {
+          fullName += strAttr.getValue().str();
+        } else if (auto floatAttr = dyn_cast<FloatAttr>(constArgs[i])) {
+          std::string floatStr;
+          llvm::raw_string_ostream stream(floatStr);
+          floatAttr.getValue().print(stream);
+          fullName += floatStr;
+        }
+      }
+    }
+    
     fullName += ">";
   }
   

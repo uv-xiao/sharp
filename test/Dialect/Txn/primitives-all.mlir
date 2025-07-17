@@ -6,22 +6,22 @@
 // CHECK-LABEL: txn.module @AllPrimitives
 txn.module @AllPrimitives {
   // Hardware primitives with various types
-  %reg_i32 = txn.instance @reg_i32 of @Register<i32> : !txn.module<"Register">
-  %reg_i64 = txn.instance @reg_i64 of @Register<i64> : !txn.module<"Register">
-  %reg_i1 = txn.instance @reg_i1 of @Register<i1> : !txn.module<"Register">
+  %reg_i32 = txn.instance @reg_i32 of @Register<i32> : index
+  %reg_i64 = txn.instance @reg_i64 of @Register<i64> : index
+  %reg_i1 = txn.instance @reg_i1 of @Register<i1> : index
   
-  %wire_i32 = txn.instance @wire_i32 of @Wire<i32> : !txn.module<"Wire">
-  %wire_vec = txn.instance @wire_vec of @Wire<vector<4xi32>> : !txn.module<"Wire">
+  %wire_i32 = txn.instance @wire_i32 of @Wire<i32> : index
+  %wire_vec = txn.instance @wire_vec of @Wire<vector<4xi32>> : index
   
-  %fifo_i32 = txn.instance @fifo_i32 of @FIFO<i32> : !txn.module<"FIFO">
-  %fifo_i64 = txn.instance @fifo_i64 of @FIFO<i64> : !txn.module<"FIFO">
+  %fifo_i32 = txn.instance @fifo_i32 of @FIFO<i32> : index
+  %fifo_i64 = txn.instance @fifo_i64 of @FIFO<i64> : index
   
-  %mem_i32 = txn.instance @mem_i32 of @Memory<i32> : !txn.module<"Memory">
-  %mem_i8 = txn.instance @mem_i8 of @Memory<i8> : !txn.module<"Memory">
+  %mem_i32 = txn.instance @mem_i32 of @Memory<i32> : index
+  %mem_i8 = txn.instance @mem_i8 of @Memory<i8> : index
   
   // Spec primitives
-  %spec_fifo = txn.instance @spec_fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
-  %spec_mem = txn.instance @spec_mem of @SpecMemory<i64> : !txn.module<"SpecMemory">
+  %spec_fifo = txn.instance @spec_fifo of @SpecFIFO<i32> : index
+  %spec_mem = txn.instance @spec_mem of @SpecMemory<i64> : index
   
   // Complex interactions between primitives
   txn.action_method @transferData(%src_addr: i32, %dst_addr: i32) {

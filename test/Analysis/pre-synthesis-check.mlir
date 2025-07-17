@@ -3,7 +3,7 @@
 // Test pre-synthesis checking pass
 
 // Test case: spec primitive
-txn.primitive @SpecPrimitive type = "spec" interface = !txn.module<"SpecPrimitive"> {
+txn.primitive @SpecPrimitive type = "spec" interface = index {
   txn.fir_value_method @getValue() {firrtl.port = "data"} : () -> i32
   txn.schedule [] {conflict_matrix = {}}
 }
@@ -28,14 +28,14 @@ txn.primitive @SpecPrimitive type = "spec" interface = !txn.module<"SpecPrimitiv
 }) {sym_name = "MultiCycleMethodModule"} : () -> ()
 
 // Test case: primitive without firrtl.impl
-txn.primitive @NoFirrtlImpl type = "hw" interface = !txn.module<"NoFirrtlImpl"> {
+txn.primitive @NoFirrtlImpl type = "hw" interface = index {
   txn.fir_value_method @read() {firrtl.port = "data"} : () -> i32
   txn.schedule [] {conflict_matrix = {}}
 }
 
 // Test case: module instantiating non-synthesizable module
 txn.module @ParentModule {
-  %inst = txn.instance @spec_inst of @SpecPrimitive : !txn.module<"SpecPrimitive">
+  %inst = txn.instance @spec_inst of @SpecPrimitive : index
   
   txn.rule @useSpec {
     %val = txn.call @spec_inst::@getValue() : () -> i32
@@ -46,7 +46,7 @@ txn.module @ParentModule {
 }
 
 // Test case: synthesizable primitive
-txn.primitive @GoodPrimitive type = "hw" interface = !txn.module<"GoodPrimitive"> {
+txn.primitive @GoodPrimitive type = "hw" interface = index {
   txn.fir_value_method @read() {firrtl.port = "read_data"} : () -> i32
   txn.fir_action_method @write() {firrtl.data_port = "write_data", firrtl.enable_port = "write_enable"} : (i32) -> ()
   txn.clock_by @clk
@@ -61,7 +61,7 @@ txn.primitive @GoodPrimitive type = "hw" interface = !txn.module<"GoodPrimitive"
 
 // Test case: synthesizable module with combinational timing
 txn.module @GoodModule {
-  %inst = txn.instance @prim of @GoodPrimitive : !txn.module<"GoodPrimitive">
+  %inst = txn.instance @prim of @GoodPrimitive : index
   
   // Combinational rule (default timing)
   txn.rule @combRule {

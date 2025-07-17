@@ -2,7 +2,7 @@
 // RUN: sharp-opt %s --mlir-print-op-generic | FileCheck %s --check-prefix=GENERIC
 
 // Define primitives used in tests
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
   txn.clock_by @clk
@@ -17,7 +17,7 @@ txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
   }
 } {firrtl.impl = "Register_impl"}
 
-txn.primitive @SpecFIFO type = "spec" interface = !txn.module<"SpecFIFO"> {
+txn.primitive @SpecFIFO type = "spec" interface = index {
   txn.fir_value_method @notEmpty() : () -> i1
   txn.fir_value_method @notFull() : () -> i1
   txn.fir_action_method @enqueue() : (i32) -> ()
@@ -34,7 +34,7 @@ txn.primitive @SpecFIFO type = "spec" interface = !txn.module<"SpecFIFO"> {
   }
 } {firrtl.impl = "SpecFIFO_impl", software_semantics = {fifo_empty = true, fifo_data = []}}
 
-txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
+txn.primitive @Memory type = "hw" interface = index {
   txn.fir_value_method @read() : (i32) -> i32
   txn.fir_action_method @write() : (i32, i32) -> ()
   txn.clock_by @clk
@@ -51,8 +51,8 @@ txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
 
 // Test basic future and launch operations
 txn.module @MultiCycleExample {
-    %reg = txn.instance @reg of @Register : !txn.module<"Register">
-    %fifo = txn.instance @fifo of @SpecFIFO : !txn.module<"SpecFIFO">
+    %reg = txn.instance @reg of @Register : index
+    %fifo = txn.instance @fifo of @SpecFIFO : index
     
     // CHECK-LABEL: txn.action_method @staticLaunch
     txn.action_method @staticLaunch(%data: i32) {
@@ -174,7 +174,7 @@ txn.module @EmptyFuture {
 
 // Test nested launches
 txn.module @NestedLaunches {
-    %mem = txn.instance @mem of @Memory : !txn.module<"Memory">
+    %mem = txn.instance @mem of @Memory : index
     
     // CHECK-LABEL: txn.action_method @nestedLaunch
     txn.action_method @nestedLaunch(%addr: i32) {

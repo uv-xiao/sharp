@@ -34,10 +34,10 @@ Automatically generates missing primitive definitions for all primitives referen
 **Example**:
 ```mlir
 // Before:
-txn.instance @reg of @Register<i32> : !txn.module<"Register">
+txn.instance @reg of @Register<i32> : index
 
 // After PrimitiveGen:
-txn.primitive @Register<i32> type = "hw" interface = !txn.module<"Register<i32>"> {
+txn.primitive @Register<i32> type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32  // Value method (not scheduled)
   txn.fir_action_method @write() : (i32) -> ()  // Action method
   txn.clock_by @clk

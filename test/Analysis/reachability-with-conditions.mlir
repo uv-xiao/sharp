@@ -3,7 +3,7 @@
 // Test that reachability analysis adds condition operands to txn.call
 
 txn.module @ReachabilityTest {
-  %reg = txn.instance @r of @Register : !txn.module<"Register">
+  %reg = txn.instance @r of @Register : index
   
   // Rule with conditional method calls
   txn.rule @conditionalWrites {
@@ -73,7 +73,7 @@ txn.module @ReachabilityTest {
   }
 }
 
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
 }

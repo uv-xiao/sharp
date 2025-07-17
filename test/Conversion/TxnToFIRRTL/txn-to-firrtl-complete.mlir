@@ -4,7 +4,7 @@
 // Comprehensive test for TxnToFIRRTL conversion covering all features
 
 // Define primitives used in tests
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
   txn.clock_by @clk
@@ -19,7 +19,7 @@ txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
   }
 } {firrtl.impl = "Register_impl"}
 
-txn.primitive @Wire type = "hw" interface = !txn.module<"Wire"> {
+txn.primitive @Wire type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i1
   txn.fir_action_method @write() : (i1) -> ()
   txn.clock_by @clk
@@ -34,7 +34,7 @@ txn.primitive @Wire type = "hw" interface = !txn.module<"Wire"> {
   }
 } {firrtl.impl = "Wire_impl"}
 
-txn.primitive @FIFO type = "hw" interface = !txn.module<"FIFO"> {
+txn.primitive @FIFO type = "hw" interface = index {
   txn.fir_value_method @canEnq() : () -> i1
   txn.fir_value_method @canDeq() : () -> i1
   txn.fir_value_method @first() : () -> i32
@@ -60,7 +60,7 @@ txn.primitive @FIFO type = "hw" interface = !txn.module<"FIFO"> {
   }
 } {firrtl.impl = "FIFO_impl"}
 
-txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
+txn.primitive @Memory type = "hw" interface = index {
   txn.fir_value_method @read() : (i32) -> i32
   txn.fir_action_method @write() : (i32, i32) -> ()
   txn.clock_by @clk
@@ -78,11 +78,11 @@ txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
 // CHECK-LABEL: firrtl.circuit "CompleteTxnToFIRRTL"
 txn.module @CompleteTxnToFIRRTL {
   // Various primitive instances with different types
-  %ctrl = txn.instance @ctrl of @Register<i8> : !txn.module<"Register">
-  %data = txn.instance @data of @Register<i64> : !txn.module<"Register">
-  %status = txn.instance @status of @Wire<i1> : !txn.module<"Wire">
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
-  %mem = txn.instance @mem of @Memory<i32> : !txn.module<"Memory">
+  %ctrl = txn.instance @ctrl of @Register<i8> : index
+  %data = txn.instance @data of @Register<i64> : index
+  %status = txn.instance @status of @Wire<i1> : index
+  %fifo = txn.instance @fifo of @FIFO<i32> : index
+  %mem = txn.instance @mem of @Memory<i32> : index
   
   // CHECK: firrtl.module @CompleteTxnToFIRRTL
   // CHECK-DAG: %clock = firrtl.input "clock"
@@ -286,7 +286,7 @@ txn.module @CompleteTxnToFIRRTL {
 // Test instance generation
 // CHECK-LABEL: firrtl.module @WithInstances
 txn.module @WithInstances {
-  %sub = txn.instance @sub of @SubModule : !txn.module<"SubModule">
+  %sub = txn.instance @sub of @SubModule : index
   
   // CHECK: firrtl.instance sub @SubModule
   // CHECK: firrtl.connect %sub.clock, %clock
@@ -308,7 +308,7 @@ txn.module @WithInstances {
 
 // CHECK-LABEL: firrtl.module private @SubModule
 txn.module @SubModule {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   // CHECK: %processEN = firrtl.input
   // CHECK: %process_value = firrtl.input

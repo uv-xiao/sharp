@@ -2,7 +2,7 @@
 
 // Test will-fire logic with conflicts
 txn.module @ConflictTest {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.action_method @write1() {
     %c1 = arith.constant 1 : i32

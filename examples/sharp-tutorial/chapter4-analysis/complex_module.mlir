@@ -1,9 +1,9 @@
 // A module with various analysis challenges
 txn.module @ComplexModule attributes {top} {
   // State elements
-  %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
-  %flag = txn.instance @flag of @Register<i1> : !txn.module<"Register">
-  %temp = txn.instance @temp of @Wire<i32> : !txn.module<"Wire">
+  txn.instance @data of @Register<i32> 
+  txn.instance @flag of @Register<i1> 
+  txn.instance @temp of @Wire<i32> 
   
   // Action that reads and writes same register
   txn.action_method @readModifyWrite(%delta: i32) {

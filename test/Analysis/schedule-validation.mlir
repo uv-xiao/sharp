@@ -2,7 +2,7 @@
 
 // Test 1: Valid schedule with only actions
 txn.module @ValidSchedule {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.value_method @getValue() -> i32 {
     %v = txn.call @reg::@read() : () -> i32
@@ -30,7 +30,7 @@ txn.module @ValidSchedule {
 
 // Test 2: Invalid schedule with value method
 txn.module @InvalidScheduleWithValueMethod {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.value_method @getValue() -> i32 {
     %v = txn.call @reg::@read() : () -> i32
@@ -50,7 +50,7 @@ txn.module @InvalidScheduleWithValueMethod {
 
 // Test 3: Schedule with non-existent action
 txn.module @ScheduleWithNonExistentAction {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.action_method @setValue(%v: i32) {
     txn.call @reg::@write(%v) : (i32) -> ()
@@ -65,7 +65,7 @@ txn.module @ScheduleWithNonExistentAction {
 
 // Test 4: Empty schedule is valid
 txn.module @EmptySchedule {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.value_method @getValue() -> i32 {
     %v = txn.call @reg::@read() : () -> i32
@@ -80,7 +80,7 @@ txn.module @EmptySchedule {
 
 // Test 5: Module with empty schedule is valid
 txn.module @EmptySchedule2 {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.value_method @getValue() -> i32 {
     %v = txn.call @reg::@read() : () -> i32
@@ -95,7 +95,7 @@ txn.module @EmptySchedule2 {
 
 // Test 6: Schedule with multiple value methods
 txn.module @MultipleValueMethodsInSchedule {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.value_method @getValue1() -> i32 {
     %v = txn.call @reg::@read() : () -> i32

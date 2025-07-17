@@ -1,12 +1,12 @@
 // Example demonstrating SpecFIFO for verification
 txn.module @NetworkInterface attributes {top} {
   // Unbounded packet queue for specification
-  %rx_queue = txn.instance @rx_queue of @SpecFIFO<i64> : !txn.module<"SpecFIFO">
-  %tx_queue = txn.instance @tx_queue of @SpecFIFO<i64> : !txn.module<"SpecFIFO">
+  txn.instance @rx_queue of @SpecFIFO<i64> 
+  txn.instance @tx_queue of @SpecFIFO<i64> 
   
   // Statistics
-  %rx_count = txn.instance @rx_count of @Register<i32> : !txn.module<"Register">
-  %tx_count = txn.instance @tx_count of @Register<i32> : !txn.module<"Register">
+  txn.instance @rx_count of @Register<i32> 
+  txn.instance @tx_count of @Register<i32> 
   
   // Receive packet
   txn.action_method @receive(%packet: i64) {

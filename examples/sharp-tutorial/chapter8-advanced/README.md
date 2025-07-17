@@ -33,7 +33,7 @@ txn.primitive @CAM<width: i32, depth: i32> {
 
 // Using custom primitive
 txn.module @NetworkRouter {
-  %cam = txn.instance @cam of @CAM<32, 1024> : !txn.module<"CAM">
+  %cam = txn.instance @cam of @CAM<32, 1024> : index
   
   txn.action_method @add_route(%prefix: i32, %port: i32) {
     txn.call @cam::@write(%prefix, %port) : (i32, i32) -> ()
@@ -97,8 +97,8 @@ txn.primitive @MultiPortRAM<width: i32, depth: i32, read_ports: i32, write_ports
 ```mlir
 // Module with formal properties
 txn.module @SecureCounter {
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
-  %max = txn.instance @max of @Register<i32> : !txn.module<"Register">
+  %count = txn.instance @count of @Register<i32> : index
+  %max = txn.instance @max of @Register<i32> : index
   
   txn.action_method @set_max(%limit: i32) {
     txn.call @max::@write(%limit) : (i32) -> ()
@@ -144,7 +144,7 @@ txn.module @SecureCounter {
 ```mlir
 // Deadlock-free protocol verification
 txn.module @Protocol {
-  %state = txn.instance @state of @Register<i8> : !txn.module<"Register">
+  %state = txn.instance @state of @Register<i8> : index
   
   // State encoding
   %IDLE = arith.constant 0 : i8
@@ -199,13 +199,13 @@ txn.module @Protocol {
 // Optimized pipeline with forwarding
 txn.module @OptimizedPipeline {
   // Pipeline registers with bypass logic
-  %stage1 = txn.instance @stage1 of @Register<i32> : !txn.module<"Register">
-  %stage2 = txn.instance @stage2 of @Register<i32> : !txn.module<"Register">
-  %stage3 = txn.instance @stage3 of @Register<i32> : !txn.module<"Register">
+  %stage1 = txn.instance @stage1 of @Register<i32> : index
+  %stage2 = txn.instance @stage2 of @Register<i32> : index
+  %stage3 = txn.instance @stage3 of @Register<i32> : index
   
   // Forwarding paths
-  %fwd1to3 = txn.instance @fwd1to3 of @Wire<i32> : !txn.module<"Wire">
-  %fwd2to3 = txn.instance @fwd2to3 of @Wire<i32> : !txn.module<"Wire">
+  %fwd1to3 = txn.instance @fwd1to3 of @Wire<i32> : index
+  %fwd2to3 = txn.instance @fwd2to3 of @Wire<i32> : index
   
   txn.action_method @process(%use_fwd: i1) {
     scf.if %use_fwd {
@@ -264,10 +264,10 @@ txn.module @OptimizedPipeline {
 // Banking and parallelism
 txn.module @BankedMemory {
   // 4-way banked memory for parallel access
-  %bank0 = txn.instance @bank0 of @BRAM<i32> : !txn.module<"BRAM">
-  %bank1 = txn.instance @bank1 of @BRAM<i32> : !txn.module<"BRAM">
-  %bank2 = txn.instance @bank2 of @BRAM<i32> : !txn.module<"BRAM">
-  %bank3 = txn.instance @bank3 of @BRAM<i32> : !txn.module<"BRAM">
+  %bank0 = txn.instance @bank0 of @BRAM<i32> : index
+  %bank1 = txn.instance @bank1 of @BRAM<i32> : index
+  %bank2 = txn.instance @bank2 of @BRAM<i32> : index
+  %bank3 = txn.instance @bank3 of @BRAM<i32> : index
   
   txn.action_method @parallel_read(%addr0: i32, %addr1: i32, %addr2: i32, %addr3: i32) 
       -> (i32, i32, i32, i32) {
@@ -312,14 +312,14 @@ txn.module @BankedMemory {
 // High-performance cache controller
 txn.module @CacheController {
   // Cache state
-  %tags = txn.instance @tags of @CAM<20, 256> : !txn.module<"CAM">
-  %data = txn.instance @data of @BRAM<i64> : !txn.module<"BRAM">
-  %valid = txn.instance @valid of @Register<i256> : !txn.module<"Register">
-  %dirty = txn.instance @dirty of @Register<i256> : !txn.module<"Register">
+  %tags = txn.instance @tags of @CAM<20, 256> : index
+  %data = txn.instance @data of @BRAM<i64> : index
+  %valid = txn.instance @valid of @Register<i256> : index
+  %dirty = txn.instance @dirty of @Register<i256> : index
   
   // Statistics
-  %hits = txn.instance @hits of @Register<i64> : !txn.module<"Register">
-  %misses = txn.instance @misses of @Register<i64> : !txn.module<"Register">
+  %hits = txn.instance @hits of @Register<i64> : index
+  %misses = txn.instance @misses of @Register<i64> : index
   
   txn.action_method @read(%addr: i32) -> i64 {
     // Extract tag and index
@@ -396,14 +396,14 @@ txn.module @CacheController {
 // AES encryption engine
 txn.module @AESEngine {
   // State array
-  %state = txn.instance @state of @Register<i128> : !txn.module<"Register">
+  %state = txn.instance @state of @Register<i128> : index
   
   // Round keys
-  %round_keys = txn.instance @keys of @ROM<i128> : !txn.module<"ROM">
-  %round = txn.instance @round of @Register<i8> : !txn.module<"Register">
+  %round_keys = txn.instance @keys of @ROM<i128> : index
+  %round = txn.instance @round of @Register<i8> : index
   
   // S-box lookup
-  %sbox = txn.instance @sbox of @ROM<i8> : !txn.module<"ROM">
+  %sbox = txn.instance @sbox of @ROM<i8> : index
   
   txn.action_method @load_plaintext(%data: i128) {
     txn.call @state::@write(%data) : (i128) -> ()
@@ -482,7 +482,7 @@ txn.module @AESEngine {
 ```mlir
 // Module with extensive debugging
 txn.module @DebugExample {
-  %state = txn.instance @state of @Register<i32> : !txn.module<"Register">
+  %state = txn.instance @state of @Register<i32> : index
   
   // Debug probes
   txn.debug_probe @state_probe {
@@ -491,8 +491,8 @@ txn.module @DebugExample {
   }
   
   // Performance counters
-  %method_calls = txn.instance @calls of @Register<i64> : !txn.module<"Register">
-  %cycle_count = txn.instance @cycles of @Register<i64> : !txn.module<"Register">
+  %method_calls = txn.instance @calls of @Register<i64> : index
+  %cycle_count = txn.instance @cycles of @Register<i64> : index
   
   txn.action_method @process(%input: i32) {
     // Increment call counter

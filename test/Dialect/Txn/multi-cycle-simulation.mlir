@@ -1,7 +1,7 @@
 // RUN: sharp-opt %s --sharp-simulate="mode=translation" | FileCheck %s
 
 // Define primitives
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
   txn.clock_by @clk
@@ -17,7 +17,7 @@ txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
 } {firrtl.impl = "Register_impl"}
 
 txn.module @MultiCycleCounter {
-  %count = txn.instance @count of @Register : !txn.module<"Register">
+  %count = txn.instance @count of @Register : index
   
   txn.action_method @increment() {
     // Per-cycle action

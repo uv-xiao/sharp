@@ -1,14 +1,14 @@
 // High-performance cache controller
 txn.module @CacheController {
   // Cache state - simplified for tutorial
-  %data = txn.instance @data of @Register<i64> : !txn.module<"Register">
-  %tag = txn.instance @tag of @Register<i32> : !txn.module<"Register">
-  %valid = txn.instance @valid of @Register<i1> : !txn.module<"Register">
-  %dirty = txn.instance @dirty of @Register<i1> : !txn.module<"Register">
+  txn.instance @data of @Register<i64> 
+  txn.instance @tag of @Register<i32> 
+  txn.instance @valid of @Register<i1> 
+  txn.instance @dirty of @Register<i1> 
   
   // Statistics
-  %hits = txn.instance @hits of @Register<i64> : !txn.module<"Register">
-  %misses = txn.instance @misses of @Register<i64> : !txn.module<"Register">
+  txn.instance @hits of @Register<i64> 
+  txn.instance @misses of @Register<i64> 
   
   txn.action_method @read(%addr: i32) -> i64 {
     // Extract tag from address

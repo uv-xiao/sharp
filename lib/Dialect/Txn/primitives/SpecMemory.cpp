@@ -26,17 +26,19 @@ namespace txn {
                                                     unsigned defaultLatency) {
   // Generate the full name for the interface type
   std::string fullName = ::sharp::txn::module_name_with_type_args(name, typeArgs);
+  std::string legalizedName = ::sharp::txn::legalizeName(fullName);
   
   // Create interface type for the primitive
-  auto moduleType = ::sharp::txn::ModuleType::get(builder.getContext(), 
-                                                  StringAttr::get(builder.getContext(), fullName));
+  auto moduleType = builder.getIndexType();
   
   // Create the primitive operation
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
-                                                            StringAttr::get(builder.getContext(), name),
-                                                            builder.getStringAttr("spec"), 
-                                                            TypeAttr::get(moduleType),
-                                                            /*type_parameters=*/typeArgs);
+                                                            StringAttr::get(builder.getContext(), legalizedName),
+                                                            /*type_parameters=*/typeArgs,
+                                                            /*const_parameters=*/ArrayAttr());
+  
+  // Store the original full name - spec primitives don't need firrtl.impl
+  primitive->setAttr("full_name", StringAttr::get(builder.getContext(), fullName));
   
   // Create a new builder for the primitive body
   OpBuilder::InsertionGuard guard(builder);

@@ -4,9 +4,9 @@
 // Comprehensive test for will-fire generation in all modes
 
 txn.module @WillFireModes {
-  %reg1 = txn.instance @reg1 of @Register<i32> : !txn.module<"Register">
-  %reg2 = txn.instance @reg2 of @Register<i32> : !txn.module<"Register">
-  %wire = txn.instance @wire of @Wire<i1> : !txn.module<"Wire">
+  %reg1 = txn.instance @reg1 of @Register<i32> : index
+  %reg2 = txn.instance @reg2 of @Register<i32> : index
+  %wire = txn.instance @wire of @Wire<i1> : index
   
   // Action with conditional abort - tests reach_abort calculation
   txn.action_method @conditionalAbort(%x: i32) {

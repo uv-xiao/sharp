@@ -4,10 +4,10 @@
 
 // CHECK-LABEL: txn.module @MultiCycleProcessor
 txn.module @MultiCycleProcessor {
-  %pc = txn.instance @pc of @Register<i32> : !txn.module<"Register">
-  %state = txn.instance @state of @Register<i8> : !txn.module<"Register">
-  %mem = txn.instance @mem of @Memory<i32> : !txn.module<"Memory">
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
+  %pc = txn.instance @pc of @Register<i32> : index
+  %state = txn.instance @state of @Register<i8> : index
+  %mem = txn.instance @mem of @Memory<i32> : index
+  %fifo = txn.instance @fifo of @FIFO<i32> : index
   
   // Simple value method
   txn.value_method @decode(%instr: i32) -> i8 attributes {combinational} {

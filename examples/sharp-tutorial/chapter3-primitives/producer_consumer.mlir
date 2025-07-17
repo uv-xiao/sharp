@@ -1,13 +1,13 @@
 // Producer-Consumer pattern using FIFO
 txn.module @ProducerConsumer attributes {top} {
   // FIFO buffer between producer and consumer
-  %buffer = txn.instance @buffer of @FIFO<i32> : !txn.module<"FIFO">
+  txn.instance @buffer of @FIFO<i32> 
   
   // State for producer
-  %prod_count = txn.instance @prod_count of @Register<i32> : !txn.module<"Register">
+  txn.instance @prod_count of @Register<i32> 
   
   // State for consumer  
-  %cons_sum = txn.instance @cons_sum of @Register<i32> : !txn.module<"Register">
+  txn.instance @cons_sum of @Register<i32> 
   
   // Producer action: generate sequential values
   txn.action_method @produce() {

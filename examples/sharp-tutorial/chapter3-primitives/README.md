@@ -43,13 +43,13 @@ Let's build a system that demonstrates FIFO usage:
 // Producer-Consumer pattern using FIFO
 txn.module @ProducerConsumer {
   // FIFO buffer between producer and consumer
-  %buffer = txn.instance @buffer of @FIFO<i32> : !txn.module<"FIFO">
+  %buffer = txn.instance @buffer of @FIFO<i32> : index
   
   // State for producer
-  %prod_count = txn.instance @prod_count of @Register<i32> : !txn.module<"Register">
+  %prod_count = txn.instance @prod_count of @Register<i32> : index
   
   // State for consumer  
-  %cons_sum = txn.instance @cons_sum of @Register<i32> : !txn.module<"Register">
+  %cons_sum = txn.instance @cons_sum of @Register<i32> : index
   
   // Producer action: generate sequential values
   txn.action_method @produce() {
@@ -199,7 +199,7 @@ The Memory primitive provides address-based storage:
 
 ```mlir
 // See memory_example.mlir
-%mem = txn.instance @mem of @Memory<i64> : !txn.module<"Memory">
+%mem = txn.instance @mem of @Memory<i64> : index
 
 // Read from address
 %data = txn.call @mem::@read(%addr) : (i32) -> i64
@@ -217,7 +217,7 @@ SpecFIFO is an unbounded FIFO for verification:
 
 ```mlir
 // See specfifo_example.mlir
-%fifo = txn.instance @fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
+%fifo = txn.instance @fifo of @SpecFIFO<i32> : index
 
 // Always succeeds
 txn.call @fifo::@enqueue(%data) : (i32) -> ()
@@ -254,8 +254,8 @@ sharp-opt specfifo_example.mlir
 ### Parametric Primitives
 Primitives can be parameterized by type:
 ```mlir
-%fifo = txn.instance @data_fifo of @FIFO<i64> : !txn.module<"FIFO">
-%reg = txn.instance @wide_reg of @Register<i128> : !txn.module<"Register">
+%fifo = txn.instance @data_fifo of @FIFO<i64> : index
+%reg = txn.instance @wide_reg of @Register<i128> : index
 ```
 
 ### Custom Primitives

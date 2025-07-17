@@ -27,9 +27,9 @@ We've been using TL simulation throughout the tutorial:
 // Three-stage pipeline example
 txn.module @Pipeline {
   // Pipeline registers
-  %stage1 = txn.instance @stage1 of @Register<i32> : !txn.module<"Register">
-  %stage2 = txn.instance @stage2 of @Register<i32> : !txn.module<"Register">
-  %stage3 = txn.instance @stage3 of @Register<i32> : !txn.module<"Register">
+  %stage1 = txn.instance @stage1 of @Register<i32> : index
+  %stage2 = txn.instance @stage2 of @Register<i32> : index
+  %stage3 = txn.instance @stage3 of @Register<i32> : index
   
   // Input new data
   txn.action_method @input(%data: i32) {
@@ -96,7 +96,7 @@ Arcilator provides cycle-accurate RTL simulation:
 ```mlir
 // Simple counter for RTL simulation
 txn.module @RTLCounter {
-  %count = txn.instance @count of @Register<i8> : !txn.module<"Register">
+  %count = txn.instance @count of @Register<i8> : index
   
   txn.value_method @read() -> i8 {
     %val = txn.call @count::@read() : () -> i8
@@ -149,10 +149,10 @@ Mix transaction-level and RTL components:
 // System with both TL and RTL components
 txn.module @HybridSystem {
   // TL component - behavioral FIFO
-  %tl_fifo = txn.instance @tl_fifo of @FIFO<i32> : !txn.module<"FIFO">
+  %tl_fifo = txn.instance @tl_fifo of @FIFO<i32> : index
   
   // RTL component - synthesizable counter
-  %rtl_counter = txn.instance @rtl_counter of @Register<i32> : !txn.module<"Register">
+  %rtl_counter = txn.instance @rtl_counter of @Register<i32> : index
   
   // Bridge between domains
   txn.action_method @transfer() {
@@ -179,7 +179,7 @@ txn.module @HybridSystem {
 ```mlir
 // Module for performance testing
 txn.module @PerfTest {
-  %acc = txn.instance @acc of @Register<i64> : !txn.module<"Register">
+  %acc = txn.instance @acc of @Register<i64> : index
   
   // Computation-heavy method
   txn.action_method @compute(%n: i32) {

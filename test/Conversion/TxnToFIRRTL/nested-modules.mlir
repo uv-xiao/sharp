@@ -19,8 +19,8 @@ txn.module @Counter {
 }
 
 txn.module @DualCounter {
-  %low = txn.instance @low of @Counter : !txn.module<"Counter">
-  %high = txn.instance @high of @Counter : !txn.module<"Counter">
+  %low = txn.instance @low of @Counter : index
+  %high = txn.instance @high of @Counter : index
   
   txn.action_method @increment() {
     // Increment low counter
@@ -58,8 +58,8 @@ txn.module @DualCounter {
 }
 
 txn.module @System {
-  %counter1 = txn.instance @counter1 of @DualCounter : !txn.module<"DualCounter">
-  %counter2 = txn.instance @counter2 of @DualCounter : !txn.module<"DualCounter">
+  %counter1 = txn.instance @counter1 of @DualCounter : index
+  %counter2 = txn.instance @counter2 of @DualCounter : index
   
   txn.rule @sync_counters {
     %val1 = txn.call @counter1::@read() : () -> i32

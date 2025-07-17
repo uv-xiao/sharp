@@ -54,176 +54,6 @@ namespace txn = ::sharp::txn;
 
 using namespace ::circt::firrtl;
 
-//===----------------------------------------------------------------------===//
-// Type Conversion Utilities
-//===----------------------------------------------------------------------===//
-
-/// Convert Sharp types to FIRRTL types
-static FIRRTLType convertType(Type type) {
-  MLIRContext *ctx = type.getContext();
-  
-  if (auto intType = dyn_cast<IntegerType>(type)) {
-    if (intType.isSigned()) {
-      return SIntType::get(ctx, intType.getWidth());
-    } else {
-      return UIntType::get(ctx, intType.getWidth());
-    }
-  }
-  
-  if (auto clockType = dyn_cast<::circt::firrtl::ClockType>(type)) {
-    return clockType;
-  }
-  
-  if (auto resetType = dyn_cast<::circt::firrtl::ResetType>(type)) {
-    return resetType;
-  }
-  
-  // For other types, return as-is (they might already be FIRRTL types)
-  if (auto firrtlType = dyn_cast<FIRRTLType>(type)) {
-    return firrtlType;
-  }
-  
-  // Default to UInt<1> for unknown types
-  return UIntType::get(ctx, 1);
-}
-
-/// Convert a value to FIRRTL type if needed
-static Value convertValueToFIRRTL(Value value, PatternRewriter &rewriter) {
-  // If already FIRRTL type, return as-is
-  if (isa<FIRRTLType>(value.getType())) {
-    return value;
-  }
-  
-  // If it's a constant, convert it to FIRRTL constant
-  if (auto constOp = value.getDefiningOp<arith::ConstantOp>()) {
-    if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue())) {
-      FIRRTLType firrtlType = convertType(constOp.getType());
-      bool isUnsigned = isa<UIntType>(firrtlType);
-      llvm::APSInt constValue(intAttr.getValue(), isUnsigned);
-      auto firrtlConstant = rewriter.create<ConstantOp>(
-          constOp.getLoc(), firrtlType, constValue);
-      return firrtlConstant.getResult();
-    }
-  }
-  
-  // For other values, create an unrealized cast for now
-  // This will be handled properly by subsequent passes
-  FIRRTLType firrtlType = convertType(value.getType());
-  auto cast = rewriter.create<mlir::UnrealizedConversionCastOp>(
-      value.getLoc(), firrtlType, value);
-  return cast.getResult(0);
-}
-
-//===----------------------------------------------------------------------===//
-// Conversion Patterns
-//===----------------------------------------------------------------------===//
-
-/// Convert arith.constant operations to firrtl.constant
-class ArithConstantToFIRRTLPattern : public OpRewritePattern<arith::ConstantOp> {
-public:
-  using OpRewritePattern::OpRewritePattern;
-  
-  LogicalResult matchAndRewrite(arith::ConstantOp op,
-                               PatternRewriter &rewriter) const override {
-    LLVM_DEBUG(llvm::dbgs() << "Converting arith.constant to firrtl.constant\n");
-    
-    auto intAttr = dyn_cast<IntegerAttr>(op.getValue());
-    if (!intAttr) {
-      return rewriter.notifyMatchFailure(op, "Non-integer constant not supported");
-    }
-    
-    // Convert to FIRRTL type directly
-    Type originalType = op.getType();
-    FIRRTLType firrtlType = convertType(originalType);
-    
-    bool isUnsigned = isa<UIntType>(firrtlType);
-    llvm::APSInt value(intAttr.getValue(), isUnsigned);
-    
-    // Create FIRRTL constant with the converted type
-    auto firrtlConstant = rewriter.create<ConstantOp>(
-        op.getLoc(), firrtlType, value);
-    
-    rewriter.replaceOp(op, firrtlConstant.getResult());
-    return success();
-  }
-};
-
-/// Convert arith binary operations to FIRRTL primitives
-template<typename ArithOp, typename FIRRTLOp>
-class ArithBinaryToFIRRTLPattern : public OpRewritePattern<ArithOp> {
-public:
-  using OpRewritePattern<ArithOp>::OpRewritePattern;
-  
-  LogicalResult matchAndRewrite(ArithOp op,
-                               PatternRewriter &rewriter) const override {
-    LLVM_DEBUG(llvm::dbgs() << "Converting arith binary op to FIRRTL\n");
-    
-    // Convert operands to FIRRTL types
-    Value lhs = convertValueToFIRRTL(op.getLhs(), rewriter);
-    Value rhs = convertValueToFIRRTL(op.getRhs(), rewriter);
-    
-    // For FIRRTL operations, let them infer their own result types
-    // Don't force the result type - let FIRRTL type inference handle it
-    auto firrtlOp = rewriter.create<FIRRTLOp>(
-        op.getLoc(), lhs, rhs);
-    
-    // If the inferred result type is different from the expected type,
-    // we need to cast it to the expected type
-    Type expectedType = convertType(op.getType());
-    Value result = firrtlOp.getResult();
-    
-    // If the types don't match, add a cast operation
-    if (result.getType() != expectedType) {
-      // Use bits operation to cast to the expected width
-      if (auto expectedUInt = dyn_cast<UIntType>(expectedType)) {
-        result = rewriter.create<BitsPrimOp>(
-            op.getLoc(), expectedUInt, result, 
-            expectedUInt.getWidth().value() - 1, 0);
-      } else if (auto expectedSInt = dyn_cast<SIntType>(expectedType)) {
-        result = rewriter.create<BitsPrimOp>(
-            op.getLoc(), expectedSInt, result, 
-            expectedSInt.getWidth().value() - 1, 0);
-      }
-    }
-    
-    rewriter.replaceOp(op, result);
-    return success();
-  }
-};
-
-/// Pattern to eliminate redundant unrealized conversion casts
-/// Handles pattern: A -> cast -> B -> cast -> A => A
-class EliminateRedundantCastsPattern : public OpRewritePattern<::mlir::UnrealizedConversionCastOp> {
-public:
-  using OpRewritePattern::OpRewritePattern;
-  
-  LogicalResult matchAndRewrite(::mlir::UnrealizedConversionCastOp op,
-                               PatternRewriter &rewriter) const override {
-    // Check if this cast has a single operand and result
-    if (op.getNumOperands() != 1 || op.getNumResults() != 1)
-      return failure();
-      
-    Value input = op.getOperand(0);
-    Value output = op.getResult(0);
-    
-    // Check if the input is also from a cast
-    auto inputCast = input.getDefiningOp<::mlir::UnrealizedConversionCastOp>();
-    if (!inputCast || inputCast.getNumOperands() != 1 || inputCast.getNumResults() != 1)
-      return failure();
-      
-    Value originalValue = inputCast.getOperand(0);
-    
-    // Check if we have A -> B -> A pattern
-    if (originalValue.getType() == output.getType()) {
-      rewriter.replaceOp(op, originalValue);
-      return success();
-    }
-    
-    return failure();
-  }
-};
-
-// Removed unused conversion patterns since we're using simpler rewrite patterns now
 
 //===----------------------------------------------------------------------===//
 // TypeConverter for Txn to FIRRTL
@@ -233,34 +63,69 @@ class TxnToFIRRTLTypeConverter : public mlir::TypeConverter {
 public:
   TxnToFIRRTLTypeConverter() {
     // Convert integer types to FIRRTL types
-    addConversion([](Type type) -> Type {
-      if (auto intType = dyn_cast<IntegerType>(type)) {
-        if (intType.isSigned()) {
-          return SIntType::get(type.getContext(), intType.getWidth());
-        } else {
-          return UIntType::get(type.getContext(), intType.getWidth());
-        }
+    addConversion([](IntegerType type) -> std::optional<Type> {
+      LLVM_DEBUG(llvm::dbgs() << "Running TxnToFIRRTLTypeConverter::conversion for type: " << type << "\n");
+     
+      if (type.isSigned()) {
+        return SIntType::get(type.getContext(), type.getWidth());
+      } else {
+        return UIntType::get(type.getContext(), type.getWidth());
       }
-      
-      // FIRRTL types are already legal
-      if (isa<FIRRTLType>(type)) {
-        return type;
-      }
-      
-      // Preserve other types (like txn.module type)
+    });
+
+    // Firrtl types are legal
+    addConversion([](FIRRTLType type) -> std::optional<Type> {
       return type;
     });
     
     // Add target materialization to handle conversions
     addTargetMaterialization([](OpBuilder &builder, Type resultType,
                                ValueRange inputs, Location loc) -> Value {
+
+      LLVM_DEBUG(llvm::dbgs() << "Running TxnToFIRRTLTypeConverter::target materialization\n");
+      // debug, print inputs and resultType
+      llvm::errs() << "inputs: ";
+      for (auto input : inputs) {
+        llvm::errs() << input.getType() << " ";
+      }
+      llvm::errs() << " =>  resultType: " << resultType << "\n";
+
       if (inputs.size() != 1)
         return nullptr;
       
       // If types match, return the input directly
       if (inputs[0].getType() == resultType)
         return inputs[0];
-        
+
+      // If the firrtl type has unmatched width, use bits for truncation or pad for extension
+      if (auto result_ty = dyn_cast<UIntType>(resultType)) {
+        if (auto input_ty = dyn_cast<UIntType>(inputs[0].getType())) {
+          auto result_width = result_ty.getWidth();
+          auto input_width = input_ty.getWidth();
+          if (result_width.value() > input_width.value()) {
+            return builder.create<PadPrimOp>(loc, result_ty, inputs[0]);
+          } else if (result_width.value() < input_width.value()) {
+            return builder.create<BitsPrimOp>(loc, result_ty, inputs[0], result_width.value() - 1, 0);
+          }
+        } else if (auto input_ty = dyn_cast<SIntType>(inputs[0].getType())) {
+          // use bitcast to convert to UIntType
+          return builder.create<BitCastOp>(loc, result_ty, inputs[0]);
+        } 
+      } else if (auto result_ty = dyn_cast<SIntType>(resultType)) {
+        if (auto input_ty = dyn_cast<SIntType>(inputs[0].getType())) {
+          auto result_width = result_ty.getWidth();
+          auto input_width = input_ty.getWidth();
+          if (result_width.value() > input_width.value()) {
+            return builder.create<PadPrimOp>(loc, result_ty, inputs[0]);
+          } else if (result_width.value() < input_width.value()) {
+            return builder.create<BitsPrimOp>(loc, result_ty, inputs[0], result_width.value() - 1, 0);
+          }
+        } else if (auto input_ty = dyn_cast<UIntType>(inputs[0].getType())) {
+          // use bitcast to convert to SIntType
+          return builder.create<BitCastOp>(loc, result_ty, inputs[0]);
+        }
+      }
+      
       // Otherwise, create an unrealized conversion cast
       auto cast = builder.create<mlir::UnrealizedConversionCastOp>(
           loc, resultType, inputs[0]);
@@ -276,7 +141,7 @@ public:
       // If types match, return the input directly
       if (inputs[0].getType() == resultType)
         return inputs[0];
-        
+      
       // Otherwise, create an unrealized conversion cast
       auto cast = builder.create<mlir::UnrealizedConversionCastOp>(
           loc, resultType, inputs[0]);
@@ -284,6 +149,108 @@ public:
     });
   }
 };
+
+
+//===----------------------------------------------------------------------===//
+// Conversion Patterns
+//===----------------------------------------------------------------------===//
+
+/// Convert arith.constant operations to firrtl.constant
+class ArithConstantToFIRRTLPattern : public OpConversionPattern<arith::ConstantOp> {
+public:
+  using OpConversionPattern<arith::ConstantOp>::OpConversionPattern;
+  
+  LogicalResult matchAndRewrite(arith::ConstantOp op, OpAdaptor adaptor,
+                               ConversionPatternRewriter &rewriter) const override {
+
+    LLVM_DEBUG(llvm::dbgs() << "ArithConstantToFIRRTLPattern: converting constant: " << op << "\n");
+    LLVM_DEBUG(llvm::dbgs() << "Original type: " << op.getType() << "\n");
+    auto firrtlType = getTypeConverter()->convertType(op.getType());
+    if (!firrtlType)
+      return failure();
+    
+    auto intAttr = dyn_cast<IntegerAttr>(adaptor.getValue());
+    if (!intAttr)
+      return failure();
+    
+    bool isUnsigned = isa<UIntType>(firrtlType);
+    llvm::APSInt value(intAttr.getValue(), isUnsigned);
+    
+    // Create FIRRTL constant with the converted type
+    auto firrtlConstant = rewriter.create<ConstantOp>(
+        op.getLoc(), firrtlType, value);
+    
+    rewriter.replaceOp(op, firrtlConstant.getResult());
+    return success();
+  }
+};
+
+/// Convert arith binary operations to FIRRTL primitives
+template<typename ArithOp, typename FIRRTLOp>
+class ArithBinaryToFIRRTLPattern : public OpConversionPattern<ArithOp> {
+public:
+  using OpConversionPattern<ArithOp>::OpConversionPattern;
+  
+  LogicalResult matchAndRewrite(ArithOp op,  ArithBinaryToFIRRTLPattern::OpAdaptor adaptor,
+                               ConversionPatternRewriter &rewriter) const override {
+    // Convert operands to FIRRTL types
+    Value lhs = adaptor.getOperands()[0];
+    Value rhs = adaptor.getOperands()[1];
+    
+    // For FIRRTL operations, let them infer their own result types
+    // Don't force the result type - let FIRRTL type inference handle it
+    auto firrtlOp = rewriter.create<FIRRTLOp>(op.getLoc(), lhs, rhs);
+    
+    rewriter.replaceOp(op, firrtlOp.getResult());
+    return success();
+  }
+};
+
+/// Convert arith.cmpi operations to FIRRTL comparison primitives
+class ArithCmpIToFIRRTLPattern : public OpConversionPattern<arith::CmpIOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+  
+  LogicalResult matchAndRewrite(arith::CmpIOp op, OpAdaptor adaptor,
+                               ConversionPatternRewriter &rewriter) const override {
+    // Convert operands to FIRRTL types
+    Value lhs = adaptor.getLhs();
+    Value rhs = adaptor.getRhs();
+    
+    // Map arith comparison predicates to FIRRTL operations
+    Value firrtlResult;
+    switch (op.getPredicate()) {
+    case arith::CmpIPredicate::eq:
+      firrtlResult = rewriter.create<EQPrimOp>(op.getLoc(), lhs, rhs).getResult();
+      break;
+    case arith::CmpIPredicate::ne:
+      firrtlResult = rewriter.create<NEQPrimOp>(op.getLoc(), lhs, rhs).getResult();
+      break;
+    case arith::CmpIPredicate::slt:
+    case arith::CmpIPredicate::ult:
+      firrtlResult = rewriter.create<LTPrimOp>(op.getLoc(), lhs, rhs).getResult();
+      break;
+    case arith::CmpIPredicate::sle:
+    case arith::CmpIPredicate::ule:
+      firrtlResult = rewriter.create<LEQPrimOp>(op.getLoc(), lhs, rhs).getResult();
+      break;
+    case arith::CmpIPredicate::sgt:
+    case arith::CmpIPredicate::ugt:
+      firrtlResult = rewriter.create<GTPrimOp>(op.getLoc(), lhs, rhs).getResult();
+      break;
+    case arith::CmpIPredicate::sge:
+    case arith::CmpIPredicate::uge:
+      firrtlResult = rewriter.create<GEQPrimOp>(op.getLoc(), lhs, rhs).getResult();
+      break;
+    }
+    
+    // Replace with the FIRRTL result - type materialization will handle conversion if needed
+    rewriter.replaceOp(op, firrtlResult);
+    return success();
+  }
+};
+
+
 
 //===----------------------------------------------------------------------===//
 // Conversion Patterns for Txn Operations
@@ -307,7 +274,8 @@ public:
       return failure();
     
     auto newFuncType = FunctionType::get(op.getContext(), convertedInputs, convertedResults);
-    
+
+
     // Clone the operation without regions
     auto newOp = rewriter.cloneWithoutRegions(op);
     
@@ -318,10 +286,15 @@ public:
                                newOp.getBody().end());
     
     // Convert the region types (block arguments)
-    if (failed(rewriter.convertRegionTypes(&newOp.getBody(), *getTypeConverter())))
+    if (failed(rewriter.convertRegionTypes(&newOp.getBody(), *getTypeConverter()))) {
+      LLVM_DEBUG(llvm::dbgs() << "ActionMethodOpConversion: failed to convert region types\n");
       return failure();
+    }
+
+    LLVM_DEBUG(llvm::dbgs() << "ActionMethodOpConversion: converted " << newOp << "\n");
+    
       
-    rewriter.replaceOp(op, newOp->getResults());
+    rewriter.replaceOp(op, newOp);
     return success();
   }
 };
@@ -356,10 +329,14 @@ public:
                                cast<ValueMethodOp>(newOp).getBody().end());
     
     // Convert the region types (block arguments)
-    if (failed(rewriter.convertRegionTypes(&cast<ValueMethodOp>(newOp).getBody(), *getTypeConverter())))
+    if (failed(rewriter.convertRegionTypes(&cast<ValueMethodOp>(newOp).getBody(), *getTypeConverter()))) {
+      LLVM_DEBUG(llvm::dbgs() << "ValueMethodOpConversion: failed to convert region types\n");
       return failure();
+    }
+
+    LLVM_DEBUG(llvm::dbgs() << "ValueMethodOpConversion: converted " << newOp << "\n");
       
-    rewriter.replaceOp(op, newOp->getResults());
+    rewriter.replaceOp(op, newOp);
     return success();
   }
 };
@@ -388,11 +365,18 @@ public:
     
     // Create new instance with converted type arguments
     ArrayAttr typeArgs = convertedTypeAttrs.empty() ? nullptr : ArrayAttr::get(op.getContext(), convertedTypeAttrs);
-    
-    auto newOp = rewriter.create<txn::InstanceOp>(
-        op.getLoc(), op.getResult().getType(), op.getSymName(), op.getModuleName(), typeArgs);
-    
-    rewriter.replaceOp(op, newOp.getResult());
+  
+    // replace
+    auto newOp = rewriter.create<txn::InstanceOp>(op.getLoc(), op.getSymName(), op.getModuleName(), typeArgs, op.getConstArgumentsAttr());
+    rewriter.replaceOp(op, newOp);
+    LLVM_DEBUG(llvm::dbgs() << "InstanceOpConversion: replaced with " << newOp << "\n");
+
+    // // In-place replacement
+    // rewriter.startOpModification(op);
+    // op.setTypeArgumentsAttr(typeArgs);
+    // rewriter.finalizeOpModification(op);
+    // LLVM_DEBUG(llvm::dbgs() << "InstanceOpConversion: in-place modified into" << op << "\n");
+
     return success();
   }
 };
@@ -484,8 +468,10 @@ public:
         methodOp->setAttr("function_type", TypeAttr::get(newFuncType));
       }
     }
-    
-    rewriter.replaceOp(op, newOp->getResults());
+
+    LLVM_DEBUG(llvm::dbgs() << "PrimitiveOpConversion: converted " << newOp << "\n");
+
+    rewriter.replaceOp(op, newOp);
     return success();
   }
 };
@@ -497,16 +483,20 @@ public:
   
   LogicalResult matchAndRewrite(CallOp op, OpAdaptor adaptor,
                                ConversionPatternRewriter &rewriter) const override {
+                                
+    LLVM_DEBUG(llvm::dbgs() << "CallOpConversion: converting call of operand types " << adaptor.getOperands().getTypes() << ", original result types " << op.getResultTypes() << "\n");
+
     // Convert result types
     SmallVector<Type> convertedResults;
     if (failed(getTypeConverter()->convertTypes(op.getResultTypes(), convertedResults)))
       return failure();
+
+    LLVM_DEBUG(llvm::dbgs() << "CallOpConversion: converted result types " << convertedResults << "\n");
     
     // Create new call with converted operands and result types
-    auto newCall = rewriter.create<CallOp>(
+    auto newOp = rewriter.create<CallOp>(
         op.getLoc(), op.getCalleeAttr(), adaptor.getOperands(), convertedResults);
-    
-    rewriter.replaceOp(op, newCall.getResults());
+    rewriter.replaceOp(op, newOp);
     return success();
   }
 };
@@ -520,6 +510,54 @@ public:
                                ConversionPatternRewriter &rewriter) const override {
     // Create new return with converted operands
     rewriter.replaceOpWithNewOp<ReturnOp>(op, adaptor.getOperands());
+    return success();
+  }
+};
+
+/// Convert txn.abort operation
+class AbortOpConversion : public OpConversionPattern<txn::AbortOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+  
+  LogicalResult matchAndRewrite(txn::AbortOp op, OpAdaptor adaptor,
+                               ConversionPatternRewriter &rewriter) const override {
+    // Create new abort with converted operands
+    auto emptyTypeRange = TypeRange();
+    rewriter.replaceOpWithNewOp<txn::AbortOp>(op, emptyTypeRange, adaptor.getOperands());
+    return success();
+  }
+};
+
+/// Convert txn.if operation
+class IfOpConversion : public OpConversionPattern<IfOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+  
+  LogicalResult matchAndRewrite(IfOp op, OpAdaptor adaptor,
+                               ConversionPatternRewriter &rewriter) const override {
+    // Convert result types
+    SmallVector<Type> convertedResults;
+    if (failed(getTypeConverter()->convertTypes(op.getResultTypes(), convertedResults)))
+      return failure();
+    
+    // Create new if operation
+    auto newIf = rewriter.create<IfOp>(op.getLoc(), convertedResults, adaptor.getCondition());
+    
+    // Move regions
+    rewriter.inlineRegionBefore(op.getThenRegion(), newIf.getThenRegion(), newIf.getThenRegion().end());
+    rewriter.inlineRegionBefore(op.getElseRegion(), newIf.getElseRegion(), newIf.getElseRegion().end());
+    
+    // Convert region types
+    if (failed(rewriter.convertRegionTypes(&newIf.getThenRegion(), *getTypeConverter()))) {
+      LLVM_DEBUG(llvm::dbgs() << "IfOpConversion: failed to convert then region types\n");
+      return failure();
+    }
+    if (failed(rewriter.convertRegionTypes(&newIf.getElseRegion(), *getTypeConverter()))) {
+      LLVM_DEBUG(llvm::dbgs() << "IfOpConversion: failed to convert else region types\n");
+      return failure();
+    }
+      
+    rewriter.replaceOp(op, newIf.getResults());
     return success();
   }
 };
@@ -547,8 +585,8 @@ public:
     // FIRRTL dialect is legal
     target.addLegalDialect<::circt::firrtl::FIRRTLDialect>();
     
-    // Unrealized conversion casts are temporarily legal
-    target.addLegalOp<::mlir::UnrealizedConversionCastOp>();
+    // Other Txn operations are legal by default
+    target.addLegalDialect<::sharp::txn::TxnDialect>();
     
     // Arith operations are illegal
     target.addIllegalDialect<arith::ArithDialect>();
@@ -556,27 +594,28 @@ public:
     // Txn operations are legal if their types are converted
     target.addDynamicallyLegalOp<ActionMethodOp>([&](ActionMethodOp op) {
       // Check if block arguments are converted
-      for (auto &block : op.getBody()) {
-        for (auto arg : block.getArguments()) {
-          if (!typeConverter.isLegal(arg.getType()))
-            return false;
-        }
+      for (auto arg : op.getFunctionType().getInputs()) {
+        if (!typeConverter.isLegal(arg))
+          return false;
+      }
+      // check if the return type is converted
+      for (auto result : op.getFunctionType().getResults()) {
+        if (!typeConverter.isLegal(result))
+          return false;
       }
       return true;
     });
     
     target.addDynamicallyLegalOp<ValueMethodOp>([&](ValueMethodOp op) {
       // Check result types
-      for (Type type : op.getResultTypes()) {
-        if (!typeConverter.isLegal(type))
+      for (auto result : op.getFunctionType().getResults()) {
+        if (!typeConverter.isLegal(result))
           return false;
       }
       // Check block arguments
-      for (auto &block : op.getBody()) {
-        for (auto arg : block.getArguments()) {
-          if (!typeConverter.isLegal(arg.getType()))
-            return false;
-        }
+      for (auto arg : op.getFunctionType().getInputs()) {
+        if (!typeConverter.isLegal(arg))
+          return false;
       }
       return true;
     });
@@ -631,7 +670,7 @@ public:
       return true;
     });
     
-    target.addDynamicallyLegalOp<CallOp>([&](CallOp op) {
+    target.addDynamicallyLegalOp<txn::CallOp>([&](txn::CallOp op) {
       // Check operand and result types
       for (Value operand : op.getOperands()) {
         if (!typeConverter.isLegal(operand.getType()))
@@ -652,25 +691,53 @@ public:
       }
       return true;
     });
+
+    target.addDynamicallyLegalOp<txn::AbortOp>([&](txn::AbortOp op) {
+      // Check operand types
+      for (Value operand : op.getOperands()) {
+        if (!typeConverter.isLegal(operand.getType()))
+          return false;
+      }
+      return true;
+    });
     
-    // Other Txn operations are legal by default
-    target.addLegalDialect<::sharp::txn::TxnDialect>();
+    target.addDynamicallyLegalOp<IfOp>([&](IfOp op) {
+      Type conditionType = op.getCondition().getType();
+      if (!typeConverter.isLegal(conditionType))
+        return false;
+      
+      // results must be converted
+      for (Type type : op.getResultTypes()) {
+        if (!typeConverter.isLegal(type))
+          return false;
+      }
+      
+      return true;
+    });
     
     // Set up conversion patterns
     RewritePatternSet patterns(ctx);
     
     // Add Txn operation conversions
     patterns.add<ActionMethodOpConversion, ValueMethodOpConversion,
-                 CallOpConversion, ReturnOpConversion>(typeConverter, ctx);
+                 CallOpConversion, ReturnOpConversion, IfOpConversion, AbortOpConversion>(typeConverter, ctx);
     // Instance and Primitive need special handling due to namespace conflicts
-    patterns.insert<InstanceOpConversion>(typeConverter, ctx);
-    patterns.insert<PrimitiveOpConversion>(typeConverter, ctx);
+    patterns.add<InstanceOpConversion>(typeConverter, ctx);
+    patterns.add<PrimitiveOpConversion>(typeConverter, ctx);
     
     // Add arith operation conversions
-    patterns.add<ArithConstantToFIRRTLPattern>(ctx);
-    patterns.add<ArithBinaryToFIRRTLPattern<arith::AddIOp, AddPrimOp>>(ctx);
-    patterns.add<ArithBinaryToFIRRTLPattern<arith::SubIOp, SubPrimOp>>(ctx);
-    patterns.add<ArithBinaryToFIRRTLPattern<arith::MulIOp, MulPrimOp>>(ctx);
+    patterns.add<ArithConstantToFIRRTLPattern>(typeConverter, ctx);
+    patterns.add<ArithBinaryToFIRRTLPattern<arith::AddIOp, AddPrimOp>>(typeConverter, ctx);
+    patterns.add<ArithBinaryToFIRRTLPattern<arith::SubIOp, SubPrimOp>>(typeConverter, ctx);
+    patterns.add<ArithBinaryToFIRRTLPattern<arith::MulIOp, MulPrimOp>>(typeConverter, ctx);
+    
+    // Add bitwise logical operations
+    patterns.add<ArithBinaryToFIRRTLPattern<arith::XOrIOp, XorPrimOp>>(typeConverter, ctx);
+    patterns.add<ArithBinaryToFIRRTLPattern<arith::AndIOp, AndPrimOp>>(typeConverter, ctx);
+    patterns.add<ArithBinaryToFIRRTLPattern<arith::OrIOp, OrPrimOp>>(typeConverter, ctx);
+    
+    // Add comparison operations
+    patterns.add<ArithCmpIToFIRRTLPattern>(typeConverter, ctx);
     
     // Apply partial conversion
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
@@ -679,14 +746,6 @@ public:
       return;
     }
     
-    // Run a cleanup pass to eliminate redundant casts
-    RewritePatternSet cleanupPatterns(ctx);
-    cleanupPatterns.add<EliminateRedundantCastsPattern>(ctx);
-    
-    if (failed(applyPatternsGreedily(module, std::move(cleanupPatterns)))) {
-      LLVM_DEBUG(llvm::dbgs() << "Failed to eliminate redundant casts\n");
-      // Don't fail the pass for this - it's just a cleanup
-    }
     
     LLVM_DEBUG(llvm::dbgs() << "LowerOpToFIRRTLPass completed successfully\n");
   }

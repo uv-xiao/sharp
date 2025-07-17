@@ -14,7 +14,7 @@ txn.primitive @CAM<width: i32, depth: i32> {
 
 // Using custom primitive
 txn.module @NetworkRouter {
-  %cam = txn.instance @cam of @CAM<32, 1024> : !txn.module<"CAM">
+  txn.instance @cam of @CAM<32, 1024> 
   
   txn.action_method @add_route(%prefix: i32, %port: i32) {
     txn.call @cam::@write(%prefix, %port) : (i32, i32) -> ()

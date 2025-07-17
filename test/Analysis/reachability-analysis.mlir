@@ -4,7 +4,7 @@
 
 // CHECK-LABEL: txn.module @SimpleConditional
 txn.module @SimpleConditional {
-  %reg = txn.instance @state of @Register : !txn.module<"Register">
+  %reg = txn.instance @state of @Register : index
   
   // CHECK-LABEL: txn.rule @conditionalRule
   txn.rule @conditionalRule {
@@ -29,8 +29,8 @@ txn.module @SimpleConditional {
 
 // CHECK-LABEL: txn.module @NestedConditionals
 txn.module @NestedConditionals {
-  %reg1 = txn.instance @r1 of @Register : !txn.module<"Register">
-  %reg2 = txn.instance @r2 of @Register : !txn.module<"Register">
+  %reg1 = txn.instance @r1 of @Register : index
+  %reg2 = txn.instance @r2 of @Register : index
   
   // CHECK-LABEL: txn.action_method @nestedAction
   txn.action_method @nestedAction(%arg0: i32) -> () {
@@ -62,7 +62,7 @@ txn.module @NestedConditionals {
 
 // CHECK-LABEL: txn.module @UnconditionalCalls
 txn.module @UnconditionalCalls {
-  %wire = txn.instance @w of @Wire : !txn.module<"Wire">
+  %wire = txn.instance @w of @Wire : index
   
   // CHECK-LABEL: txn.value_method @getValue
   txn.value_method @getValue() -> i32 {
@@ -85,7 +85,7 @@ txn.module @UnconditionalCalls {
 
 // CHECK-LABEL: txn.module @ComplexControlFlow
 txn.module @ComplexControlFlow {
-  %reg = txn.instance @counter of @Register : !txn.module<"Register">
+  %reg = txn.instance @counter of @Register : index
   
   // CHECK-LABEL: txn.rule @complexRule
   txn.rule @complexRule {

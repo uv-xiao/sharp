@@ -1,7 +1,7 @@
 // RUN: sharp-opt %s --convert-txn-to-firrtl 2>&1 | FileCheck %s
 
 // Define primitives
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
   txn.clock_by @clk
@@ -18,7 +18,7 @@ txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
 
 // Test that multi-cycle operations emit proper errors in FIRRTL conversion
 txn.module @MultiCycleFIRRTL {
-  %reg = txn.instance @reg of @Register : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register : index
   
   txn.action_method @withFuture() {
     %v = txn.call @reg::@read() : () -> i32

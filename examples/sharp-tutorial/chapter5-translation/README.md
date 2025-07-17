@@ -77,9 +77,9 @@ endmodule
 ```mlir
 // Datapath with FIFO and processing
 txn.module @Datapath {
-  %input_fifo = txn.instance @input_fifo of @FIFO<i32> : !txn.module<"FIFO">
-  %output_reg = txn.instance @output_reg of @Register<i32> : !txn.module<"Register">
-  %status = txn.instance @status of @Register<i1> : !txn.module<"Register">
+  %input_fifo = txn.instance @input_fifo of @FIFO<i32> : index
+  %output_reg = txn.instance @output_reg of @Register<i32> : index
+  %status = txn.instance @status of @Register<i1> : index
   
   // Input data
   txn.action_method @pushData(%data: i32) {
@@ -293,7 +293,7 @@ Sharp supports hierarchical module composition where modules can instantiate oth
 ```mlir
 // Inner module: SimpleAdder
 txn.module @SimpleAdder {
-  %result = txn.instance @result of @Register<i32> : !txn.module<"Register">
+  %result = txn.instance @result of @Register<i32> : index
   
   txn.action_method @add(%a: i32, %b: i32) { ... }
   txn.value_method @getResult() -> i32 { ... }
@@ -304,8 +304,8 @@ txn.module @SimpleAdder {
 
 // Outer module: DualProcessor  
 txn.module @DualProcessor {
-  %adder1 = txn.instance @adder1 of @SimpleAdder : !txn.module<"SimpleAdder">
-  %adder2 = txn.instance @adder2 of @SimpleAdder : !txn.module<"SimpleAdder">
+  %adder1 = txn.instance @adder1 of @SimpleAdder : index
+  %adder2 = txn.instance @adder2 of @SimpleAdder : index
   
   txn.action_method @processA(%x: i32, %y: i32) {
     txn.call @adder1::@add(%x, %y) : (i32, i32) -> ()

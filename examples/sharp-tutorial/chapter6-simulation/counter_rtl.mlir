@@ -1,6 +1,6 @@
 // Simple counter for RTL simulation
 txn.module @RTLCounter {
-  %count = txn.instance @count of @Register<i8> : !txn.module<"Register">
+  txn.instance @count of @Register<i8> 
   
   txn.value_method @read() -> i8 {
     %val = txn.call @count::@read() : () -> i8

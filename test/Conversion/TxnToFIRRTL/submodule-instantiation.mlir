@@ -19,8 +19,8 @@ txn.module @Register {
 }
 
 txn.module @Top {
-  %reg1 = txn.instance @reg1 of @Register : !txn.module<"Register">
-  %reg2 = txn.instance @reg2 of @Register : !txn.module<"Register">
+  %reg1 = txn.instance @reg1 of @Register : index
+  %reg2 = txn.instance @reg2 of @Register : index
   
   txn.rule @copy_rule {
     // Read from reg1

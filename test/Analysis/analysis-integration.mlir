@@ -5,12 +5,12 @@
 // CHECK-LABEL: txn.module @IntegratedAnalysis
 txn.module @IntegratedAnalysis {
   // Multiple primitives to create complex interactions
-  %ctrl = txn.instance @ctrl of @Register<i8> : !txn.module<"Register">
-  %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
-  %fifo1 = txn.instance @fifo1 of @FIFO<i32> : !txn.module<"FIFO">
-  %fifo2 = txn.instance @fifo2 of @FIFO<i32> : !txn.module<"FIFO">
-  %wire = txn.instance @wire of @Wire<i1> : !txn.module<"Wire">
-  %mem = txn.instance @mem of @Memory<i32> : !txn.module<"Memory">
+  %ctrl = txn.instance @ctrl of @Register<i8> : index
+  %data = txn.instance @data of @Register<i32> : index
+  %fifo1 = txn.instance @fifo1 of @FIFO<i32> : index
+  %fifo2 = txn.instance @fifo2 of @FIFO<i32> : index
+  %wire = txn.instance @wire of @Wire<i1> : index
+  %mem = txn.instance @mem of @Memory<i32> : index
   
   // Value method for conflict-free computation
   txn.value_method @computeAddress(%base: i32, %offset: i32) -> i32 attributes {combinational} {
@@ -174,7 +174,7 @@ txn.module @IntegratedAnalysis {
 
 // CHECK-LABEL: txn.module @ConflictInferenceEdgeCases
 txn.module @ConflictInferenceEdgeCases {
-  %shared = txn.instance @shared of @Register<i32> : !txn.module<"Register">
+  %shared = txn.instance @shared of @Register<i32> : index
   
   // Simple actions that access same resource for conflict inference
   txn.action_method @read_action() {

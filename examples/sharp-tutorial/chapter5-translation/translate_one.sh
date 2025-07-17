@@ -62,11 +62,12 @@ translate_one() {
 
     # Step 2: Lower Txn operation bodies to FIRRTL operations
     echo "  Step 2: Lower Txn operation bodies to FIRRTL operations"
-    local debug_file="${base_name}_firrtl.log"
+    local debug_file="${base_name}_firrtl_op.log"
     local firrtl_op_file="${base_name}_firrtl_op._mlir"
 
     $SHARP_OPT "${analysis_file}" \
         --lower-op-to-firrtl \
+        --debug-only=lower-op-to-firrtl \
         > "${firrtl_op_file}" 2>"${debug_file}"
     
     if [ $? -ne 0 ]; then
@@ -96,7 +97,7 @@ translate_one() {
 
     # Step 3: Translate to FIRRTL (with debug output and two-pass conversion)
     echo "  Step 3: Translate to FIRRTL"
-    local debug_file="${base_name}_${mode}.log"
+    local debug_file="${base_name}_${mode}_firrtl.log"
     local firrtl_file="${base_name}_${mode}.firrtl"
     
     $SHARP_OPT "${firrtl_op_file}" \

@@ -6,7 +6,7 @@
 // CHECK: firrtl.module @ConflictTest
 
 txn.module @ConflictTest {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.action_method @a1() {
     %c1 = arith.constant 1 : i32

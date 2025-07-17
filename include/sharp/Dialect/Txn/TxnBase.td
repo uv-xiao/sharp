@@ -27,7 +27,6 @@ def TxnDialect : Dialect {
     - Clear separation between value (pure) and action (stateful) methods
   }];
 
-  let useDefaultTypePrinterParser = 1;
 
   let dependentDialects = [
     "circt::hw::HWDialect",

@@ -6,10 +6,10 @@
 // CHECK-LABEL: txn.module @ConflictInferenceTest
 txn.module @ConflictInferenceTest {
   // Multiple primitive instances to create complex conflicts
-  %reg1 = txn.instance @reg1 of @Register<i32> : !txn.module<"Register">
-  %reg2 = txn.instance @reg2 of @Register<i32> : !txn.module<"Register">
-  %wire = txn.instance @wire of @Wire<i32> : !txn.module<"Wire">
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
+  %reg1 = txn.instance @reg1 of @Register<i32> : index
+  %reg2 = txn.instance @reg2 of @Register<i32> : index
+  %wire = txn.instance @wire of @Wire<i32> : index
+  %fifo = txn.instance @fifo of @FIFO<i32> : index
   
   // Actions with varying conflict relationships
   txn.rule @r1 {
@@ -105,7 +105,7 @@ txn.module @ConflictInferenceTest {
 
 // CHECK-LABEL: txn.module @TransitiveConflicts
 txn.module @TransitiveConflicts {
-  %shared = txn.instance @shared of @Register<i64> : !txn.module<"Register">
+  %shared = txn.instance @shared of @Register<i64> : index
   
   // Create a chain of dependencies
   txn.action_method @a1() {
@@ -156,7 +156,7 @@ txn.module @TransitiveConflicts {
 // Test complex scheduling with all conflict types
 // CHECK-LABEL: txn.module @AllConflictTypes
 txn.module @AllConflictTypes {
-  %r = txn.instance @r of @Register<i32> : !txn.module<"Register">
+  %r = txn.instance @r of @Register<i32> : index
   
   // Sequential before (SB)
   txn.rule @writer {

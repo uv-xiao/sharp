@@ -1,6 +1,6 @@
 // Module for performance testing
 txn.module @PerfTest {
-  %acc = txn.instance @acc of @Register<i64> : !txn.module<"Register">
+  txn.instance @acc of @Register<i64> 
   
   // Computation-heavy method
   txn.action_method @compute(%n: i32) {

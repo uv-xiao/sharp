@@ -5,9 +5,9 @@
 
 // CHECK-LABEL: txn.module @NestedControlFlow
 txn.module @NestedControlFlow {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
-  %wire = txn.instance @wire of @Wire<i32> : !txn.module<"Wire">
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
+  %reg = txn.instance @reg of @Register<i32> : index
+  %wire = txn.instance @wire of @Wire<i32> : index
+  %fifo = txn.instance @fifo of @FIFO<i32> : index
   
   // Deep nesting with multiple abort paths
   txn.action_method @deeplyNested(%a: i32, %b: i32, %c: i32) -> i32 {

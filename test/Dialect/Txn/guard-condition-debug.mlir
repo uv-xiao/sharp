@@ -2,7 +2,7 @@
 
 // Debug test for guard condition conversion
 txn.module @GuardDebug {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   // Rule with simple guard
   txn.rule @rule_simple {

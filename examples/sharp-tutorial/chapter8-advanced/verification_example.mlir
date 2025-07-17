@@ -1,7 +1,7 @@
 // Module with formal properties
 txn.module @SecureCounter {
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
-  %max = txn.instance @max of @Register<i32> : !txn.module<"Register">
+  txn.instance @count of @Register<i32> 
+  txn.instance @max of @Register<i32> 
   
   txn.action_method @set_max(%limit: i32) {
     txn.call @max::@write(%limit) : (i32) -> ()
@@ -43,7 +43,7 @@ txn.module @SecureCounter {
 
 // Deadlock-free protocol verification
 txn.module @Protocol {
-  %state = txn.instance @state of @Register<i8> : !txn.module<"Register">
+  txn.instance @state of @Register<i8> 
   
   // State encoding
   %IDLE = arith.constant 0 : i8

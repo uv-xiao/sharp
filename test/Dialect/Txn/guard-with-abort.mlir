@@ -2,7 +2,7 @@
 
 // Test guard condition with abort
 txn.module @GuardAbort {
-  %reg = txn.instance @reg of @Register<i1> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i1> : index
   
   // Rule with guard condition and abort
   txn.rule @guarded_rule {

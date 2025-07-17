@@ -3,8 +3,8 @@
 // Test complex conflict matrix with multiple relationships
 txn.module @ComplexConflicts {
   // Create instances to demonstrate conflicts
-  %reg1 = txn.instance @reg1 of @Register<i32> : !txn.module<"Register">
-  %reg2 = txn.instance @reg2 of @Register<i32> : !txn.module<"Register">
+  %reg1 = txn.instance @reg1 of @Register<i32> : index
+  %reg2 = txn.instance @reg2 of @Register<i32> : index
   
   // Four actions with different conflict relationships
   txn.action_method @a1() {

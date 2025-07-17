@@ -6,7 +6,6 @@
 
 #include "sharp/Dialect/Txn/TxnDialect.h"
 #include "sharp/Dialect/Txn/TxnOps.h"
-#include "sharp/Dialect/Txn/TxnTypes.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -29,12 +28,6 @@ using namespace sharp::txn;
 //===----------------------------------------------------------------------===//
 
 void TxnDialect::initialize() {
-  // Register types.
-  addTypes<
-#define GET_TYPEDEF_LIST
-#include "sharp/Dialect/Txn/TxnTypes.cpp.inc"
-      >();
-
   // Register attributes.
   // TODO: Register custom attributes when we have proper AttrDef support
 
@@ -45,12 +38,6 @@ void TxnDialect::initialize() {
       >();
 }
 
-//===----------------------------------------------------------------------===//
-// Type definitions
-//===----------------------------------------------------------------------===//
-
-#define GET_TYPEDEF_CLASSES
-#include "sharp/Dialect/Txn/TxnTypes.cpp.inc"
 
 //===----------------------------------------------------------------------===//
 // Dialect definitions

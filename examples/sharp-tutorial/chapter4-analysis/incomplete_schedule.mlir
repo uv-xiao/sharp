@@ -1,8 +1,8 @@
 // Module with incomplete schedule for testing schedule completeness validation
 txn.module @IncompleteScheduleExample attributes {top} {
   // State elements
-  %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
-  %flag = txn.instance @flag of @Register<i1> : !txn.module<"Register">
+  txn.instance @data of @Register<i32> 
+  txn.instance @flag of @Register<i1> 
   
   // Action method 1
   txn.action_method @processData(%value: i32) {
@@ -52,7 +52,7 @@ txn.module @IncompleteScheduleExample attributes {top} {
 
 // Module with complete schedule for comparison
 txn.module @CompleteScheduleExample {
-  %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
+  txn.instance @data of @Register<i32> 
   
   txn.action_method @increment() {
     %current = txn.call @data::@read() : () -> i32

@@ -4,7 +4,7 @@
 
 // CHECK-LABEL: firrtl.circuit "MethodArgConditions"
 txn.module @MethodArgConditions {
-  %reg = txn.instance @r of @Register : !txn.module<"Register">
+  %reg = txn.instance @r of @Register : index
   
   // Action method where condition is directly the method argument
   txn.action_method @conditionalWrite(%enable: i1) {
@@ -38,7 +38,7 @@ txn.module @MethodArgConditions {
   }
 }
 
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
 }

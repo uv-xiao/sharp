@@ -145,11 +145,10 @@ void PreSynthesisCheckPass::runOnOperation() {
 }
 
 bool PreSynthesisCheckPass::checkPrimitive(::sharp::txn::PrimitiveOp primitive) {
-  // Check if the primitive type is "hw" (synthesizable)
-  auto typeAttr = primitive.getType();
-  if (typeAttr != "hw") {
+  // Check if the primitive is synthesizable by checking for firrtl.impl attribute
+  if (!primitive->hasAttr("firrtl.impl")) {
     LLVM_DEBUG(llvm::dbgs() << "Primitive " << primitive.getSymName() 
-                            << " has type '" << typeAttr << "' (not 'hw')\n");
+                            << " is not synthesizable (no firrtl.impl attribute)\n");
     markNonSynthesizable(primitive, "spec primitive type");
     return false;
   }

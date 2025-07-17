@@ -4,7 +4,7 @@
 
 // CHECK-LABEL: firrtl.circuit "BlockArgHandling"
 txn.module @BlockArgHandling {
-  %reg = txn.instance @r of @Register : !txn.module<"Register">
+  %reg = txn.instance @r of @Register : index
   
   // Action method with multiple conditions derived from arguments
   txn.action_method @complexConditions(%cond1: i1, %cond2: i1) {
@@ -59,7 +59,7 @@ txn.module @BlockArgHandling {
   }
 }
 
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
 }

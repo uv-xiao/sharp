@@ -6,10 +6,10 @@
 // CHECK-LABEL: txn.module @ProcessorCore
 txn.module @ProcessorCore {
   // Parametric primitive instantiation with type arguments
-  %pc = txn.instance @pc of @Register<i32> : !txn.module<"Register">
-  %ir = txn.instance @ir of @Register<i32> : !txn.module<"Register">
-  %alu_result = txn.instance @alu_result of @Wire<i32> : !txn.module<"Wire">
-  %mem = txn.instance @mem of @Memory<i32> : !txn.module<"Memory">
+  %pc = txn.instance @pc of @Register<i32> : index
+  %ir = txn.instance @ir of @Register<i32> : index
+  %alu_result = txn.instance @alu_result of @Wire<i32> : index
+  %mem = txn.instance @mem of @Memory<i32> : index
   
   // Complex value method with multiple primitive calls
   txn.value_method @decode() -> (i32, i32, i32) attributes {combinational} {
@@ -109,9 +109,9 @@ txn.module @ProcessorCore {
 // CHECK-LABEL: txn.module @FIFONetwork
 txn.module @FIFONetwork {
   // Network of FIFOs with different types
-  %data_fifo = txn.instance @data_fifo of @FIFO<i64> : !txn.module<"FIFO">
-  %ctrl_fifo = txn.instance @ctrl_fifo of @FIFO<i1> : !txn.module<"FIFO">
-  %status = txn.instance @status of @Register<i8> : !txn.module<"Register">
+  %data_fifo = txn.instance @data_fifo of @FIFO<i64> : index
+  %ctrl_fifo = txn.instance @ctrl_fifo of @FIFO<i1> : index
+  %status = txn.instance @status of @Register<i8> : index
   
   // Producer rule with multi-cycle behavior
   txn.rule @producer {
@@ -170,7 +170,7 @@ txn.module @FIFONetwork {
 // Test error cases
 // ERROR-LABEL: txn.module @ErrorCases
 txn.module @ErrorCases {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   // ERROR: txn.value_method @invalid_abort
   txn.value_method @invalid_abort() -> i32 {

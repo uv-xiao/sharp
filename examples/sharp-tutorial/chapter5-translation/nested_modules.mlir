@@ -1,7 +1,7 @@
 // Example demonstrating nested modules with timing modes
 // Inner module: Simple adder
 txn.module @SimpleAdder {
-  %result = txn.instance @result of @Register<i32> : !txn.module<"Register">
+  txn.instance @result of @Register<i32> 
   
   // Add two numbers and store result
   txn.action_method @add(%a: i32, %b: i32) {
@@ -34,9 +34,9 @@ txn.module @SimpleAdder {
 
 // Outer module: Dual adder processor
 txn.module @DualProcessor attributes {top} {
-  %adder1 = txn.instance @adder1 of @SimpleAdder : !txn.module<"SimpleAdder">
-  %adder2 = txn.instance @adder2 of @SimpleAdder : !txn.module<"SimpleAdder">
-  %output = txn.instance @output of @Register<i32> : !txn.module<"Register">
+  txn.instance @adder1 of @SimpleAdder 
+  txn.instance @adder2 of @SimpleAdder 
+  txn.instance @output of @Register<i32> 
   
   // Process input through first adder
   txn.action_method @processA(%x: i32, %y: i32) {

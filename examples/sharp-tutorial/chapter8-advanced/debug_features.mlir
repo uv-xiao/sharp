@@ -1,10 +1,10 @@
 // Module with extensive debugging
 txn.module @DebugExample {
-  %state = txn.instance @state of @Register<i32> : !txn.module<"Register">
+  txn.instance @state of @Register<i32> 
   
   // Performance counters
-  %method_calls = txn.instance @calls of @Register<i64> : !txn.module<"Register">
-  %cycle_count = txn.instance @cycles of @Register<i64> : !txn.module<"Register">
+  txn.instance @calls of @Register<i64> 
+  txn.instance @cycles of @Register<i64> 
   
   txn.action_method @process(%input: i32) {
     // Increment call counter

@@ -1,9 +1,9 @@
 // Three-stage pipeline example
 txn.module @Pipeline {
   // Pipeline registers
-  %stage1 = txn.instance @stage1 of @Register<i32> : !txn.module<"Register">
-  %stage2 = txn.instance @stage2 of @Register<i32> : !txn.module<"Register">
-  %stage3 = txn.instance @stage3 of @Register<i32> : !txn.module<"Register">
+  txn.instance @stage1 of @Register<i32> 
+  txn.instance @stage2 of @Register<i32> 
+  txn.instance @stage3 of @Register<i32> 
   
   // Input new data
   txn.action_method @input(%data: i32) {

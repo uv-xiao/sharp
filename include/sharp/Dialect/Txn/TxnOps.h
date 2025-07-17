@@ -49,9 +49,17 @@ class ScheduleOp;
 class ValueMethodOp;
 class YieldOp;
 
+/// Utility function to legalize names for MLIR symbol usage
+/// Replaces problematic characters like <, >, , with underscores
+std::string legalizeName(mlir::StringRef name);
+
 /// Utility function to create module name with type arguments
 /// e.g., module_name_with_type_args("Register", typeArgs) -> "Register<!firrtl.uint<32>>"
 std::string module_name_with_type_args(mlir::StringRef baseName, mlir::ArrayAttr typeArgs);
+
+/// Utility function to create module name with type and const arguments
+/// e.g., module_name_with_type_args("Register", typeArgs, constArgs) -> "Register<i32;4>"
+std::string module_name_with_type_args(mlir::StringRef baseName, mlir::ArrayAttr typeArgs, mlir::ArrayAttr constArgs);
 
 } // namespace txn
 } // namespace sharp

@@ -1,7 +1,7 @@
 // Simple FIFO module using basic operations only
 txn.module @SimpleFifo {
-  %data_reg = txn.instance @data_reg of @Register<i32> : !txn.module<"Register">
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  txn.instance @data_reg of @Register<i32> 
+  txn.instance @count of @Register<i32> 
   
   // Enqueue data into FIFO
   txn.action_method @enqueue(%data: i32) {
@@ -43,9 +43,9 @@ txn.module @SimpleFifo {
 
 // Datapath with FIFO and processing - DEMONSTRATES NESTED MODULE LIMITATION
 txn.module @Datapath attributes {top} {
-  %input_fifo = txn.instance @input_fifo of @SimpleFifo : !txn.module<"SimpleFifo">
-  %output_reg = txn.instance @output_reg of @Register<i32> : !txn.module<"Register">
-  %status = txn.instance @status of @Register<i1> : !txn.module<"Register">
+  txn.instance @input_fifo of @SimpleFifo 
+  txn.instance @output_reg of @Register<i32> 
+  txn.instance @status of @Register<i1> 
   
   // Input data - this works (action method with no return value)
   txn.action_method @pushData(%data: i32) {

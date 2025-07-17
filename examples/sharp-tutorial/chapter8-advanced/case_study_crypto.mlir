@@ -1,10 +1,10 @@
 // Simplified AES-like encryption engine
 txn.module @AESEngine {
   // State array
-  %state = txn.instance @state of @Register<i128> : !txn.module<"Register">
+  txn.instance @state of @Register<i128> 
   
   // Round counter
-  %round = txn.instance @round of @Register<i8> : !txn.module<"Register">
+  txn.instance @round of @Register<i8> 
   
   txn.action_method @load_plaintext(%data: i128) {
     txn.call @state::@write(%data) : (i128) -> ()

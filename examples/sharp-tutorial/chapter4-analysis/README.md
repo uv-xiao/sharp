@@ -70,8 +70,8 @@ Let's first demonstrate schedule completeness validation with an incomplete sche
 
 ```mlir
 txn.module @IncompleteScheduleExample {
-  %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
-  %flag = txn.instance @flag of @Register<i1> : !txn.module<"Register">
+  %data = txn.instance @data of @Register<i32> : index
+  %flag = txn.instance @flag of @Register<i1> : index
   
   // Action method 1
   txn.action_method @processData(%value: i32) {
@@ -154,9 +154,9 @@ Let's create a module with various analysis challenges to demonstrate all passes
 // A module with various analysis challenges
 txn.module @ComplexModule {
   // State elements
-  %data = txn.instance @data of @Register<i32> : !txn.module<"Register">
-  %flag = txn.instance @flag of @Register<i1> : !txn.module<"Register">
-  %temp = txn.instance @temp of @Wire<i32> : !txn.module<"Wire">
+  %data = txn.instance @data of @Register<i32> : index
+  %flag = txn.instance @flag of @Register<i1> : index
+  %temp = txn.instance @temp of @Wire<i32> : index
   
   // Action that reads and writes same register
   txn.action_method @readModifyWrite(%delta: i32) {
@@ -366,8 +366,8 @@ This enhanced pass now includes method attribute validation (formerly `--sharp-v
 // Multiple pre-synthesis violations for testing
 txn.module @NonSynthesizable {
   // Violation 1: Using spec primitives (simulation-only)
-  %spec_fifo = txn.instance @spec_fifo of @SpecFIFO<i32> : !txn.module<"SpecFIFO">
-  %spec_mem = txn.instance @spec_mem of @SpecMemory<i32> : !txn.module<"SpecMemory">
+  %spec_fifo = txn.instance @spec_fifo of @SpecFIFO<i32> : index
+  %spec_mem = txn.instance @spec_mem of @SpecMemory<i32> : index
   
   txn.action_method @useSpecPrimitives(%data: i32) {
     txn.call @spec_fifo::@enqueue(%data) : (i32) -> ()
@@ -379,7 +379,7 @@ txn.module @NonSynthesizable {
 }
 
 txn.module @DisallowedOperations {
-  %reg = txn.instance @reg of @Register<f32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<f32> : index
   
   txn.action_method @useFloatingPoint(%x: f32, %y: f32) {
     // Violation 2: Floating-point operations not in synthesis allowlist

@@ -34,17 +34,20 @@ namespace txn {
                                               unsigned depth) {
   // Generate the full name for the interface type
   std::string fullName = ::sharp::txn::module_name_with_type_args(name, typeArgs);
+  std::string legalizedName = ::sharp::txn::legalizeName(fullName);
   
   // Create interface type for the primitive
-  auto moduleType = ::sharp::txn::ModuleType::get(builder.getContext(), 
-                                                  StringAttr::get(builder.getContext(), fullName));
+  auto moduleType = builder.getIndexType();
   
   // Create the primitive operation
   auto primitive = builder.create<::sharp::txn::PrimitiveOp>(loc, 
-                                                            StringAttr::get(builder.getContext(), name),
-                                                            builder.getStringAttr("hw"), 
-                                                            TypeAttr::get(moduleType),
-                                                            /*type_parameters=*/typeArgs);
+                                                            StringAttr::get(builder.getContext(), legalizedName),
+                                                            /*type_parameters=*/typeArgs,
+                                                            /*const_parameters=*/ArrayAttr());
+  
+  // Store the original full name and set firrtl.impl to legalized name
+  primitive->setAttr("full_name", StringAttr::get(builder.getContext(), fullName));
+  primitive->setAttr("firrtl.impl", StringAttr::get(builder.getContext(), legalizedName));
   
   // Store depth as an attribute
   primitive->setAttr("depth", builder.getI32IntegerAttr(depth));
@@ -95,7 +98,7 @@ namespace txn {
   builder.create<::sharp::txn::ResetByOp>(loc, SymbolRefAttr::get(builder.getContext(), "rst"));
   
   // Add reference to the FIRRTL module implementation
-  primitive->setAttr("firrtl.impl", builder.getStringAttr(name.str() + "_impl"));
+  primitive->setAttr("firrtl.impl", builder.getStringAttr(fullName));
   
   // Create schedule with conflict matrix
   // For FIFO: enqueue conflicts with isFull, dequeue conflicts with isEmpty

@@ -2,7 +2,7 @@
 
 // Test will-fire logic with guard conditions
 txn.module @GuardTest {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.value_method @getValue() -> i32 {
     %val = txn.call @reg::@read() : () -> i32

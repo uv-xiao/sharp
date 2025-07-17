@@ -8,7 +8,7 @@ Sharp Txn primitives are fundamental building blocks providing transaction-level
 
 ### Structure
 ```mlir
-txn.primitive @PrimitiveName type = "hw" interface = !txn.module<"PrimitiveName"> {
+txn.primitive @PrimitiveName type = "hw" interface = index {
   // Method declarations with FIRRTL port mappings
   txn.fir_value_method @read() {firrtl.port = "read_data"} : () -> i32
   txn.fir_action_method @write() {firrtl.data_port = "write_data", 
@@ -78,7 +78,7 @@ Memory with configurable read latency.
 
 ```mlir
 txn.module @Counter {
-  %count = txn.instance @count of @Register<i32> : !txn.module<"Register">
+  %count = txn.instance @count of @Register<i32> : index
   
   txn.action_method @increment() {
     %val = txn.call @count::@read() : () -> i32

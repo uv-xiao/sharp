@@ -4,7 +4,7 @@
 // Comprehensive test for abort propagation through multiple levels
 
 // Define primitives used in tests
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
   txn.clock_by @clk
@@ -19,7 +19,7 @@ txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
   }
 } {firrtl.impl = "Register_impl"}
 
-txn.primitive @FIFO type = "hw" interface = !txn.module<"FIFO"> {
+txn.primitive @FIFO type = "hw" interface = index {
   txn.fir_value_method @canEnq() : () -> i1
   txn.fir_action_method @enq() : (i32) -> ()
   txn.clock_by @clk
@@ -34,7 +34,7 @@ txn.primitive @FIFO type = "hw" interface = !txn.module<"FIFO"> {
   }
 } {firrtl.impl = "FIFO_impl"}
 
-txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
+txn.primitive @Memory type = "hw" interface = index {
   txn.fir_value_method @read() : (i32) -> i32
   txn.fir_action_method @write() : (i32, i32) -> ()
   txn.clock_by @clk
@@ -50,9 +50,9 @@ txn.primitive @Memory type = "hw" interface = !txn.module<"Memory"> {
 } {firrtl.impl = "Memory_impl"}
 
 txn.module @AbortPropagation {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
-  %reg2 = txn.instance @reg2 of @Register<i32> : !txn.module<"Register">
-  %wire = txn.instance @wire of @Wire<i32> : !txn.module<"Wire">
+  %reg = txn.instance @reg of @Register<i32> : index
+  %reg2 = txn.instance @reg2 of @Register<i32> : index
+  %wire = txn.instance @wire of @Wire<i32> : index
   
   // Deepest level - multiple abort conditions
   txn.action_method @level3(%x: i32, %y: i32) -> i32 {

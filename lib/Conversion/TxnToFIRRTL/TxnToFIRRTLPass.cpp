@@ -138,8 +138,8 @@ static FIRRTLType convertType(Type type) {
     return nullptr;
   }
   
-  // Handle module types - not directly converted
-  if (isa<ModuleType>(type)) {
+  // Handle index types used for module types - not directly converted
+  if (isa<IndexType>(type)) {
     return nullptr;
   }
   

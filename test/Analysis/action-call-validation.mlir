@@ -2,7 +2,7 @@
 
 // Test 1: Valid - actions calling value methods
 txn.module @ValidActionCalls {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.value_method @getValue() -> i32 {
     %v = txn.call @reg::@read() : () -> i32
@@ -31,7 +31,7 @@ txn.module @ValidActionCalls {
 
 // Test 2: Invalid - rule calling action method in same module
 txn.module @RuleCallingActionMethod {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.action_method @setValue(%v: i32) {
     txn.call @reg::@write(%v) : (i32) -> ()
@@ -52,7 +52,7 @@ txn.module @RuleCallingActionMethod {
 
 // Test 3: Invalid - action method calling another action method
 txn.module @ActionMethodCallingActionMethod {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.action_method @increment() {
     %v = txn.call @reg::@read() : () -> i32
@@ -75,7 +75,7 @@ txn.module @ActionMethodCallingActionMethod {
 
 // Test 4: Invalid - action method calling a rule (rules are actions too)
 txn.module @ActionMethodCallingRule {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.rule @autoUpdate {
     %v = arith.constant 0 : i32
@@ -96,8 +96,8 @@ txn.module @ActionMethodCallingRule {
 
 // Test 5: Valid - actions calling instance methods (both value and action)
 txn.module @ValidInstanceCalls {
-  %counter = txn.instance @counter of @Counter : !txn.module<"Counter">
-  %display = txn.instance @display of @Display : !txn.module<"Display">
+  %counter = txn.instance @counter of @Counter : index
+  %display = txn.instance @display of @Display : index
   
   txn.rule @updateDisplay {
     // Valid: calling instance value method
@@ -122,7 +122,7 @@ txn.module @ValidInstanceCalls {
 
 // Test 6: Complex case - nested calls
 txn.module @NestedCalls {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register<i32> : index
   
   txn.value_method @compute() -> i32 {
     %v = txn.call @reg::@read() : () -> i32

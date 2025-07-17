@@ -5,10 +5,10 @@
 
 // CHECK-LABEL: txn.module @DeepReachability
 txn.module @DeepReachability {
-  %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
-  %fifo = txn.instance @fifo of @FIFO<i32> : !txn.module<"FIFO">
-  %wire = txn.instance @wire of @Wire<i1> : !txn.module<"Wire">
-  %mem = txn.instance @mem of @Memory<i32> : !txn.module<"Memory">
+  %reg = txn.instance @reg of @Register<i32> : index
+  %fifo = txn.instance @fifo of @FIFO<i32> : index
+  %wire = txn.instance @wire of @Wire<i1> : index
+  %mem = txn.instance @mem of @Memory<i32> : index
   
   // Action method with conditional calls and aborts (no return value)
   txn.action_method @level1(%x: i32) {

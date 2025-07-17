@@ -115,7 +115,7 @@ txn.module @TestModule {
 ```mlir
 txn.module @ProcessorPipeline {
   // Multiple primitive types
-  %pc = txn.instance @pc of @Register<i32> : !txn.module<"Register">
+  %pc = txn.instance @pc of @Register<i32> : index
   
   // Complex control flow with aborts
   txn.action_method @execute(%enable: i1) {

@@ -7,7 +7,7 @@
 // STATIC-LABEL: firrtl.circuit "WillFireModes"
 // DYNAMIC-LABEL: firrtl.circuit "WillFireModes"
 txn.module @WillFireModes {
-  %reg = txn.instance @r of @Register : !txn.module<"Register">
+  %reg = txn.instance @r of @Register : index
   
   txn.rule @simple {
     %c0 = arith.constant 0 : i32
@@ -24,7 +24,7 @@ txn.module @WillFireModes {
   }
 }
 
-txn.primitive @Register type = "hw" interface = !txn.module<"Register"> {
+txn.primitive @Register type = "hw" interface = index {
   txn.fir_value_method @read() : () -> i32
   txn.fir_action_method @write() : (i32) -> ()
 }

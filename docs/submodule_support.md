@@ -58,7 +58,7 @@ The main changes should be made in:
 
 **Before (Txn)**:
 ```mlir
-%reg1 = txn.instance @reg1 of @Register<i32> : !txn.module<"Register">
+%reg1 = txn.instance @reg1 of @Register<i32> : index
 txn.rule @copy_rule {
   %val = txn.call @reg1::@read() : () -> i32
   txn.call @reg2::@write(%val) : (i32) -> ()

@@ -1,13 +1,13 @@
 // Optimized pipeline with forwarding
 txn.module @OptimizedPipeline {
   // Pipeline registers with bypass logic
-  %stage1 = txn.instance @stage1 of @Register<i32> : !txn.module<"Register">
-  %stage2 = txn.instance @stage2 of @Register<i32> : !txn.module<"Register">
-  %stage3 = txn.instance @stage3 of @Register<i32> : !txn.module<"Register">
+  txn.instance @stage1 of @Register<i32> 
+  txn.instance @stage2 of @Register<i32> 
+  txn.instance @stage3 of @Register<i32> 
   
   // Forwarding paths
-  %fwd1to3 = txn.instance @fwd1to3 of @Wire<i32> : !txn.module<"Wire">
-  %fwd2to3 = txn.instance @fwd2to3 of @Wire<i32> : !txn.module<"Wire">
+  txn.instance @fwd1to3 of @Wire<i32> 
+  txn.instance @fwd2to3 of @Wire<i32> 
   
   txn.action_method @process(%use_fwd: i1) {
     scf.if %use_fwd {
@@ -66,10 +66,10 @@ txn.module @OptimizedPipeline {
 // Banking and parallelism
 txn.module @BankedMemory {
   // 4-way banked memory for parallel access
-  %bank0 = txn.instance @bank0 of @BRAM<i32> : !txn.module<"BRAM">
-  %bank1 = txn.instance @bank1 of @BRAM<i32> : !txn.module<"BRAM">
-  %bank2 = txn.instance @bank2 of @BRAM<i32> : !txn.module<"BRAM">
-  %bank3 = txn.instance @bank3 of @BRAM<i32> : !txn.module<"BRAM">
+  txn.instance @bank0 of @BRAM<i32> 
+  txn.instance @bank1 of @BRAM<i32> 
+  txn.instance @bank2 of @BRAM<i32> 
+  txn.instance @bank3 of @BRAM<i32> 
   
   txn.action_method @parallel_read(%addr0: i32, %addr1: i32, %addr2: i32, %addr3: i32) 
       -> (i32, i32, i32, i32) {

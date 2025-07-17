@@ -62,16 +62,17 @@ def PrimitiveOp : TxnOp<"primitive", [
 
   let arguments = (ins 
     SymbolNameAttr:$sym_name,
-    StrAttr:$type,  // "hw" for synthesizable, "spec" for specification
-    TypeAttr:$interface_type,
-    OptionalAttr<ArrayAttr>:$type_parameters  // Array of TypeAttr for parametric primitives
+    OptionalAttr<ArrayAttr>:$type_parameters,  // Array of TypeAttr for parametric primitives
+    OptionalAttr<ArrayAttr>:$const_parameters  // Array of constants for parametric primitives
   );
   let regions = (region SizedRegion<1>:$body);
 
   let extraClassDeclaration = [{
-    /// Returns the full name including type parameters (e.g., "Register<!firrtl.uint<32>>")
+    /// Returns the full name including type and const parameters (e.g., "Register<i32;4>")
     std::string getFullName() {
-      return ::sharp::txn::module_name_with_type_args(getName(), getTypeParameters().value_or(::mlir::ArrayAttr()));
+      return ::sharp::txn::module_name_with_type_args(getName(), 
+        getTypeParameters().value_or(::mlir::ArrayAttr()),
+        getConstParameters().value_or(::mlir::ArrayAttr()));
     }
   }];
 
@@ -86,20 +87,22 @@ def InstanceOp : TxnOp<"instance", [Symbol]> {
     
     For parametric primitives, type arguments can be provided to instantiate
     the primitive with specific types. For example:
-      %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+      %reg = txn.instance @reg of @Register<i32>
   }];
 
   let arguments = (ins
     SymbolNameAttr:$sym_name,
     FlatSymbolRefAttr:$module_name,
-    OptionalAttr<ArrayAttr>:$type_arguments  // Array of TypeAttr for instantiating parametric modules
+    OptionalAttr<ArrayAttr>:$type_arguments,  // Array of TypeAttr for instantiating parametric modules
+    OptionalAttr<ArrayAttr>:$const_arguments  // Array of constants for instantiating parametric modules
   );
-  let results = (outs Txn_ModuleType:$result);
 
   let extraClassDeclaration = [{
-    /// Returns the full module name including type arguments (e.g., "Register<!firrtl.uint<32>>")
+    /// Returns the full module name including type and const arguments (e.g., "Register<i32;4>")
     std::string getFullModuleName() {
-      return ::sharp::txn::module_name_with_type_args(getModuleName(), getTypeArguments().value_or(::mlir::ArrayAttr()));
+      return ::sharp::txn::module_name_with_type_args(getModuleName(), 
+        getTypeArguments().value_or(::mlir::ArrayAttr()),
+        getConstArguments().value_or(::mlir::ArrayAttr()));
     }
   }];
 
@@ -292,7 +295,7 @@ def IfOp : TxnOp<"if", [
     must yield values using txn.yield.
   }];
 
-  let arguments = (ins I1:$condition);
+  let arguments = (ins AnyType:$condition);
   let results = (outs Variadic<AnyType>:$results);
   let regions = (region AnyRegion:$thenRegion,
                         AnyRegion:$elseRegion);

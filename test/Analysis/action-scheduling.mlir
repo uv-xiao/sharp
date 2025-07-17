@@ -182,7 +182,7 @@ txn.module @CompleteSchedule {
 
 // Test 8: Module with no actions
 txn.module @NoActions {
-  %reg = txn.instance @reg of @Register : !txn.module<"Register">
+  %reg = txn.instance @reg of @Register : index
   txn.schedule [] {}
 }
 // CHECK-LABEL: txn.module @NoActions

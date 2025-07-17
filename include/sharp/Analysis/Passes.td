@@ -301,7 +301,7 @@ def PrimitiveGen : Pass<"sharp-primitive-gen", "mlir::ModuleOp"> {
     Example:
     ```mlir
     txn.module @MyModule {
-      %reg = txn.instance @reg of @Register<i32> : !txn.module<"Register">
+      %reg = txn.instance @reg of @Register<i32> : index
       // Register<i32> primitive will be auto-generated if missing
     }
     ```

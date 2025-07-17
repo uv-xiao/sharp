@@ -1,8 +1,8 @@
 // Example demonstrating Memory primitive for caching
 txn.module @CacheController attributes {top} {
   // 256-entry cache memory
-  %cache = txn.instance @cache of @Memory<i64> : !txn.module<"Memory">
-  %tags = txn.instance @tags of @Memory<i32> : !txn.module<"Memory">
+  txn.instance @cache of @Memory<i64> 
+  txn.instance @tags of @Memory<i32> 
   
   // Cache lookup
   txn.value_method @lookup(%addr: i32) -> (i1, i64) {

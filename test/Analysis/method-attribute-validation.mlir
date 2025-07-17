@@ -4,7 +4,7 @@
 
 // Valid attributes with custom signal names
 txn.module @ValidAttributes {
-  %reg = txn.instance @state of @Register : !txn.module<"Register">
+  %reg = txn.instance @state of @Register : index
   
   // Custom prefix and postfixes
   txn.value_method @getValue() -> i32 
@@ -55,7 +55,7 @@ txn.module @NameConflict2 {
 
 // Signal name conflicts with instance name
 txn.module @NameConflict3 {
-  %reg = txn.instance @control of @Register : !txn.module<"Register">
+  %reg = txn.instance @control of @Register : index
   
   // expected-error@+2 {{Method name conflicts with existing name: control}}
   // expected-error@+1 {{Method enable signal conflicts with existing name: control}}
@@ -69,7 +69,7 @@ txn.module @NameConflict3 {
 
 // Invalid always_ready - method has conflicts
 txn.module @InvalidAlwaysReady {
-  %reg = txn.instance @state of @Register : !txn.module<"Register">
+  %reg = txn.instance @state of @Register : index
   
   // expected-error@+1 {{Method marked always_ready but has potential conflicts}}
   txn.action_method @write(%val: i32) -> () attributes {always_ready} {
@@ -95,7 +95,7 @@ txn.module @InvalidAlwaysReady {
 
 // Valid always_ready - no conflicts
 txn.module @ValidAlwaysReady {
-  %reg = txn.instance @state of @Register : !txn.module<"Register">
+  %reg = txn.instance @state of @Register : index
   
   // This is OK - read has no conflicts
   txn.action_method @read() -> i32 attributes {always_ready} {
@@ -129,7 +129,7 @@ txn.module @InvalidAlwaysEnable {
 }
 
 txn.module @Caller1 {
-  %inst = txn.instance @m of @InvalidAlwaysEnable : !txn.module<"InvalidAlwaysEnable">
+  %inst = txn.instance @m of @InvalidAlwaysEnable : index
   
   txn.rule @conditionalCaller {
     %c0 = arith.constant 0 : i32
@@ -159,7 +159,7 @@ txn.module @ValidAlwaysEnable {
 }
 
 txn.module @Caller2 {
-  %inst = txn.instance @m of @ValidAlwaysEnable : !txn.module<"ValidAlwaysEnable">
+  %inst = txn.instance @m of @ValidAlwaysEnable : index
   
   txn.rule @unconditionalCaller {
     // Always called - always_enable is valid
@@ -173,7 +173,7 @@ txn.module @Caller2 {
 
 // Multiple attribute combinations
 txn.module @MultipleAttributes {
-  %wire = txn.instance @w of @Wire : !txn.module<"Wire">
+  %wire = txn.instance @w of @Wire : index
   
   // Valid: always_ready because no conflicts in schedule
   txn.action_method @alwaysMethod() -> () 

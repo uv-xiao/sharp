@@ -3,8 +3,8 @@
 
 // Conditional processor
 txn.module @ConditionalLogic {
-  %counter = txn.instance @counter of @Register<i32> : !txn.module<"Register">
-  %enabled = txn.instance @enabled of @Register<i1> : !txn.module<"Register">
+  txn.instance @counter of @Register<i32> 
+  txn.instance @enabled of @Register<i1> 
   
   // Initialize system
   txn.action_method @initialize() {
@@ -81,8 +81,8 @@ txn.module @ConditionalLogic {
 
 // Multi-instance system demonstrating will-fire interactions
 txn.module @ConditionalSystem attributes {top} {
-  %processor1 = txn.instance @processor1 of @ConditionalLogic : !txn.module<"ConditionalLogic">
-  %processor2 = txn.instance @processor2 of @ConditionalLogic : !txn.module<"ConditionalLogic">
+  txn.instance @processor1 of @ConditionalLogic 
+  txn.instance @processor2 of @ConditionalLogic 
 
   // Initialize system
   txn.action_method @init_system() {
@@ -119,7 +119,7 @@ txn.module @ConditionalSystem attributes {top} {
 
 // One-instance system demonstrating will-fire interactions
 txn.module @OneInstanceSystem {
-  %processor = txn.instance @processor of @ConditionalLogic : !txn.module<"ConditionalLogic">
+  txn.instance @processor of @ConditionalLogic 
 
   // Initialize system
   txn.action_method @init_system() {
